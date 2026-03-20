@@ -1,0 +1,36 @@
+version: "3"
+
+vars:
+  CONFIG: config.yml
+
+tasks:
+  run:
+    desc: "Fetch feeds, summarize, and generate HTML report"
+    cmds:
+      - uv run python src/main.py --config {{.CONFIG}}
+
+  run:no-summary:
+    desc: "Generate report without LLM summarization"
+    cmds:
+      - uv run python src/main.py --config {{.CONFIG}} --no-summary
+
+  run:fresh:
+    desc: "Clear all caches and re-fetch everything"
+    cmds:
+      - rm -rf cache/
+      - uv run python src/main.py --config {{.CONFIG}}
+
+  open:
+    desc: "Open today's report in Chrome"
+    cmds:
+      - open -a Google\ Chrome output/$(date +%Y-%m-%d).html
+
+  clean:
+    desc: "Remove all cached data and generated reports"
+    cmds:
+      - rm -rf cache/ output/
+
+  install:
+    desc: "Install dependencies"
+    cmds:
+      - uv sync
