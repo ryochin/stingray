@@ -1,7 +1,8 @@
 # -- General --
 max_age_hours: 25        # How far back to include articles
 output_dir: "output"     # HTML output directory
-cache_dir: "cache"       # Cache directory
+cache_dir: "cache"                 # Cache directory
+article_cache_max_age_days: 30     # Days to keep article cache
 
 # -- LLM (Ollama) --
 ollama:
@@ -32,3 +33,18 @@ feeds:
     subreddit: "technology"
     sort: "hot"
     max_items: 10
+
+  - name: "ReadWrite"
+    type: rss
+    url: "https://feeds.feedburner.com/readwriteweb"
+    max_items: 20
+
+  - name: "Science News"
+    type: rss
+    url: "https://www.sciencenews.org/feed"
+    max_items: 20
+
+  - name: "Open Culture"
+    type: rss
+    url: "https://www.openculture.com/feed"
+    max_items: 20

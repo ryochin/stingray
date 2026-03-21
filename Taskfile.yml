@@ -6,6 +6,7 @@ vars:
 tasks:
   run:
     desc: "Fetch feeds, summarize, and generate HTML report"
+    aliases: [r]
     cmds:
       - uv run python src/main.py --config {{.CONFIG}}
 
@@ -23,7 +24,7 @@ tasks:
   open:
     desc: "Open today's report in Chrome"
     cmds:
-      - open -a Google\ Chrome output/$(date +%Y-%m-%d).html
+      - open -a Google\ Chrome output/$(TZ=Asia/Tokyo date +%Y-%m-%d).html
 
   clean:
     desc: "Remove all cached data and generated reports"
