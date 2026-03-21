@@ -4,6 +4,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import log
 from models import Article
 
 
@@ -12,6 +13,16 @@ FEED_CACHE_DIR = CACHE_DIR / "feeds"
 ARTICLE_CACHE_PATH = CACHE_DIR / "articles.json"
 
 ARTICLE_CACHE_MAX_AGE_DAYS = 30
+
+_article_db: dict | None = None
+
+
+def configure(cache_dir: Path, max_age_days: int = 30) -> None:
+  global CACHE_DIR, FEED_CACHE_DIR, ARTICLE_CACHE_PATH, ARTICLE_CACHE_MAX_AGE_DAYS
+  CACHE_DIR = cache_dir
+  FEED_CACHE_DIR = cache_dir / "feeds"
+  ARTICLE_CACHE_PATH = cache_dir / "articles.json"
+  ARTICLE_CACHE_MAX_AGE_DAYS = max_age_days
 
 
 def _atomic_write(path: Path, data: str) -> None:
@@ -32,14 +43,14 @@ def _safe_load_json(path: Path) -> dict | list | None:
   try:
     return json.loads(path.read_text(encoding="utf-8"))
   except (json.JSONDecodeError, OSError):
-    print(f"  Warning: corrupted cache {path.name}, ignoring.")
+    log.warn(f"  Warning: corrupted cache {path.name}, ignoring.")
     return None
 
 
 # --- L1: Feed response cache (by URL hash + ETag/content hash) ---
 
 def _feed_key(url: str) -> str:
-  return hashlib.sha256(url.encode()).hexdigest()[:16]
+  return hashlib.sha256(url.encode()).hexdigest()
 
 
 def load_feed_cache(url: str) -> dict | None:
@@ -63,22 +74,31 @@ def save_feed_cache(url: str, etag: str | None, last_modified: str | None, body:
 # --- L2: Article-level cache (keyed by URL, stores title_ja + summary) ---
 
 def _load_article_db() -> dict:
+  global _article_db
+  if _article_db is not None:
+    return _article_db
   data = _safe_load_json(ARTICLE_CACHE_PATH)
-  if isinstance(data, dict):
-    return data
-  return {}
+  _article_db = data if isinstance(data, dict) else {}
+  return _article_db
 
 
 def _save_article_db(db: dict) -> None:
+  global _article_db
+  _article_db = db
   _atomic_write(ARTICLE_CACHE_PATH, json.dumps(db, ensure_ascii=False, indent=2))
 
 
 def _prune_article_db(db: dict) -> dict:
-  cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=ARTICLE_CACHE_MAX_AGE_DAYS)).isoformat()
-  return {
-    url: entry for url, entry in db.items()
-    if entry.get("cached_at", "") >= cutoff
-  }
+  cutoff = datetime.now(tz=timezone.utc) - timedelta(days=ARTICLE_CACHE_MAX_AGE_DAYS)
+  result = {}
+  for url, entry in db.items():
+    try:
+      cached_at = datetime.fromisoformat(entry.get("cached_at", ""))
+      if cached_at >= cutoff:
+        result[url] = entry
+    except (ValueError, TypeError):
+      pass
+  return result
 
 
 def restore_article_cache(articles: list[Article]) -> list[Article]:
@@ -93,7 +113,7 @@ def restore_article_cache(articles: list[Article]) -> list[Article]:
       article.summary = entry.get("summary", "")
       cached_count += 1
   if cached_count:
-    print(f"  {cached_count}/{len(articles)} articles restored from cache.")
+    log.info(f"  {cached_count}/{len(articles)} articles restored from cache.")
   return articles
 
 

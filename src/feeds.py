@@ -1,13 +1,15 @@
 import asyncio
 import hashlib
 import html
+import json
 import re
 from datetime import datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
 
 import feedparser
 import httpx
 
+import log
+from cache import load_feed_cache, save_feed_cache
 from models import Article
 
 
@@ -32,9 +34,9 @@ async def _fetch_with_cache(
   headers: dict | None = None,
 ) -> tuple[str, bool]:
   """Fetch URL with L1 cache (ETag / content hash). Returns (body, was_cached)."""
-  from cache import load_feed_cache, save_feed_cache
-
   cached = load_feed_cache(url)
+  if cached and "body" not in cached:
+    cached = None
   req_headers = dict(headers or {})
   if cached:
     if cached.get("etag"):
@@ -44,16 +46,25 @@ async def _fetch_with_cache(
 
   try:
     resp = await client.get(url, headers=req_headers)
-  except (httpx.ConnectError, httpx.TimeoutException, OSError) as e:
+  except (httpx.TransportError, OSError) as e:
     if cached:
-      print(f"    Network error, using cached feed: {e}")
+      log.warn(f"    Network error, using cached feed: {e}")
       return cached["body"], True
     raise
 
-  if resp.status_code == 304 and cached:
-    return cached["body"], True
+  if resp.status_code == 304:
+    if cached:
+      return cached["body"], True
+    log.warn(f"    304 without cached data, skipping: {url}")
+    return "", True
 
-  resp.raise_for_status()
+  try:
+    resp.raise_for_status()
+  except httpx.HTTPStatusError as e:
+    if e.response.status_code in {403, 429, 500, 502, 503, 504} and cached:
+      log.warn(f"    HTTP {e.response.status_code}, using cached feed: {url}")
+      return cached["body"], True
+    raise
   body = resp.text
 
   if cached and hashlib.sha256(body.encode()).hexdigest() == cached.get("content_hash"):
@@ -73,10 +84,10 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
   articles = []
   for entry in parsed.entries[:max_items]:
     published = None
-    if hasattr(entry, "published"):
+    if hasattr(entry, "published_parsed") and entry.published_parsed:
       try:
-        published = parsedate_to_datetime(entry.published)
-      except Exception:
+        published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+      except (ValueError, TypeError):
         pass
 
     snippet = ""
@@ -86,7 +97,7 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
       snippet = _strip_html(entry.description)
 
     link = entry.get("link", "")
-    if not link:
+    if not link or not link.startswith(("http://", "https://")):
       continue
 
     articles.append(Article(
@@ -101,19 +112,26 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
 
 
 def _parse_reddit(body: str, feed_cfg: dict) -> list[Article]:
-  import json
   max_items = feed_cfg.get("max_items", 15)
-  data = json.loads(body)
+  try:
+    data = json.loads(body)
+  except json.JSONDecodeError as e:
+    log.error(f"    Invalid JSON from Reddit: {e}")
+    return []
+  if not isinstance(data, dict):
+    log.error(f"    Unexpected Reddit response type: {type(data)}")
+    return []
 
-  children = data.get("data", {}).get("children", [])
+  children = (data.get("data") or {}).get("children", [])
   articles = []
   for child in children[:max_items]:
-    post = child["data"]
-    if post.get("stickied"):
+    post = child.get("data")
+    if not post or post.get("stickied"):
       continue
 
     permalink = post.get("permalink", "")
-    if not permalink:
+    title = post.get("title", "")
+    if not permalink or not title:
       continue
 
     published = None
@@ -122,10 +140,10 @@ def _parse_reddit(body: str, feed_cfg: dict) -> list[Article]:
 
     snippet = _strip_html(post.get("selftext", ""))
     if not snippet:
-      snippet = post.get("title", "")
+      snippet = title
 
     articles.append(Article(
-      title=post["title"],
+      title=title,
       url=f"https://reddit.com{permalink}",
       source=feed_cfg["name"],
       published=published,
@@ -146,9 +164,16 @@ async def _fetch_rss(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Ar
   return _parse_rss(body, feed_cfg), was_cached
 
 
+_VALID_REDDIT_SORTS = {"hot", "new", "top", "rising"}
+
+
 async def _fetch_reddit(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Article], bool]:
   subreddit = feed_cfg["subreddit"]
+  if not re.fullmatch(r"[A-Za-z0-9_]{1,21}", subreddit):
+    raise ValueError(f"Invalid subreddit name: {subreddit}")
   sort = feed_cfg.get("sort", "hot")
+  if sort not in _VALID_REDDIT_SORTS:
+    raise ValueError(f"Invalid Reddit sort: {sort}")
   max_items = feed_cfg.get("max_items", 15)
   url = f"https://www.reddit.com/r/{subreddit}/{sort}.json?limit={max_items}"
   body, was_cached = await _fetch_with_cache(client, url, headers=REDDIT_HEADERS)
@@ -169,7 +194,7 @@ async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Ar
       feed_type = feed.get("type", "rss")
       fetcher = FETCHERS.get(feed_type)
       if fetcher is None:
-        print(f"  Unknown feed type: {feed_type}, skipping {feed.get('name')}")
+        log.warn(f"  Unknown feed type: {feed_type}, skipping {feed.get('name')}")
         continue
       tasks.append(fetcher(client, feed))
       task_feeds.append(feed)
@@ -183,7 +208,7 @@ async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Ar
   fetched_feeds = 0
   for i, result in enumerate(results):
     if isinstance(result, Exception):
-      print(f"  Error: {task_feeds[i].get('name')}: {result}")
+      log.error(f"  Error: {task_feeds[i].get('name')}: {result}")
     else:
       feed_articles, was_cached = result
       if was_cached:
@@ -197,8 +222,9 @@ async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Ar
         pub = a.published
         if pub is not None and pub.tzinfo is None:
           pub = pub.replace(tzinfo=timezone.utc)
+          a.published = pub
         if pub is None or pub >= cutoff:
           articles.append(a)
 
-  print(f"  Feeds: {fetched_feeds} fetched, {cached_feeds} from cache.")
+  log.info(f"  Feeds: {fetched_feeds} fetched, {cached_feeds} from cache.")
   return articles

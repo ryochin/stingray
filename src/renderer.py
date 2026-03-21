@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from jinja2 import Environment, FileSystemLoader
 
-from feeds import Article
+from models import Article
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 JST = timezone(timedelta(hours=9))
