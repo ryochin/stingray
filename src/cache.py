@@ -4,7 +4,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from feeds import Article
+from models import Article
 
 
 CACHE_DIR = Path(__file__).parent.parent / "cache"
