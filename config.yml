@@ -6,7 +6,7 @@ article_cache_max_age_days: 30     # Days to keep article cache
 
 # -- LLM (Ollama) --
 ollama:
-  model: "gemma3"
+  model: "gemma4:e4b"
   base_url: "http://localhost:11434"
   timeout: 120           # Seconds per LLM request
 
@@ -47,4 +47,9 @@ feeds:
   - name: "Open Culture"
     type: rss
     url: "https://www.openculture.com/feed"
+    max_items: 20
+
+  - name: "TechWave"
+    type: rss
+    url: "https://techwave.jp/feed"
     max_items: 20

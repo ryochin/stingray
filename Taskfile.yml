@@ -23,6 +23,7 @@ tasks:
 
   open:
     desc: "Open today's report in Chrome"
+    aliases: [o]
     cmds:
       - open -a Google\ Chrome output/$(TZ=Asia/Tokyo date +%Y-%m-%d).html
 
