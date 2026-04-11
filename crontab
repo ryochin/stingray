@@ -1,0 +1,3 @@
+# News aggregation every 30 minutes
+# Fields: minute hour day-of-month month day-of-week command
+*/30 * * * * /app/.venv/bin/python /app/src/main.py --config /app/config.yml

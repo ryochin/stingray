@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -70,7 +71,7 @@ async def run(args: argparse.Namespace) -> None:
     need_summary = [a for a in articles if not a.title_ja or not a.summary]
     if need_summary:
       model = ollama_cfg.get("model", "gemma3")
-      base_url = ollama_cfg.get("base_url", "http://localhost:11434")
+      base_url = os.environ.get("OLLAMA_BASE_URL") or ollama_cfg.get("base_url", "http://localhost:11434")
       timeout = ollama_cfg.get("timeout", 120)
       log.step(f"Summarizing {len(need_summary)} new articles with {model}...")
       failures = await summarize_all(

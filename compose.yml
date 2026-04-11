@@ -1,0 +1,15 @@
+services:
+  news:
+    build: .
+    image: news-aggregator:latest
+    container_name: news-aggregator
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Tokyo
+      # Ollama runs on the host. On Docker Desktop for macOS,
+      # host.docker.internal resolves to the host automatically.
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./cache:/app/cache
+      - ./output:/app/output
