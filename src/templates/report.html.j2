@@ -177,7 +177,7 @@
   <header>
     <h1>
       News Report
-      <span>{{ date.strftime('%Y-%m-%d') }} / {{ total }} articles</span>
+      <span>{{ date.strftime('%Y-%m-%d %H:%M') }} JST / {{ total }} articles</span>
     </h1>
   </header>
 
@@ -206,7 +206,7 @@
           {% if article.published %}
           <div class="article-meta">{{ article.published|jst }}</div>
           {% endif %}
-          {% if article.content_snippet %}
+          {% if article.content_snippet and article.content_snippet != article.summary %}
           <div class="article-snippet">{{ article.content_snippet }}</div>
           {% endif %}
           {% if article.summary %}

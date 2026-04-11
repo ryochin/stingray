@@ -6,28 +6,46 @@ import httpx
 import log
 from models import Article
 
-SYSTEM_PROMPT = """\
+_JA_RULES = """\
+Write Japanese output using ONLY Japanese scripts (hiragana, katakana, kanji) and standard ASCII punctuation.
+Do NOT include Cyrillic, Greek, Arabic, Hangul, or any other non-Japanese script.
+For foreign loanwords, always use katakana (e.g. "Molotov cocktail" → "モロトフカクテル", never "モロトフ коктейл").
+Proper nouns that are well-known in their Latin form (company names, people, products like "OpenAI", "ChatGPT") may remain in Latin script."""
+
+TRANSLATE_PROMPT = f"""\
 You are a concise news summarizer.
-Given an article, return a JSON object with two fields:
-- "title_ja": The article title translated into Japanese. If the title is already in Japanese, return it as-is.
+Given a non-Japanese article, return a JSON object with two fields:
+- "title_ja": The article title translated into Japanese.
 - "summary": A 2-3 sentence summary of the article in Japanese, focusing on key facts and significance.
+
+{_JA_RULES}
+
+Return ONLY valid JSON, no markdown fences or extra text."""
+
+SUMMARIZE_PROMPT = f"""\
+You are a concise news summarizer.
+Given a Japanese article, return a JSON object with one field:
+- "summary": A 2-3 sentence summary of the article in Japanese, focusing on key facts and significance.
+
+Do NOT translate or rewrite the title. Do NOT include a "title_ja" field.
+
+{_JA_RULES}
 
 Return ONLY valid JSON, no markdown fences or extra text."""
 
 
-async def process_article(
+async def _call_llm(
   client: httpx.AsyncClient,
-  article: Article,
   model: str,
-) -> tuple[str, str]:
-  user_prompt = f"Title: {article.title}\n\n{article.content_snippet}"
-
+  system_prompt: str,
+  user_prompt: str,
+) -> dict:
   resp = await client.post(
     "/api/chat",
     json={
       "model": model,
       "messages": [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
       ],
       "stream": False,
@@ -45,9 +63,26 @@ async def process_article(
     content = content.strip()
 
   try:
-    data = json.loads(content)
+    return json.loads(content)
   except json.JSONDecodeError:
     raise ValueError(f"LLM returned invalid JSON: {content[:200]}")
+
+
+async def process_article(
+  client: httpx.AsyncClient,
+  article: Article,
+  model: str,
+) -> tuple[str, str]:
+  user_prompt = f"Title: {article.title}\n\n{article.content_snippet}"
+
+  if article.lang == "ja":
+    data = await _call_llm(client, model, SUMMARIZE_PROMPT, user_prompt)
+    summary = data.get("summary", "")
+    if not isinstance(summary, str):
+      summary = ""
+    return "", summary
+
+  data = await _call_llm(client, model, TRANSLATE_PROMPT, user_prompt)
   title_ja = data.get("title_ja", article.title)
   summary = data.get("summary", "")
   if not isinstance(title_ja, str):

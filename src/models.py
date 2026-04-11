@@ -9,6 +9,7 @@ class Article:
   source: str
   published: datetime | None
   content_snippet: str
+  lang: str = "en"
   title_ja: str = ""
   summary: str = ""
 

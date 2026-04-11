@@ -13,6 +13,10 @@ from feeds import fetch_all
 from renderer import render_report
 from summarizer import summarize_all
 
+# For ja articles: snippets shorter than this are treated as already-summarized
+# and displayed as-is, skipping the LLM call.
+SHORT_SNIPPET_CHARS = 300
+
 
 def load_config(path: Path) -> dict:
   with open(path, encoding="utf-8") as f:
@@ -68,7 +72,20 @@ async def run(args: argparse.Namespace) -> None:
 
   # 3. Summarize only articles without cached translations
   if not args.no_summary:
-    need_summary = [a for a in articles if not a.title_ja or not a.summary]
+    # Short ja snippets already look like a summary — reuse them verbatim.
+    for a in articles:
+      if (
+        a.lang == "ja"
+        and not a.summary
+        and a.content_snippet
+        and len(a.content_snippet) < SHORT_SNIPPET_CHARS
+      ):
+        a.summary = a.content_snippet
+
+    need_summary = [
+      a for a in articles
+      if not a.summary or (a.lang != "ja" and not a.title_ja)
+    ]
     if need_summary:
       model = ollama_cfg.get("model", "gemma3")
       base_url = os.environ.get("OLLAMA_BASE_URL") or ollama_cfg.get("base_url", "http://localhost:11434")

@@ -22,6 +22,17 @@ def _strip_html(text: str) -> str:
   return text.strip()
 
 
+# Hiragana or katakana in the title is a strong signal that the article is Japanese.
+# Kanji alone is ambiguous (Chinese shares them), so we deliberately exclude the CJK range.
+_JA_KANA = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")
+
+
+def _detect_lang(title: str, default: str) -> str:
+  if title and _JA_KANA.search(title):
+    return "ja"
+  return default
+
+
 def _truncate(text: str, max_len: int = 500) -> str:
   if len(text) <= max_len:
     return text
@@ -79,6 +90,7 @@ async def _fetch_with_cache(
 def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
   max_items = feed_cfg.get("max_items", 20)
   source = feed_cfg["name"]
+  default_lang = feed_cfg.get("lang", "en")
   parsed = feedparser.parse(body)
 
   articles = []
@@ -100,12 +112,14 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
     if not link or not link.startswith(("http://", "https://")):
       continue
 
+    title = entry.get("title", "(no title)")
     articles.append(Article(
-      title=entry.get("title", "(no title)"),
+      title=title,
       url=link,
       source=source,
       published=published,
       content_snippet=_truncate(snippet),
+      lang=_detect_lang(title, default_lang),
     ))
 
   return articles
@@ -113,6 +127,7 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
 
 def _parse_reddit(body: str, feed_cfg: dict) -> list[Article]:
   max_items = feed_cfg.get("max_items", 15)
+  default_lang = feed_cfg.get("lang", "en")
   try:
     data = json.loads(body)
   except json.JSONDecodeError as e:
@@ -148,6 +163,7 @@ def _parse_reddit(body: str, feed_cfg: dict) -> list[Article]:
       source=feed_cfg["name"],
       published=published,
       content_snippet=_truncate(snippet),
+      lang=_detect_lang(title, default_lang),
     ))
 
   return articles
