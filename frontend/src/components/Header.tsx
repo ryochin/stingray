@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
@@ -21,14 +22,18 @@ export default function Header() {
       query.state.data?.running ? 2000 : false,
   })
 
+  const prevRunning = useRef(false)
+  useEffect(() => {
+    if (prevRunning.current && !status?.running) {
+      queryClient.invalidateQueries({ queryKey: ["articles"] })
+    }
+    prevRunning.current = status?.running ?? false
+  }, [status?.running, queryClient])
+
   const refresh = useMutation({
     mutationFn: api.refresh,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["status"] })
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ["articles"] })
-        queryClient.invalidateQueries({ queryKey: ["status"] })
-      }, 3000)
     },
   })
 
