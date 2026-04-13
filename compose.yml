@@ -1,15 +1,33 @@
 services:
-  news:
+  web:
     build: .
-    image: news-aggregator:latest
-    container_name: news-aggregator
-    restart: unless-stopped
+    image: news-reader:latest
+    container_name: news-reader-web
+    command: ["/app/.venv/bin/uvicorn", "app:app", "--host", "0.0.0.0", "--port", "10180"]
+    working_dir: /app
     environment:
       TZ: Asia/Tokyo
-      # Ollama runs on the host. On Docker Desktop for macOS,
-      # host.docker.internal resolves to the host automatically.
+      PYTHONPATH: /app/backend
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    ports:
+      - "10180:10180"
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./data:/app/data
+      - ./cache:/app/cache
+    restart: unless-stopped
+
+  fetcher:
+    build: .
+    image: news-reader:latest
+    container_name: news-reader-fetcher
+    command: ["/usr/local/bin/supercronic", "-passthrough-logs", "/app/crontab"]
+    environment:
+      TZ: Asia/Tokyo
+      PYTHONPATH: /app/backend
       OLLAMA_BASE_URL: http://host.docker.internal:11434
     volumes:
       - ./config.yml:/app/config.yml:ro
+      - ./data:/app/data
       - ./cache:/app/cache
-      - ./output:/app/output
+    restart: unless-stopped

@@ -4,6 +4,9 @@
 .venv
 cache
 output
+data
+frontend/node_modules
+frontend/dist
 .claude
 .serena
 __pycache__
@@ -13,9 +16,11 @@ __pycache__
 .mypy_cache
 .pytest_cache
 Dockerfile
-docker-compose.yml
+compose.yml
 .dockerignore
 Taskfile.yml
 CLAUDE.md
 AGENTS.md
 SPEC.md
+SPEC_WEBAPP.md
+README.md

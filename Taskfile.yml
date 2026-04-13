@@ -8,18 +8,18 @@ tasks:
     desc: "Fetch feeds, summarize, and generate HTML report"
     aliases: [r]
     cmds:
-      - uv run python src/main.py --config {{.CONFIG}}
+      - uv run python backend/main.py --config {{.CONFIG}}
 
   run:no-summary:
     desc: "Generate report without LLM summarization"
     cmds:
-      - uv run python src/main.py --config {{.CONFIG}} --no-summary
+      - uv run python backend/main.py --config {{.CONFIG}} --no-summary
 
   run:fresh:
     desc: "Clear all caches and re-fetch everything"
     cmds:
       - rm -rf cache/
-      - uv run python src/main.py --config {{.CONFIG}}
+      - uv run python backend/main.py --config {{.CONFIG}}
 
   open:
     desc: "Open today's report in Chrome"
