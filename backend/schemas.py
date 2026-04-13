@@ -1,0 +1,119 @@
+"""Pydantic v2 models for API DTOs, DB rows, and configuration."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel, Field
+
+
+# -- DB row models --
+
+
+class FeedRow(BaseModel):
+  id: int = 0
+  name: str
+  type: str = "rss"
+  url: str | None = None
+  subreddit: str | None = None
+  sort: str | None = None
+  lang: str = "en"
+  max_items: int = 20
+  summarize: bool = True
+  enabled: bool = True
+  created_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+
+  def to_feed_cfg(self) -> dict[str, object]:
+    """Convert to the dict format expected by feeds.fetch_all()."""
+    cfg: dict[str, object] = {
+      "name": self.name,
+      "type": self.type,
+      "lang": self.lang,
+      "max_items": self.max_items,
+    }
+    if self.type == "reddit":
+      cfg["subreddit"] = self.subreddit
+      if self.sort:
+        cfg["sort"] = self.sort
+    else:
+      cfg["url"] = self.url
+    return cfg
+
+
+class ArticleRow(BaseModel):
+  url: str
+  feed_id: int | None = None
+  title: str
+  title_ja: str | None = None
+  source: str
+  published: datetime | None = None
+  content_snippet: str | None = None
+  summary: str | None = None
+  lang: str | None = None
+  fetched_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+
+
+class RefreshJob(BaseModel):
+  id: int = 0
+  started_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+  finished_at: datetime | None = None
+  source: str = "web"
+  status: str = "running"
+  new_count: int | None = None
+  error: str | None = None
+
+
+# -- API response models --
+
+
+class FeedResponse(BaseModel):
+  id: int
+  name: str
+  type: str
+  url: str | None
+  subreddit: str | None
+  sort: str | None
+  lang: str
+  max_items: int
+  summarize: bool
+  enabled: bool
+  article_count: int = 0
+
+
+class ArticleResponse(BaseModel):
+  url: str
+  feed_id: int | None
+  title: str
+  title_ja: str | None
+  source: str
+  published: datetime | None
+  content_snippet: str | None
+  summary: str | None
+  lang: str | None
+
+
+class StatusResponse(BaseModel):
+  running: bool
+  last_started_at: datetime | None = None
+  last_finished_at: datetime | None = None
+  last_status: str | None = None
+  last_new_count: int | None = None
+  last_error: str | None = None
+
+
+# -- Config models --
+
+
+class OllamaConfig(BaseModel):
+  model: str = "gemma3"
+  base_url: str = "http://localhost:11434"
+  timeout: int = 120
+
+
+class AppConfig(BaseModel):
+  max_age_hours: float = 25
+  db_path: str = "data/news.db"
+  cache_dir: str = "cache"
+  article_cache_max_age_days: int = 30
+  ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+  feeds: list[dict[str, str | int | float | bool | None]] = Field(default_factory=lambda: [])

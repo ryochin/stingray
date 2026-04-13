@@ -1,11 +1,29 @@
 [project]
 name = "news-aggregator"
-version = "0.1.0"
-description = "Daily news feed aggregator with Japanese summaries"
+version = "0.2.0"
+description = "RSS reader web app with Japanese translation and summarization"
 requires-python = ">=3.12"
 dependencies = [
   "feedparser>=6.0",
   "httpx>=0.28",
-  "jinja2>=3.1",
   "pyyaml>=6.0",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.34",
+  "python-multipart>=0.0.18",
+  "pydantic>=2.10",
+]
+
+[dependency-groups]
+dev = [
+  "pyright>=1.1",
+]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+pythonPlatform = "All"
+exclude = [
+  "backend/feeds.py",
+  "backend/summarizer.py",
+  "backend/log.py",
 ]

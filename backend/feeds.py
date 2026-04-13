@@ -202,7 +202,7 @@ FETCHERS = {
 }
 
 
-async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Article]:
+async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Article]:  # type: ignore[type-arg]
   async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
     tasks = []
     task_feeds = []
