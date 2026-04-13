@@ -88,7 +88,7 @@ async def refresh_all(
 
       need_summary = [
         a for a in articles
-        if summarize_map.get(a.source, True)
+        if summarize_map.get(a.source, False)
         and _should_summarize(a)
       ]
 

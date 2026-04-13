@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
@@ -21,7 +21,7 @@ class FeedRow(BaseModel):
   max_items: int = 20
   summarize: bool = True
   enabled: bool = True
-  created_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+  created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
   def to_feed_cfg(self) -> dict[str, object]:
     """Convert to the dict format expected by feeds.fetch_all()."""
@@ -50,46 +50,17 @@ class ArticleRow(BaseModel):
   content_snippet: str | None = None
   summary: str | None = None
   lang: str | None = None
-  fetched_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+  fetched_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
 
 class RefreshJob(BaseModel):
   id: int = 0
-  started_at: datetime = Field(default_factory=lambda: datetime.now().astimezone())
+  started_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
   finished_at: datetime | None = None
   source: str = "web"
   status: str = "running"
   new_count: int | None = None
   error: str | None = None
-
-
-# -- API response models --
-
-
-class FeedResponse(BaseModel):
-  id: int
-  name: str
-  type: str
-  url: str | None
-  subreddit: str | None
-  sort: str | None
-  lang: str
-  max_items: int
-  summarize: bool
-  enabled: bool
-  article_count: int = 0
-
-
-class ArticleResponse(BaseModel):
-  url: str
-  feed_id: int | None
-  title: str
-  title_ja: str | None
-  source: str
-  published: datetime | None
-  content_snippet: str | None
-  summary: str | None
-  lang: str | None
 
 
 class StatusResponse(BaseModel):

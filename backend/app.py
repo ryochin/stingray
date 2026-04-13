@@ -96,11 +96,7 @@ def delete_feed(feed_id: int) -> None:
 
 @app.post("/api/feeds/{feed_id}/toggle")
 def toggle_feed(feed_id: int) -> FeedRow:
-  feeds = repo.list_feeds()
-  current = next((f for f in feeds if f.id == feed_id), None)
-  if current is None:
-    raise HTTPException(404, "Feed not found")
-  repo.toggle_feed(feed_id, not current.enabled)
+  repo.toggle_feed(feed_id)
   updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
   if updated is None:
     raise HTTPException(404, "Feed not found")
@@ -109,11 +105,7 @@ def toggle_feed(feed_id: int) -> FeedRow:
 
 @app.post("/api/feeds/{feed_id}/summarize")
 def toggle_summarize(feed_id: int) -> FeedRow:
-  feeds = repo.list_feeds()
-  current = next((f for f in feeds if f.id == feed_id), None)
-  if current is None:
-    raise HTTPException(404, "Feed not found")
-  repo.set_summarize(feed_id, not current.summarize)
+  repo.toggle_summarize(feed_id)
   updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
   if updated is None:
     raise HTTPException(404, "Feed not found")

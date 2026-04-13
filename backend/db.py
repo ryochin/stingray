@@ -59,7 +59,7 @@ def configure(path: str | Path) -> None:
 def get_conn() -> sqlite3.Connection:
   """Open a connection with WAL mode and recommended PRAGMAs."""
   _db_path.parent.mkdir(parents=True, exist_ok=True)
-  conn = sqlite3.connect(str(_db_path), timeout=10)
+  conn = sqlite3.connect(str(_db_path), timeout=5)
   conn.row_factory = sqlite3.Row
   conn.execute("PRAGMA journal_mode = WAL")
   conn.execute("PRAGMA synchronous = NORMAL")
@@ -73,6 +73,5 @@ def init_schema() -> None:
   conn = get_conn()
   try:
     conn.executescript(_SCHEMA)
-    conn.commit()
   finally:
     conn.close()

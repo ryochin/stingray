@@ -4,35 +4,51 @@ vars:
   CONFIG: config.yml
 
 tasks:
-  run:
-    desc: "Fetch feeds, summarize, and generate HTML report"
-    aliases: [r]
+  serve:
+    desc: "Start API server and frontend dev server"
+    deps: [serve:api, serve:web]
+
+  serve:api:
+    desc: "Start FastAPI dev server with hot reload"
+    cmds:
+      - PYTHONPATH=backend uv run uvicorn app:app --host 127.0.0.1 --port 10180 --reload
+
+  serve:web:
+    desc: "Start Vite dev server (proxies /api to :10180)"
+    dir: frontend
+    cmds:
+      - npm run dev
+
+  build:
+    desc: "Build frontend for production"
+    dir: frontend
+    cmds:
+      - npm run build
+
+  fetch:
+    desc: "Fetch feeds and summarize"
+    aliases: [f]
     cmds:
       - uv run python backend/main.py --config {{.CONFIG}}
 
-  run:no-summary:
-    desc: "Generate report without LLM summarization"
+  fetch:no-summary:
+    desc: "Fetch feeds without LLM summarization"
     cmds:
       - uv run python backend/main.py --config {{.CONFIG}} --no-summary
 
-  run:fresh:
-    desc: "Clear all caches and re-fetch everything"
+  fetch:fresh:
+    desc: "Clear feed cache and re-fetch everything"
     cmds:
       - rm -rf cache/
       - uv run python backend/main.py --config {{.CONFIG}}
 
-  open:
-    desc: "Open today's report in Chrome"
-    aliases: [o]
-    cmds:
-      - open -a Google\ Chrome output/$(TZ=Asia/Tokyo date +%Y-%m-%d).html
-
   clean:
-    desc: "Remove all cached data and generated reports"
+    desc: "Remove all cached data"
     cmds:
-      - rm -rf cache/ output/
+      - rm -rf cache/
 
   install:
-    desc: "Install dependencies"
+    desc: "Install all dependencies"
     cmds:
       - uv sync
+      - cd frontend && npm install

@@ -185,7 +185,7 @@ _VALID_REDDIT_SORTS = {"hot", "new", "top", "rising"}
 
 async def _fetch_reddit(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Article], bool]:
   subreddit = feed_cfg["subreddit"]
-  if not re.fullmatch(r"[A-Za-z0-9_]{1,21}", subreddit):
+  if not re.fullmatch(r"[A-Za-z0-9_]{1,20}", subreddit):
     raise ValueError(f"Invalid subreddit name: {subreddit}")
   sort = feed_cfg.get("sort", "hot")
   if sort not in _VALID_REDDIT_SORTS:

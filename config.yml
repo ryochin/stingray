@@ -1,6 +1,5 @@
 # -- General --
 max_age_hours: 25        # How far back to include articles
-output_dir: "output"     # HTML output directory
 cache_dir: "cache"                 # Cache directory
 article_cache_max_age_days: 30     # Days to keep article cache
 

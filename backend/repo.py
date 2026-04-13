@@ -81,24 +81,24 @@ def delete_feed(feed_id: int) -> None:
     conn.close()
 
 
-def toggle_feed(feed_id: int, enabled: bool) -> None:
+def toggle_feed(feed_id: int) -> None:
   conn = db.get_conn()
   try:
     conn.execute(
-      "UPDATE feeds SET enabled = ? WHERE id = ?",
-      (int(enabled), feed_id),
+      "UPDATE feeds SET enabled = NOT enabled WHERE id = ?",
+      (feed_id,),
     )
     conn.commit()
   finally:
     conn.close()
 
 
-def set_summarize(feed_id: int, on: bool) -> None:
+def toggle_summarize(feed_id: int) -> None:
   conn = db.get_conn()
   try:
     conn.execute(
-      "UPDATE feeds SET summarize = ? WHERE id = ?",
-      (int(on), feed_id),
+      "UPDATE feeds SET summarize = NOT summarize WHERE id = ?",
+      (feed_id,),
     )
     conn.commit()
   finally:
@@ -148,7 +148,7 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
             """UPDATE articles SET
                  title_ja = COALESCE(?, title_ja),
                  summary = COALESCE(?, summary)
-               WHERE url = ? AND (title_ja IS NULL OR summary IS NULL)""",
+               WHERE url = ? AND (title_ja IS NULL AND summary IS NULL)""",
             (a.title_ja or None, a.summary or None, a.url),
           )
     conn.commit()
