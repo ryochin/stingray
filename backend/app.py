@@ -11,7 +11,7 @@ import yaml
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 import db
 import repo
@@ -71,6 +71,14 @@ class FeedCreate(BaseModel):
   lang: str = "en"
   max_items: int = 20
   summarize: bool = True
+
+  @model_validator(mode="after")
+  def _check_url_or_subreddit(self) -> FeedCreate:
+    if self.type == "rss" and not self.url:
+      raise ValueError("RSS feeds require a URL")
+    if self.type == "reddit" and not self.subreddit:
+      raise ValueError("Reddit feeds require a subreddit")
+    return self
 
 
 @app.get("/api/feeds")

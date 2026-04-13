@@ -4,7 +4,7 @@ import { api } from "../api/client"
 import type { Feed, FeedCreate } from "../api/client"
 import Header from "../components/Header"
 
-function AddFeedForm({ onAdd }: { onAdd: (f: FeedCreate) => void }) {
+function AddFeedForm({ onAdd, isAdding }: { onAdd: (f: FeedCreate) => void, isAdding: boolean }) {
   const [type, setType] = useState("rss")
   const [name, setName] = useState("")
   const [url, setUrl] = useState("")
@@ -20,13 +20,16 @@ function AddFeedForm({ onAdd }: { onAdd: (f: FeedCreate) => void }) {
       body.url = url
     }
     onAdd(body)
+  }
+
+  const reset = () => {
     setName("")
     setUrl("")
     setSubreddit("")
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap gap-3 items-end p-4 bg-bg-secondary rounded-lg border border-border mb-6">
+    <form onSubmit={submit} onReset={reset} className="flex flex-wrap gap-3 items-end p-4 bg-bg-secondary rounded-lg border border-border mb-6">
       <div className="flex flex-col gap-1">
         <label className="text-xs text-text-muted">Type</label>
         <select value={type} onChange={(e) => setType(e.target.value)}
@@ -64,8 +67,8 @@ function AddFeedForm({ onAdd }: { onAdd: (f: FeedCreate) => void }) {
           <option value="ja">ja</option>
         </select>
       </div>
-      <button type="submit"
-        className="px-4 py-1.5 rounded bg-accent text-white text-sm hover:opacity-90 transition-opacity">
+      <button type="submit" disabled={isAdding}
+        className="px-4 py-1.5 rounded bg-accent text-white text-sm hover:opacity-90 transition-opacity disabled:opacity-40">
         Add
       </button>
     </form>
@@ -74,26 +77,38 @@ function AddFeedForm({ onAdd }: { onAdd: (f: FeedCreate) => void }) {
 
 export default function Feeds() {
   const queryClient = useQueryClient()
-  const { data: feeds, isLoading } = useQuery({
+  const [error, setError] = useState<string | null>(null)
+  const { data: feeds, isLoading, isError } = useQuery({
     queryKey: ["feeds"],
     queryFn: api.getFeeds,
   })
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["feeds"] })
+  const onError = (e: Error) => setError(e.message)
 
-  const addFeed = useMutation({ mutationFn: api.createFeed, onSuccess: invalidate })
-  const toggleFeed = useMutation({ mutationFn: api.toggleFeed, onSuccess: invalidate })
-  const toggleSummarize = useMutation({ mutationFn: api.toggleSummarize, onSuccess: invalidate })
-  const deleteFeed = useMutation({ mutationFn: api.deleteFeed, onSuccess: invalidate })
+  const addFeed = useMutation({
+    mutationFn: api.createFeed,
+    onSuccess: () => { invalidate(); setError(null) },
+    onError,
+  })
+  const toggleFeed = useMutation({ mutationFn: api.toggleFeed, onSuccess: invalidate, onError })
+  const toggleSummarize = useMutation({ mutationFn: api.toggleSummarize, onSuccess: invalidate, onError })
+  const deleteFeed = useMutation({ mutationFn: api.deleteFeed, onSuccess: invalidate, onError })
 
   return (
     <div className="flex flex-col h-screen">
       <Header />
       <main className="flex-1 overflow-y-auto px-7 py-5 max-w-4xl">
         <h2 className="text-lg font-semibold text-text-heading mb-4">Feeds</h2>
-        <AddFeedForm onAdd={(f) => addFeed.mutate(f)} />
+        <AddFeedForm onAdd={(f) => addFeed.mutate(f)} isAdding={addFeed.isPending} />
 
-        {isLoading ? (
+        {error && (
+          <div className="text-red-400 text-sm mb-4">{error}</div>
+        )}
+
+        {isError ? (
+          <div className="text-red-400">Failed to load feeds.</div>
+        ) : isLoading ? (
           <div className="text-text-muted">Loading...</div>
         ) : (
           <div className="space-y-2">
