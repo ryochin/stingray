@@ -11,25 +11,42 @@ export default function Articles() {
   const articleRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const mainRef = useRef<HTMLElement>(null)
 
-  const { data: allArticles, isLoading } = useQuery({
+  const { data: allArticles, isLoading, isError } = useQuery({
     queryKey: ["articles"],
     queryFn: () => api.getArticles(),
   })
 
+  const { data: feeds } = useQuery({
+    queryKey: ["feeds"],
+    queryFn: api.getFeeds,
+  })
+
+  const enabledFeedIds = useMemo(() => {
+    if (!feeds) return null
+    return new Set(feeds.filter((f) => f.enabled).map((f) => f.id))
+  }, [feeds])
+
+  const enabledArticles = useMemo(() => {
+    if (!enabledFeedIds) return allArticles ?? []
+    return (allArticles ?? []).filter(
+      (a) => a.feed_id != null && enabledFeedIds.has(a.feed_id)
+    )
+  }, [allArticles, enabledFeedIds])
+
   const articleCounts = useMemo(() => {
     const map = new Map<number, number>()
-    for (const a of allArticles ?? []) {
+    for (const a of enabledArticles) {
       if (a.feed_id != null) {
         map.set(a.feed_id, (map.get(a.feed_id) ?? 0) + 1)
       }
     }
     return map
-  }, [allArticles])
+  }, [enabledArticles])
 
   const filtered = useMemo(() => {
-    if (activeFeedId === null) return allArticles ?? []
-    return (allArticles ?? []).filter((a) => a.feed_id === activeFeedId)
-  }, [allArticles, activeFeedId])
+    if (activeFeedId === null) return enabledArticles
+    return enabledArticles.filter((a) => a.feed_id === activeFeedId)
+  }, [enabledArticles, activeFeedId])
 
   // Focus first article when feed changes or articles load
   useEffect(() => {
@@ -91,7 +108,9 @@ export default function Articles() {
           articleCounts={articleCounts}
         />
         <main ref={mainRef} className="flex-1 overflow-y-auto px-7 py-5">
-          {isLoading ? (
+          {isError ? (
+            <div className="text-red-400">Failed to load articles.</div>
+          ) : isLoading ? (
             <div className="text-text-muted">Loading...</div>
           ) : filtered.length === 0 ? (
             <div className="text-text-muted">No articles</div>
