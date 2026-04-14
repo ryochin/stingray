@@ -47,6 +47,40 @@ CREATE INDEX IF NOT EXISTS idx_articles_feed      ON articles(feed_id);
 CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published DESC);
 """
 
+_POST_MIGRATION_INDEXES = """\
+CREATE INDEX IF NOT EXISTS idx_articles_read_at   ON articles(read_at);
+CREATE INDEX IF NOT EXISTS idx_feeds_folder_id    ON feeds(folder_id);
+"""
+
+_MIGRATIONS = [
+  # Migration 1: add read_at column
+  """\
+  ALTER TABLE articles ADD COLUMN read_at TEXT;
+  """,
+  # Migration 2: folders table
+  """\
+  CREATE TABLE IF NOT EXISTS folders (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  """,
+  # Migration 3: add folder_id to feeds
+  """\
+  ALTER TABLE feeds ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL;
+  """,
+  # Migration 4: ng_words table
+  """\
+  CREATE TABLE IF NOT EXISTS ng_words (
+    id         INTEGER PRIMARY KEY,
+    pattern    TEXT NOT NULL,
+    target     TEXT NOT NULL DEFAULT 'title',
+    created_at TEXT NOT NULL
+  );
+  """,
+]
+
 _db_path: Path = Path("data/news.db")
 
 
@@ -68,10 +102,33 @@ def get_conn() -> sqlite3.Connection:
   return conn
 
 
+def _run_migrations(conn: sqlite3.Connection) -> None:
+  """Apply pending schema migrations."""
+  cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
+  if "read_at" not in cols:
+    conn.execute(_MIGRATIONS[0])
+    conn.commit()
+
+  tables = {r[0] for r in conn.execute(
+    "SELECT name FROM sqlite_master WHERE type='table'"
+  ).fetchall()}
+  if "folders" not in tables:
+    for sql in _MIGRATIONS[1:3]:
+      conn.execute(sql)
+    conn.commit()
+    tables.add("folders")
+
+  if "ng_words" not in tables:
+    conn.execute(_MIGRATIONS[3])
+    conn.commit()
+
+
 def init_schema() -> None:
   """Create tables and indexes if they don't exist."""
   conn = get_conn()
   try:
     conn.executescript(_SCHEMA)
+    _run_migrations(conn)
+    conn.executescript(_POST_MIGRATION_INDEXES)
   finally:
     conn.close()

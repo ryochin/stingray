@@ -1,15 +1,45 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { api } from "../api/client"
+import type { Selection } from "../api/client"
 import Header from "../components/Header"
 import Sidebar from "../components/Sidebar"
 import ArticleCard from "../components/ArticleCard"
 
 export default function Articles() {
-  const [activeFeedId, setActiveFeedId] = useState<number | null>(null)
+  const queryClient = useQueryClient()
+  const [selection, setSelection] = useState<Selection>({ type: "all" })
+  const [showUnreadOnly, setShowUnreadOnly] = useState(true)
   const [focusIndex, setFocusIndex] = useState(-1)
+  const sessionReadUrls = useRef<Set<string>>(new Set())
   const articleRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const mainRef = useRef<HTMLElement>(null)
+
+  // Debounced batch read marking
+  const pendingReadUrls = useRef<Set<string>>(new Set())
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flushReads = useCallback(() => {
+    if (pendingReadUrls.current.size === 0) return
+    const urls = Array.from(pendingReadUrls.current)
+    pendingReadUrls.current.clear()
+    api.markRead(urls).then(() => {
+      queryClient.invalidateQueries({ queryKey: ["articles"] })
+    })
+  }, [queryClient])
+
+  const scheduleRead = useCallback((url: string) => {
+    pendingReadUrls.current.add(url)
+    sessionReadUrls.current.add(url)
+    if (flushTimer.current) clearTimeout(flushTimer.current)
+    flushTimer.current = setTimeout(flushReads, 500)
+  }, [flushReads])
+
+  // Flush on unmount
+  useEffect(() => () => {
+    if (flushTimer.current) clearTimeout(flushTimer.current)
+    flushReads()
+  }, [flushReads])
 
   const { data: allArticles, isLoading, isError } = useQuery({
     queryKey: ["articles"],
@@ -33,57 +63,126 @@ export default function Articles() {
     )
   }, [allArticles, enabledFeedIds])
 
-  const articleCounts = useMemo(() => {
+  // Unread counts (always from full list, not filtered)
+  const unreadCounts = useMemo(() => {
     const map = new Map<number, number>()
     for (const a of enabledArticles) {
-      if (a.feed_id != null) {
+      if (a.feed_id != null && a.read_at == null) {
         map.set(a.feed_id, (map.get(a.feed_id) ?? 0) + 1)
       }
     }
     return map
   }, [enabledArticles])
 
-  const filtered = useMemo(() => {
-    if (activeFeedId === null) return enabledArticles
-    return enabledArticles.filter((a) => a.feed_id === activeFeedId)
-  }, [enabledArticles, activeFeedId])
+  const folderFeedIds = useMemo(() => {
+    if (selection.type !== "folder" || !feeds) return null
+    return new Set(
+      feeds.filter((f) => f.folder_id === selection.id && f.enabled).map((f) => f.id)
+    )
+  }, [selection, feeds])
 
-  // Focus first article when feed changes or articles load
+  const filtered = useMemo(() => {
+    let list = enabledArticles
+    if (selection.type === "feed") {
+      list = list.filter((a) => a.feed_id === selection.id)
+    } else if (selection.type === "folder" && folderFeedIds) {
+      list = list.filter((a) => a.feed_id != null && folderFeedIds.has(a.feed_id))
+    }
+    if (showUnreadOnly) {
+      list = list.filter((a) => a.read_at == null || sessionReadUrls.current.has(a.url))
+    }
+    return list
+  }, [enabledArticles, selection, folderFeedIds, showUnreadOnly])
+
+  // Clear session reads and reset focus when selection changes
+  useEffect(() => {
+    sessionReadUrls.current.clear()
+  }, [selection])
+
+  // Focus first article when feed/filter changes
   useEffect(() => {
     setFocusIndex(filtered.length > 0 ? 0 : -1)
-  }, [activeFeedId, filtered.length])
+  }, [selection, showUnreadOnly, filtered.length])
 
   // Scroll focused article into view
   useEffect(() => {
     if (focusIndex < 0) return
     const el = articleRefs.current.get(focusIndex)
-    el?.scrollIntoView({ block: "start", behavior: "smooth" })
+    el?.scrollIntoView({ block: "start" })
+    // CSS scroll-behavior on main handles smooth + fast animation
   }, [focusIndex])
 
+  // Mark article as read when focus leaves it
+  const markFocusedAsRead = useCallback((index: number) => {
+    if (index < 0 || index >= filtered.length) return
+    const article = filtered[index]
+    if (article && article.read_at == null) {
+      scheduleRead(article.url)
+    }
+  }, [filtered, scheduleRead])
+
+  // Mark all as read mutation
+  const markAllReadFeedId = selection.type === "feed" ? selection.id : undefined
+  const markAllRead = useMutation({
+    mutationFn: () => api.markAllRead(markAllReadFeedId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["articles"] })
+    },
+  })
+
+  // Toggle read/unread for a single article
+  const toggleRead = useCallback((url: string, isRead: boolean) => {
+    const fn = isRead ? api.markUnread([url]) : api.markRead([url])
+    fn.then(() => {
+      queryClient.invalidateQueries({ queryKey: ["articles"] })
+    })
+  }, [queryClient])
+
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // Ignore when typing in inputs
     const tag = (e.target as HTMLElement).tagName
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
 
     const len = filtered.length
-    if (len === 0) return
+    if (len === 0 && e.key !== "A") return
 
     if (e.key === "j") {
       e.preventDefault()
-      setFocusIndex((i) => Math.min(i + 1, len - 1))
+      setFocusIndex((prev) => {
+        markFocusedAsRead(prev)
+        return Math.min(prev + 1, len - 1)
+      })
     } else if (e.key === "k") {
       e.preventDefault()
-      setFocusIndex((i) => Math.max(i - 1, 0))
+      setFocusIndex((prev) => {
+        markFocusedAsRead(prev)
+        return Math.max(prev - 1, 0)
+      })
     } else if (e.key === "o" || e.key === "Enter") {
       e.preventDefault()
       setFocusIndex((i) => {
         if (i >= 0 && i < len) {
-          window.open(filtered[i].url, "_blank", "noopener")
+          const article = filtered[i]
+          window.open(article.url, "_blank", "noopener")
+          if (article.read_at == null) {
+            scheduleRead(article.url)
+          }
         }
         return i
       })
+    } else if (e.key === "m") {
+      e.preventDefault()
+      setFocusIndex((i) => {
+        if (i >= 0 && i < len) {
+          const article = filtered[i]
+          toggleRead(article.url, article.read_at != null)
+        }
+        return i
+      })
+    } else if (e.key === "A" && e.shiftKey) {
+      e.preventDefault()
+      markAllRead.mutate()
     }
-  }, [filtered])
+  }, [filtered, markFocusedAsRead, scheduleRead, toggleRead, markAllRead])
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown)
@@ -98,22 +197,68 @@ export default function Articles() {
     }
   }, [])
 
+  const handleCardClick = useCallback((index: number) => {
+    setFocusIndex((prev) => {
+      if (prev !== index) markFocusedAsRead(prev)
+      return index
+    })
+  }, [markFocusedAsRead])
+
+  const totalUnread = Array.from(unreadCounts.values()).reduce((a, b) => a + b, 0)
+
   return (
     <div className="flex flex-col h-screen">
       <Header />
       <div className="flex flex-1 min-h-0">
         <Sidebar
-          activeFeedId={activeFeedId}
-          onSelect={setActiveFeedId}
-          articleCounts={articleCounts}
+          selection={selection}
+          onSelect={setSelection}
+          unreadCounts={unreadCounts}
         />
-        <main ref={mainRef} className="flex-1 overflow-y-auto px-7 py-5">
+        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 flex flex-col items-center" style={{ scrollBehavior: "smooth" }}>
+          <div className="w-[95%] max-w-4xl pl-1">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex gap-1 text-sm">
+              <button
+                onClick={() => setShowUnreadOnly(true)}
+                className={`px-3 py-1 rounded transition-colors ${
+                  showUnreadOnly
+                    ? "bg-accent-bg text-accent-text"
+                    : "bg-bg-card text-text-muted hover:text-text"
+                }`}
+              >
+                Unread{totalUnread > 0 ? ` (${totalUnread})` : ""}
+              </button>
+              <button
+                onClick={() => setShowUnreadOnly(false)}
+                className={`px-3 py-1 rounded transition-colors ${
+                  !showUnreadOnly
+                    ? "bg-accent-bg text-accent-text"
+                    : "bg-bg-card text-text-muted hover:text-text"
+                }`}
+              >
+                All
+              </button>
+            </div>
+            {filtered.length > 0 && (
+              <button
+                onClick={() => markAllRead.mutate()}
+                disabled={markAllRead.isPending}
+                className="text-sm px-3 py-1 rounded bg-bg-card text-text-muted hover:text-text transition-colors disabled:opacity-40"
+              >
+                Mark all as read
+              </button>
+            )}
+          </div>
+
           {isError ? (
             <div className="text-red-400">Failed to load articles.</div>
           ) : isLoading ? (
             <div className="text-text-muted">Loading...</div>
           ) : filtered.length === 0 ? (
-            <div className="text-text-muted">No articles</div>
+            <div className="text-text-muted">
+              {showUnreadOnly ? "No unread articles" : "No articles"}
+            </div>
           ) : (
             filtered.map((article, i) => (
               <ArticleCard
@@ -121,10 +266,11 @@ export default function Articles() {
                 article={article}
                 focused={i === focusIndex}
                 ref={(el) => setRef(i, el)}
-                onClick={() => setFocusIndex(i)}
+                onClick={() => handleCardClick(i)}
               />
             ))
           )}
+          </div>
         </main>
       </div>
     </div>

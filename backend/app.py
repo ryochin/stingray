@@ -16,7 +16,7 @@ from pydantic import BaseModel, model_validator
 import db
 import repo
 from fetcher import refresh_all
-from schemas import AppConfig, ArticleRow, FeedRow, StatusResponse
+from schemas import AppConfig, ArticleRow, FeedRow, FolderRow, NgWordRow, StatusResponse
 from seed import seed_feeds_from_config
 
 # -- Globals for background refresh --
@@ -54,12 +54,87 @@ app = FastAPI(title="News Reader", lifespan=lifespan)
 @app.get("/api/articles")
 def get_articles(
   feed_id: int | None = Query(None),
+  unread: bool = Query(False),
   limit: int = Query(500, ge=1, le=5000),
 ) -> list[ArticleRow]:
-  return repo.list_articles(feed_id=feed_id, limit=limit)
+  return repo.list_articles(feed_id=feed_id, unread=unread, limit=limit)
+
+
+class ArticleUrls(BaseModel):
+  urls: list[str]
+
+
+@app.post("/api/articles/read", status_code=204)
+def mark_articles_read(body: ArticleUrls) -> None:
+  repo.mark_read(body.urls)
+
+
+@app.post("/api/articles/unread", status_code=204)
+def mark_articles_unread(body: ArticleUrls) -> None:
+  repo.mark_unread(body.urls)
+
+
+@app.post("/api/articles/read-all")
+def mark_all_articles_read(feed_id: int | None = Query(None)) -> dict[str, int]:
+  count = repo.mark_all_read(feed_id)
+  return {"marked": count}
+
+
+# -- Folders --
+
+
+class FolderCreate(BaseModel):
+  name: str
+
+
+class FolderRename(BaseModel):
+  name: str
+
+
+class FolderReorder(BaseModel):
+  folder_ids: list[int]
+
+
+@app.get("/api/folders")
+def get_folders() -> list[FolderRow]:
+  return repo.list_folders()
+
+
+@app.post("/api/folders", status_code=201)
+def create_folder(body: FolderCreate) -> FolderRow:
+  folder_id = repo.create_folder(body.name)
+  folders = repo.list_folders()
+  for f in folders:
+    if f.id == folder_id:
+      return f
+  raise HTTPException(404, "Folder not found after creation")
+
+
+@app.patch("/api/folders/{folder_id}")
+def rename_folder(folder_id: int, body: FolderRename) -> FolderRow:
+  repo.rename_folder(folder_id, body.name)
+  folders = repo.list_folders()
+  updated = next((f for f in folders if f.id == folder_id), None)
+  if updated is None:
+    raise HTTPException(404, "Folder not found")
+  return updated
+
+
+@app.delete("/api/folders/{folder_id}", status_code=204)
+def delete_folder(folder_id: int) -> None:
+  repo.delete_folder(folder_id)
+
+
+@app.put("/api/folders/reorder", status_code=204)
+def reorder_folders(body: FolderReorder) -> None:
+  repo.reorder_folders(body.folder_ids)
 
 
 # -- Feeds --
+
+
+class FeedMove(BaseModel):
+  folder_id: int | None = None
 
 
 class FeedCreate(BaseModel):
@@ -71,6 +146,7 @@ class FeedCreate(BaseModel):
   lang: str = "en"
   max_items: int = 20
   summarize: bool = True
+  folder_id: int | None = None
 
   @model_validator(mode="after")
   def _check_url_or_subreddit(self) -> FeedCreate:
@@ -118,6 +194,43 @@ def toggle_summarize(feed_id: int) -> FeedRow:
   if updated is None:
     raise HTTPException(404, "Feed not found")
   return updated
+
+
+@app.patch("/api/feeds/{feed_id}/folder")
+def move_feed_to_folder(feed_id: int, body: FeedMove) -> FeedRow:
+  repo.move_feed_to_folder(feed_id, body.folder_id)
+  updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  if updated is None:
+    raise HTTPException(404, "Feed not found")
+  return updated
+
+
+# -- NG words --
+
+
+class NgWordCreate(BaseModel):
+  pattern: str
+  target: str = "title"
+
+
+@app.get("/api/ng-words")
+def get_ng_words() -> list[NgWordRow]:
+  return repo.list_ng_words()
+
+
+@app.post("/api/ng-words", status_code=201)
+def create_ng_word(body: NgWordCreate) -> NgWordRow:
+  ng_id = repo.add_ng_word(body.pattern, body.target)
+  words = repo.list_ng_words()
+  for w in words:
+    if w.id == ng_id:
+      return w
+  raise HTTPException(404, "NG word not found after creation")
+
+
+@app.delete("/api/ng-words/{ng_word_id}", status_code=204)
+def delete_ng_word(ng_word_id: int) -> None:
+  repo.delete_ng_word(ng_word_id)
 
 
 # -- Refresh --

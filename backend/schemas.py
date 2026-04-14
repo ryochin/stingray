@@ -10,6 +10,20 @@ from pydantic import BaseModel, Field
 # -- DB row models --
 
 
+class NgWordRow(BaseModel):
+  id: int = 0
+  pattern: str
+  target: str = "title"
+  created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+
+
+class FolderRow(BaseModel):
+  id: int = 0
+  name: str
+  position: int = 0
+  created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+
+
 class FeedRow(BaseModel):
   id: int = 0
   name: str
@@ -21,6 +35,7 @@ class FeedRow(BaseModel):
   max_items: int = 20
   summarize: bool = True
   enabled: bool = True
+  folder_id: int | None = None
   created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
   def to_feed_cfg(self) -> dict[str, object]:
@@ -51,6 +66,7 @@ class ArticleRow(BaseModel):
   summary: str | None = None
   lang: str | None = None
   fetched_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+  read_at: datetime | None = None
 
 
 class RefreshJob(BaseModel):

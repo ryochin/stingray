@@ -1,5 +1,11 @@
 const BASE = "/api"
 
+export interface Folder {
+  id: number
+  name: string
+  position: number
+}
+
 export interface Feed {
   id: number
   name: string
@@ -11,6 +17,7 @@ export interface Feed {
   max_items: number
   summarize: boolean
   enabled: boolean
+  folder_id: number | null
 }
 
 export interface Article {
@@ -23,6 +30,7 @@ export interface Article {
   content_snippet: string | null
   summary: string | null
   lang: string | null
+  read_at: string | null
 }
 
 export interface RefreshStatus {
@@ -43,7 +51,19 @@ export interface FeedCreate {
   lang?: string
   max_items?: number
   summarize?: boolean
+  folder_id?: number
 }
+
+export interface NgWord {
+  id: number
+  pattern: string
+  target: string
+}
+
+export type Selection =
+  | { type: "all" }
+  | { type: "folder", id: number }
+  | { type: "feed", id: number }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init)
@@ -62,7 +82,40 @@ export const api = {
     return fetchJson<Article[]>(`/articles?${params}`)
   },
 
+  getFolders: () => fetchJson<Folder[]>("/folders"),
+
+  createFolder: (name: string) =>
+    fetchJson<Folder>("/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+
+  renameFolder: (id: number, name: string) =>
+    fetchJson<Folder>(`/folders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteFolder: (id: number) =>
+    fetchJson<void>(`/folders/${id}`, { method: "DELETE" }),
+
+  reorderFolders: (folderIds: number[]) =>
+    fetchJson<void>("/folders/reorder", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder_ids: folderIds }),
+    }),
+
   getFeeds: () => fetchJson<Feed[]>("/feeds"),
+
+  moveFeedToFolder: (feedId: number, folderId: number | null) =>
+    fetchJson<Feed>(`/feeds/${feedId}/folder`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder_id: folderId }),
+    }),
 
   createFeed: (body: FeedCreate) =>
     fetchJson<Feed>("/feeds", {
@@ -84,4 +137,36 @@ export const api = {
     fetchJson<{ message: string }>("/refresh", { method: "POST" }),
 
   getStatus: () => fetchJson<RefreshStatus>("/status"),
+
+  markRead: (urls: string[]) =>
+    fetchJson<void>("/articles/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ urls }),
+    }),
+
+  markUnread: (urls: string[]) =>
+    fetchJson<void>("/articles/unread", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ urls }),
+    }),
+
+  markAllRead: (feedId?: number) => {
+    const params = new URLSearchParams()
+    if (feedId != null) params.set("feed_id", String(feedId))
+    return fetchJson<{ marked: number }>(`/articles/read-all?${params}`, { method: "POST" })
+  },
+
+  getNgWords: () => fetchJson<NgWord[]>("/ng-words"),
+
+  createNgWord: (pattern: string, target: string = "title") =>
+    fetchJson<NgWord>("/ng-words", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pattern, target }),
+    }),
+
+  deleteNgWord: (id: number) =>
+    fetchJson<void>(`/ng-words/${id}`, { method: "DELETE" }),
 }

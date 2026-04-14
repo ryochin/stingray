@@ -29,17 +29,20 @@ interface Props {
 
 const ArticleCard = forwardRef<HTMLDivElement, Props>(
   ({ article, focused, onClick }, ref) => {
+    const isRead = article.read_at != null
     const hasTranslation = article.title_ja && article.title_ja !== article.title
-    const titleColor = focused ? "text-accent-text" : "text-text-heading"
+    const titleColor = focused ? "text-accent-text" : isRead ? "text-text-muted" : "text-text-heading"
 
     return (
       <div
         ref={ref}
         onClick={onClick}
-        className={`py-3 px-4 rounded-lg mb-2 border cursor-pointer transition-colors ${
+        className={`py-3 px-4 rounded-lg mb-2 border-l-2 border cursor-pointer transition-colors ${
           focused
-            ? "bg-bg-hover border-accent"
-            : "bg-bg-secondary border-border hover:border-text-dim"
+            ? "bg-bg-hover border-accent border-l-accent"
+            : isRead
+              ? "bg-bg-secondary border-border border-l-transparent opacity-60"
+              : "bg-bg-secondary border-border border-l-accent hover:border-text-dim"
         }`}
       >
         {hasTranslation ? (
@@ -86,7 +89,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
         )}
 
         {article.summary && (
-          <div className="mt-1 text-text">
+          <div className={`mt-1 ${isRead ? "text-text-muted" : "text-text"}`}>
             {article.summary}
           </div>
         )}
