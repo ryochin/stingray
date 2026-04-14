@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import type { Feed, Folder, FeedCreate, NgWord } from "../api/client"
@@ -275,6 +275,64 @@ function NgWordManager({ onError }: { onError: (e: Error) => void }) {
   )
 }
 
+function OpmlButtons({ onError, onImported }: { onError: (e: Error) => void, onImported: () => void }) {
+  const [importResult, setImportResult] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleExport = async () => {
+    try {
+      const blob = await api.exportOpml()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "subscriptions.opml"
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      onError(e as Error)
+    }
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const result = await api.importOpml(file)
+      setImportResult(
+        `Imported: ${result.folders_created} folders, ${result.feeds_created} feeds (${result.feeds_skipped} skipped)`
+      )
+      onImported()
+    } catch (err) {
+      onError(err as Error)
+    }
+    if (fileRef.current) fileRef.current.value = ""
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {importResult && (
+        <span className="text-xs text-text-muted mr-2">{importResult}</span>
+      )}
+      <button
+        onClick={handleExport}
+        className="px-3 py-1.5 rounded text-sm bg-bg-card text-text-muted border border-border hover:text-text transition-colors"
+      >
+        Export OPML
+      </button>
+      <label className="px-3 py-1.5 rounded text-sm bg-bg-card text-text-muted border border-border hover:text-text transition-colors cursor-pointer">
+        Import OPML
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".opml,.xml"
+          onChange={handleImport}
+          className="hidden"
+        />
+      </label>
+    </div>
+  )
+}
+
 export default function Feeds() {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
@@ -374,7 +432,10 @@ export default function Feeds() {
     <div className="flex flex-col h-screen">
       <Header />
       <main className="flex-1 overflow-y-auto px-7 py-5 max-w-4xl">
-        <h2 className="text-lg font-semibold text-text-heading mb-4">Feeds</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-text-heading">Feeds</h2>
+          <OpmlButtons onError={onError} onImported={invalidate} />
+        </div>
 
         <FolderManager folders={sortedFolders} onError={onError} />
         <NgWordManager onError={onError} />

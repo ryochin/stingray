@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import AsyncIterator
 
 import yaml
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
 
@@ -231,6 +231,76 @@ def create_ng_word(body: NgWordCreate) -> NgWordRow:
 @app.delete("/api/ng-words/{ng_word_id}", status_code=204)
 def delete_ng_word(ng_word_id: int) -> None:
   repo.delete_ng_word(ng_word_id)
+
+
+# -- OPML --
+
+
+@app.get("/api/opml/export")
+def opml_export() -> Response:
+  from opml import export_opml
+  folders = repo.list_folders()
+  feeds = repo.list_feeds()
+  xml = export_opml(folders, feeds)
+  return Response(
+    content=xml,
+    media_type="text/xml",
+    headers={"Content-Disposition": 'attachment; filename="subscriptions.opml"'},
+  )
+
+
+@app.post("/api/opml/import")
+async def opml_import(file: UploadFile) -> dict[str, int]:
+  from opml import parse_opml
+  content = (await file.read()).decode("utf-8")
+  imported_folders, uncategorized = parse_opml(content)
+
+  existing_urls = {f.url for f in repo.list_feeds() if f.url}
+  existing_subs = {f.subreddit for f in repo.list_feeds() if f.subreddit}
+  folders_created = 0
+  feeds_created = 0
+  feeds_skipped = 0
+
+  def _add_feed(feed_data, folder_id: int | None) -> None:
+    nonlocal feeds_created, feeds_skipped
+    if feed_data.type == "rss" and feed_data.url in existing_urls:
+      feeds_skipped += 1
+      return
+    if feed_data.type == "reddit" and feed_data.subreddit in existing_subs:
+      feeds_skipped += 1
+      return
+    row = FeedRow(
+      name=feed_data.name,
+      type=feed_data.type,
+      url=feed_data.url,
+      subreddit=feed_data.subreddit,
+      sort=feed_data.sort,
+      lang=feed_data.lang,
+      max_items=feed_data.max_items,
+      summarize=feed_data.summarize,
+      folder_id=folder_id,
+    )
+    repo.add_feed(row)
+    if feed_data.url:
+      existing_urls.add(feed_data.url)
+    if feed_data.subreddit:
+      existing_subs.add(feed_data.subreddit)
+    feeds_created += 1
+
+  for imp_folder in imported_folders:
+    folder_id = repo.create_folder(imp_folder.name)
+    folders_created += 1
+    for feed_data in imp_folder.feeds:
+      _add_feed(feed_data, folder_id)
+
+  for feed_data in uncategorized:
+    _add_feed(feed_data, None)
+
+  return {
+    "folders_created": folders_created,
+    "feeds_created": feeds_created,
+    "feeds_skipped": feeds_skipped,
+  }
 
 
 # -- Refresh --

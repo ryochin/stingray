@@ -169,4 +169,19 @@ export const api = {
 
   deleteNgWord: (id: number) =>
     fetchJson<void>(`/ng-words/${id}`, { method: "DELETE" }),
+
+  exportOpml: async () => {
+    const res = await fetch(`${BASE}/opml/export`)
+    if (!res.ok) throw new Error(`API error: ${res.status}`)
+    return res.blob()
+  },
+
+  importOpml: (file: File) => {
+    const form = new FormData()
+    form.append("file", file)
+    return fetchJson<{ folders_created: number, feeds_created: number, feeds_skipped: number }>(
+      "/opml/import",
+      { method: "POST", body: form },
+    )
+  },
 }
