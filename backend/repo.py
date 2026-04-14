@@ -272,8 +272,8 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
     for a in articles:
       cur = conn.execute(
         """INSERT OR IGNORE INTO articles
-           (url, feed_id, title, title_ja, source, published, content_snippet, summary, lang, fetched_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (url, feed_id, title, title_ja, source, published, content_snippet, summary, content_html, lang, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
           a.url,
           feed_id_map.get(a.source),
@@ -283,6 +283,7 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
           a.published.isoformat() if a.published else None,
           a.content_snippet or None,
           a.summary or None,
+          a.content_html or None,
           a.lang,
           now,
         ),
@@ -346,6 +347,7 @@ def _row_to_article(r: object) -> ArticleRow:
     published=datetime.fromisoformat(r["published"]) if r["published"] else None,  # type: ignore[index]
     content_snippet=r["content_snippet"],  # type: ignore[index]
     summary=r["summary"],  # type: ignore[index]
+    content_html=r["content_html"],  # type: ignore[index]
     lang=r["lang"],  # type: ignore[index]
     fetched_at=datetime.fromisoformat(r["fetched_at"]),  # type: ignore[index]
     read_at=datetime.fromisoformat(r["read_at"]) if r["read_at"] else None,  # type: ignore[index]

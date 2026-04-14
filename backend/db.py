@@ -79,6 +79,10 @@ _MIGRATIONS = [
     created_at TEXT NOT NULL
   );
   """,
+  # Migration 5: add content_html to articles
+  """\
+  ALTER TABLE articles ADD COLUMN content_html TEXT;
+  """,
 ]
 
 _db_path: Path = Path("data/news.db")
@@ -120,6 +124,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
   if "ng_words" not in tables:
     conn.execute(_MIGRATIONS[3])
+    conn.commit()
+
+  art_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
+  if "content_html" not in art_cols:
+    conn.execute(_MIGRATIONS[4])
     conn.commit()
 
 

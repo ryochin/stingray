@@ -1,6 +1,6 @@
 import { useState, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { api } from "../api/client"
+import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, FeedCreate, NgWord } from "../api/client"
 import Header from "../components/Header"
 
@@ -378,7 +378,11 @@ export default function Feeds() {
   const renderFeed = (feed: Feed) => (
     <div key={feed.id}
       className="flex items-center justify-between p-3 bg-bg-secondary rounded-lg border border-border">
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 flex items-start gap-2.5">
+        {faviconUrl(feed) && (
+          <img src={faviconUrl(feed)!} alt="" className="w-4 h-4 shrink-0 mt-1" loading="lazy" />
+        )}
+        <div className="flex-1 min-w-0">
         <div className={`font-medium ${feed.enabled ? "text-text-heading" : "text-text-dim line-through"}`}>
           {feed.name}
         </div>
@@ -386,6 +390,7 @@ export default function Feeds() {
           {feed.type === "reddit" ? `r/${feed.subreddit}` : feed.url}
           {" "}&middot;{" "}{feed.lang}
           {" "}&middot;{" "}max {feed.max_items}
+        </div>
         </div>
       </div>
       <div className="flex items-center gap-2 ml-4 shrink-0">

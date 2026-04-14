@@ -9,12 +9,14 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5",
+    "dompurify": "^3.4.0",
     "react": "^19",
     "react-dom": "^19",
     "react-router-dom": "^7"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4",
+    "@types/dompurify": "^3.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",

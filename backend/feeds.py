@@ -102,11 +102,14 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
       except (ValueError, TypeError):
         pass
 
+    raw_html = ""
     snippet = ""
     if hasattr(entry, "summary"):
-      snippet = _strip_html(entry.summary)
+      raw_html = entry.summary
+      snippet = _strip_html(raw_html)
     elif hasattr(entry, "description"):
-      snippet = _strip_html(entry.description)
+      raw_html = entry.description
+      snippet = _strip_html(raw_html)
 
     link = entry.get("link", "")
     if not link or not link.startswith(("http://", "https://")):
@@ -119,6 +122,7 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
       source=source,
       published=published,
       content_snippet=_truncate(snippet),
+      content_html=raw_html,
       lang=_detect_lang(title, default_lang),
     ))
 
@@ -153,6 +157,7 @@ def _parse_reddit(body: str, feed_cfg: dict) -> list[Article]:
     if post.get("created_utc"):
       published = datetime.fromtimestamp(post["created_utc"], tz=timezone.utc)
 
+    raw_html = post.get("selftext_html") or post.get("selftext", "")
     snippet = _strip_html(post.get("selftext", ""))
     if not snippet:
       snippet = title
@@ -163,6 +168,7 @@ def _parse_reddit(body: str, feed_cfg: dict) -> list[Article]:
       source=feed_cfg["name"],
       published=published,
       content_snippet=_truncate(snippet),
+      content_html=raw_html,
       lang=_detect_lang(title, default_lang),
     ))
 

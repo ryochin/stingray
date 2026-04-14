@@ -1,4 +1,5 @@
-import { forwardRef } from "react"
+import { forwardRef, useMemo } from "react"
+import DOMPurify from "dompurify"
 import type { Article } from "../api/client"
 
 function domain(url: string): string {
@@ -32,6 +33,10 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
     const isRead = article.read_at != null
     const hasTranslation = article.title_ja && article.title_ja !== article.title
     const titleColor = focused ? "text-accent-text" : isRead ? "text-text-muted" : "text-text-heading"
+    const sanitizedHtml = useMemo(
+      () => article.content_html ? DOMPurify.sanitize(article.content_html) : null,
+      [article.content_html],
+    )
 
     return (
       <div
@@ -82,16 +87,17 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
           </div>
         )}
 
-        {article.content_snippet && article.content_snippet !== article.summary && (
-          <div className="mt-1 text-sm text-text-muted line-clamp-3">
-            {article.content_snippet}
-          </div>
-        )}
-
         {article.summary && (
           <div className={`mt-1 ${isRead ? "text-text-muted" : "text-text"}`}>
             {article.summary}
           </div>
+        )}
+
+        {sanitizedHtml && (
+          <div
+            className="mt-2 text-sm text-text-muted article-html prose prose-invert prose-sm max-w-none"
+            dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+          />
         )}
       </div>
     )

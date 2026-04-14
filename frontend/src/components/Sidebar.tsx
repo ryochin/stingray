@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { api } from "../api/client"
+import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, Selection } from "../api/client"
 
 interface Props {
@@ -70,7 +70,12 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
         onClick={() => onSelect({ type: "feed", id: feed.id })}
         className={btnClass(active)}
       >
-        <span className="truncate mr-2">{feed.name}</span>
+        <span className="flex items-center gap-1.5 truncate mr-2">
+          {faviconUrl(feed) && (
+            <img src={faviconUrl(feed)!} alt="" className="w-4 h-4 shrink-0" loading="lazy" />
+          )}
+          <span className="truncate">{feed.name}</span>
+        </span>
         {unread > 0 && <span className={badgeClass(active)}>{unread}</span>}
       </button>
     )
@@ -80,7 +85,7 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
   const uncategorized = feedsByFolder.get(null) ?? []
 
   return (
-    <nav className="w-56 shrink-0 bg-bg-secondary border-r border-border overflow-y-auto py-2">
+    <nav className="w-64 shrink-0 bg-bg-secondary border-r border-border overflow-y-auto py-2">
       {/* All */}
       <button
         onClick={() => onSelect({ type: "all" })}

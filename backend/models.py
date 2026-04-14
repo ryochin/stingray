@@ -12,6 +12,7 @@ class Article:
   lang: str = "en"
   title_ja: str = ""
   summary: str = ""
+  content_html: str = ""
 
   def to_dict(self) -> dict:
     return {
@@ -22,6 +23,7 @@ class Article:
       "content_snippet": self.content_snippet,
       "title_ja": self.title_ja,
       "summary": self.summary,
+      "content_html": self.content_html,
     }
 
   @classmethod
@@ -37,4 +39,5 @@ class Article:
       content_snippet=d.get("content_snippet", ""),
       title_ja=d.get("title_ja", ""),
       summary=d.get("summary", ""),
+      content_html=d.get("content_html", ""),
     )

@@ -64,6 +64,7 @@ class ArticleRow(BaseModel):
   published: datetime | None = None
   content_snippet: str | None = None
   summary: str | None = None
+  content_html: str | None = None
   lang: str | None = None
   fetched_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
   read_at: datetime | None = None

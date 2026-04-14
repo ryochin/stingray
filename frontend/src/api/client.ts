@@ -29,6 +29,7 @@ export interface Article {
   published: string | null
   content_snippet: string | null
   summary: string | null
+  content_html: string | null
   lang: string | null
   read_at: string | null
 }
@@ -58,6 +59,19 @@ export interface NgWord {
   id: number
   pattern: string
   target: string
+}
+
+export function faviconUrl(feed: Feed): string | null {
+  const url = feed.type === "reddit"
+    ? `https://www.reddit.com/r/${feed.subreddit}`
+    : feed.url
+  if (!url) return null
+  try {
+    const domain = new URL(url).hostname
+    return `https://www.google.com/s2/favicons?sz=16&domain=${domain}`
+  } catch {
+    return null
+  }
 }
 
 export type Selection =

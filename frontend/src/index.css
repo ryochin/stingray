@@ -23,3 +23,13 @@ body {
   color: var(--color-text);
   margin: 0;
 }
+
+.article-html a { color: var(--color-link); text-decoration: underline; }
+.article-html a:hover { color: var(--color-link-hover); }
+.article-html img { max-width: 100%; height: auto; border-radius: 4px; margin: 0.5em 0; }
+.article-html p { margin: 0.5em 0; }
+.article-html ul, .article-html ol { padding-left: 1.5em; margin: 0.5em 0; }
+.article-html blockquote { border-left: 2px solid var(--color-border); padding-left: 0.75em; margin: 0.5em 0; color: var(--color-text-muted); }
+.article-html pre, .article-html code { background: var(--color-bg-card); padding: 0.15em 0.3em; border-radius: 3px; font-size: 0.9em; }
+.article-html pre { padding: 0.75em; overflow-x: auto; }
+.article-html pre code { padding: 0; background: none; }

@@ -11,6 +11,7 @@ export default function Articles() {
   const [selection, setSelection] = useState<Selection>({ type: "all" })
   const [showUnreadOnly, setShowUnreadOnly] = useState(true)
   const [focusIndex, setFocusIndex] = useState(-1)
+  const [showHelp, setShowHelp] = useState(false)
   const sessionReadUrls = useRef<Set<string>>(new Set())
   const articleRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const mainRef = useRef<HTMLElement>(null)
@@ -44,12 +45,36 @@ export default function Articles() {
   const { data: allArticles, isLoading, isError } = useQuery({
     queryKey: ["articles"],
     queryFn: () => api.getArticles(),
+    refetchInterval: 60_000,
   })
 
   const { data: feeds } = useQuery({
     queryKey: ["feeds"],
     queryFn: api.getFeeds,
+    refetchInterval: 60_000,
   })
+
+  const { data: folders } = useQuery({
+    queryKey: ["folders"],
+    queryFn: api.getFolders,
+  })
+
+  // Ordered feed list matching sidebar display order
+  const orderedFeedIds = useMemo(() => {
+    if (!feeds || !folders) return []
+    const enabled = feeds.filter((f) => f.enabled)
+    const sortedFolders = folders.slice().sort((a, b) => a.position - b.position || a.id - b.id)
+    const ids: number[] = []
+    for (const folder of sortedFolders) {
+      for (const feed of enabled) {
+        if (feed.folder_id === folder.id) ids.push(feed.id)
+      }
+    }
+    for (const feed of enabled) {
+      if (feed.folder_id == null) ids.push(feed.id)
+    }
+    return ids
+  }, [feeds, folders])
 
   const enabledFeedIds = useMemo(() => {
     if (!feeds) return null
@@ -138,9 +163,26 @@ export default function Articles() {
     })
   }, [queryClient])
 
+  const goToNextFeed = useCallback(() => {
+    if (selection.type !== "feed" || orderedFeedIds.length === 0) return
+    const idx = orderedFeedIds.indexOf(selection.id)
+    if (idx < 0 || idx >= orderedFeedIds.length - 1) return
+    setSelection({ type: "feed", id: orderedFeedIds[idx + 1] })
+  }, [selection, orderedFeedIds])
+
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
+
+    if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
+      e.preventDefault()
+      setShowHelp((v) => !v)
+      return
+    }
+    if (e.key === "Escape") {
+      setShowHelp(false)
+      return
+    }
 
     const len = filtered.length
     if (len === 0 && e.key !== "A") return
@@ -149,7 +191,11 @@ export default function Articles() {
       e.preventDefault()
       setFocusIndex((prev) => {
         markFocusedAsRead(prev)
-        return Math.min(prev + 1, len - 1)
+        if (prev >= len - 1) {
+          goToNextFeed()
+          return prev
+        }
+        return prev + 1
       })
     } else if (e.key === "k") {
       e.preventDefault()
@@ -182,7 +228,7 @@ export default function Articles() {
       e.preventDefault()
       markAllRead.mutate()
     }
-  }, [filtered, markFocusedAsRead, scheduleRead, toggleRead, markAllRead])
+  }, [filtered, markFocusedAsRead, scheduleRead, toggleRead, markAllRead, goToNextFeed])
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown)
@@ -273,6 +319,31 @@ export default function Articles() {
           </div>
         </main>
       </div>
+
+      {showHelp && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowHelp(false)}>
+          <div className="bg-bg-secondary border border-border rounded-lg p-6 max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-text-heading font-semibold mb-4">Keyboard Shortcuts</h3>
+            <table className="text-sm w-full">
+              <tbody>
+                {[
+                  ["j", "Next article"],
+                  ["k", "Previous article"],
+                  ["o / Enter", "Open in new tab"],
+                  ["m", "Toggle read/unread"],
+                  ["Shift+A", "Mark all as read"],
+                  ["?", "Show/hide this help"],
+                ].map(([key, desc]) => (
+                  <tr key={key}>
+                    <td className="pr-4 py-1"><kbd className="px-1.5 py-0.5 rounded bg-bg-card text-accent-text text-xs font-mono">{key}</kbd></td>
+                    <td className="py-1 text-text-muted">{desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
