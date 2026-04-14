@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import html
 import json
+import random
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -208,7 +209,18 @@ FETCHERS = {
 }
 
 
+_CONCURRENCY = 5
+
+async def _delayed_fetch(fetcher, client, feed, delay: float, sem: asyncio.Semaphore):
+  """Fetch a single feed with concurrency limit and random delay."""
+  async with sem:
+    if delay > 0:
+      await asyncio.sleep(delay)
+    return await fetcher(client, feed)
+
+
 async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Article]:  # type: ignore[type-arg]
+  sem = asyncio.Semaphore(_CONCURRENCY)
   async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
     tasks = []
     task_feeds = []
@@ -218,7 +230,8 @@ async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Ar
       if fetcher is None:
         log.warn(f"  Unknown feed type: {feed_type}, skipping {feed.get('name')}")
         continue
-      tasks.append(fetcher(client, feed))
+      delay = random.uniform(0, 2)
+      tasks.append(_delayed_fetch(fetcher, client, feed, delay, sem))
       task_feeds.append(feed)
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
