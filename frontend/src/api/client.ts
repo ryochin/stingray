@@ -9,10 +9,8 @@ export interface Folder {
 export interface Feed {
   id: number
   name: string
-  type: string
   url: string | null
-  subreddit: string | null
-  sort: string | null
+  site_url: string | null
   lang: string
   max_items: number
   summarize: boolean
@@ -44,11 +42,8 @@ export interface RefreshStatus {
 }
 
 export interface FeedCreate {
-  name: string
-  type: string
-  url?: string
-  subreddit?: string
-  sort?: string
+  name?: string
+  url: string
   lang?: string
   max_items?: number
   summarize?: boolean
@@ -62,9 +57,7 @@ export interface NgWord {
 }
 
 export function faviconUrl(feed: Feed): string | null {
-  const url = feed.type === "reddit"
-    ? `https://www.reddit.com/r/${feed.subreddit}`
-    : feed.url
+  const url = feed.site_url ?? feed.url
   if (!url) return null
   try {
     const domain = new URL(url).hostname
@@ -138,14 +131,34 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  fetchFeed: (id: number) =>
+    fetchJson<{ message: string }>(`/feeds/${id}/fetch`, { method: "POST" }),
+
   deleteFeed: (id: number) =>
     fetchJson<void>(`/feeds/${id}`, { method: "DELETE" }),
+
+  deleteAllFeeds: () =>
+    fetchJson<void>("/feeds", { method: "DELETE" }),
 
   toggleFeed: (id: number) =>
     fetchJson<Feed>(`/feeds/${id}/toggle`, { method: "POST" }),
 
   toggleSummarize: (id: number) =>
     fetchJson<Feed>(`/feeds/${id}/summarize`, { method: "POST" }),
+
+  renameFeed: (id: number, name: string) =>
+    fetchJson<Feed>(`/feeds/${id}/name`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+
+  updateFeedLang: (id: number, lang: string) =>
+    fetchJson<Feed>(`/feeds/${id}/lang`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lang }),
+    }),
 
   refresh: () =>
     fetchJson<{ message: string }>("/refresh", { method: "POST" }),

@@ -13,7 +13,6 @@ import db
 import log
 from fetcher import refresh_all
 from schemas import AppConfig
-from seed import seed_feeds_from_config
 
 
 def load_config(path: Path) -> AppConfig:
@@ -41,9 +40,6 @@ async def run(args: argparse.Namespace) -> None:
   db.configure(db_path)
   db.init_schema()
   cache_mod.configure(cache_dir)
-
-  # Seed feeds on first run
-  seed_feeds_from_config(config.feeds)
 
   # Update config with resolved paths
   config.cache_dir = str(cache_dir)

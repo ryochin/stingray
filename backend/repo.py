@@ -177,10 +177,8 @@ def list_feeds(*, enabled: bool | None = None) -> list[FeedRow]:
       FeedRow(
         id=r["id"],
         name=r["name"],
-        type=r["type"],
         url=r["url"],
-        subreddit=r["subreddit"],
-        sort=r["sort"],
+        site_url=r["site_url"],
         lang=r["lang"],
         max_items=r["max_items"],
         summarize=bool(r["summarize"]),
@@ -198,14 +196,12 @@ def add_feed(feed: FeedRow) -> int:
   conn = db.get_conn()
   try:
     cur = conn.execute(
-      """INSERT INTO feeds (name, type, url, subreddit, sort, lang, max_items, summarize, enabled, folder_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+      """INSERT INTO feeds (name, url, site_url, lang, max_items, summarize, enabled, folder_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
       (
         feed.name,
-        feed.type,
         feed.url,
-        feed.subreddit,
-        feed.sort,
+        feed.site_url,
         feed.lang,
         feed.max_items,
         int(feed.summarize),
@@ -229,12 +225,59 @@ def delete_feed(feed_id: int) -> None:
     conn.close()
 
 
+def delete_all_feeds() -> None:
+  conn = db.get_conn()
+  try:
+    conn.execute("DELETE FROM articles")
+    conn.execute("DELETE FROM feeds")
+    conn.execute("DELETE FROM folders")
+    conn.commit()
+  finally:
+    conn.close()
+
+
 def toggle_feed(feed_id: int) -> None:
   conn = db.get_conn()
   try:
     conn.execute(
       "UPDATE feeds SET enabled = NOT enabled WHERE id = ?",
       (feed_id,),
+    )
+    conn.commit()
+  finally:
+    conn.close()
+
+
+def rename_feed(feed_id: int, name: str) -> None:
+  conn = db.get_conn()
+  try:
+    conn.execute(
+      "UPDATE feeds SET name = ? WHERE id = ?",
+      (name, feed_id),
+    )
+    conn.commit()
+  finally:
+    conn.close()
+
+
+def update_feed_site_url(feed_id: int, site_url: str) -> None:
+  conn = db.get_conn()
+  try:
+    conn.execute(
+      "UPDATE feeds SET site_url = ? WHERE id = ?",
+      (site_url, feed_id),
+    )
+    conn.commit()
+  finally:
+    conn.close()
+
+
+def update_feed_lang(feed_id: int, lang: str) -> None:
+  conn = db.get_conn()
+  try:
+    conn.execute(
+      "UPDATE feeds SET lang = ? WHERE id = ?",
+      (lang, feed_id),
     )
     conn.commit()
   finally:

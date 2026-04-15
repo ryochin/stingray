@@ -85,7 +85,7 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
   const uncategorized = feedsByFolder.get(null) ?? []
 
   return (
-    <nav className="w-64 shrink-0 bg-bg-secondary border-r border-border overflow-y-auto py-2">
+    <nav className="w-80 shrink-0 bg-bg-secondary border-r border-border overflow-y-auto py-2">
       {/* All */}
       <button
         onClick={() => onSelect({ type: "all" })}

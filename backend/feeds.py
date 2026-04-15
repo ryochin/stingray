@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import html
-import json
 import random
 import re
 from datetime import datetime, timedelta, timezone
@@ -130,93 +129,20 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
   return articles
 
 
-def _parse_reddit(body: str, feed_cfg: dict) -> list[Article]:
-  max_items = feed_cfg.get("max_items", 15)
-  default_lang = feed_cfg.get("lang", "en")
-  try:
-    data = json.loads(body)
-  except json.JSONDecodeError as e:
-    log.error(f"    Invalid JSON from Reddit: {e}")
-    return []
-  if not isinstance(data, dict):
-    log.error(f"    Unexpected Reddit response type: {type(data)}")
-    return []
-
-  children = (data.get("data") or {}).get("children", [])
-  articles = []
-  for child in children[:max_items]:
-    post = child.get("data")
-    if not post or post.get("stickied"):
-      continue
-
-    permalink = post.get("permalink", "")
-    title = post.get("title", "")
-    if not permalink or not title:
-      continue
-
-    published = None
-    if post.get("created_utc"):
-      published = datetime.fromtimestamp(post["created_utc"], tz=timezone.utc)
-
-    raw_html = post.get("selftext_html") or post.get("selftext", "")
-    snippet = _strip_html(post.get("selftext", ""))
-    if not snippet:
-      snippet = title
-
-    articles.append(Article(
-      title=title,
-      url=f"https://reddit.com{permalink}",
-      source=feed_cfg["name"],
-      published=published,
-      content_snippet=_truncate(snippet),
-      content_html=raw_html,
-      lang=_detect_lang(title, default_lang),
-    ))
-
-  return articles
-
-
-REDDIT_HEADERS = {
-  "User-Agent": "news-aggregator/0.1 (local feed reader)",
-}
-
-
 async def _fetch_rss(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Article], bool]:
   url = feed_cfg["url"]
   body, was_cached = await _fetch_with_cache(client, url)
   return _parse_rss(body, feed_cfg), was_cached
 
 
-_VALID_REDDIT_SORTS = {"hot", "new", "top", "rising"}
-
-
-async def _fetch_reddit(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Article], bool]:
-  subreddit = feed_cfg["subreddit"]
-  if not re.fullmatch(r"[A-Za-z0-9_]{1,20}", subreddit):
-    raise ValueError(f"Invalid subreddit name: {subreddit}")
-  sort = feed_cfg.get("sort", "hot")
-  if sort not in _VALID_REDDIT_SORTS:
-    raise ValueError(f"Invalid Reddit sort: {sort}")
-  max_items = feed_cfg.get("max_items", 15)
-  url = f"https://www.reddit.com/r/{subreddit}/{sort}.json?limit={max_items}"
-  body, was_cached = await _fetch_with_cache(client, url, headers=REDDIT_HEADERS)
-  return _parse_reddit(body, feed_cfg), was_cached
-
-
-FETCHERS = {
-  "rss": _fetch_rss,
-  "reddit": _fetch_reddit,
-}
-
-
 _CONCURRENCY = 5
 
-async def _delayed_fetch(fetcher, client, feed, delay: float, sem: asyncio.Semaphore):
+async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
   """Fetch a single feed with concurrency limit and random delay."""
   async with sem:
     if delay > 0:
       await asyncio.sleep(delay)
-    return await fetcher(client, feed)
+    return await _fetch_rss(client, feed)
 
 
 async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Article]:  # type: ignore[type-arg]
@@ -225,13 +151,8 @@ async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Ar
     tasks = []
     task_feeds = []
     for feed in feeds_cfg:
-      feed_type = feed.get("type", "rss")
-      fetcher = FETCHERS.get(feed_type)
-      if fetcher is None:
-        log.warn(f"  Unknown feed type: {feed_type}, skipping {feed.get('name')}")
-        continue
       delay = random.uniform(0, 2)
-      tasks.append(_delayed_fetch(fetcher, client, feed, delay, sem))
+      tasks.append(_delayed_fetch(client, feed, delay, sem))
       task_feeds.append(feed)
 
     results = await asyncio.gather(*tasks, return_exceptions=True)

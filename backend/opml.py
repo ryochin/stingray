@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from schemas import FeedRow, FolderRow
 
@@ -12,13 +13,11 @@ from schemas import FeedRow, FolderRow
 @dataclass
 class ImportFeed:
   name: str
-  type: str = "rss"
-  url: str | None = None
-  subreddit: str | None = None
-  sort: str | None = None
+  url: str
+  site_url: str | None = None
   lang: str = "en"
   max_items: int = 20
-  summarize: bool = True
+  summarize: bool = False
 
 
 @dataclass
@@ -58,28 +57,35 @@ def export_opml(folders: list[FolderRow], feeds: list[FeedRow]) -> str:
 
 def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
   attrs: dict[str, str] = {"type": "rss", "text": feed.name, "title": feed.name}
-  if feed.type == "reddit":
-    attrs["xmlUrl"] = f"https://www.reddit.com/r/{feed.subreddit}/.rss"
-    attrs["htmlUrl"] = f"https://www.reddit.com/r/{feed.subreddit}"
-    if feed.subreddit:
-      attrs["data-subreddit"] = feed.subreddit
-    if feed.sort:
-      attrs["data-sort"] = feed.sort
-  else:
-    if feed.url:
-      attrs["xmlUrl"] = feed.url
+  if feed.url:
+    attrs["xmlUrl"] = feed.url
+  if feed.site_url:
+    attrs["htmlUrl"] = feed.site_url
   if feed.lang != "en":
     attrs["data-lang"] = feed.lang
   if feed.max_items != 20:
     attrs["data-max-items"] = str(feed.max_items)
-  if not feed.summarize:
-    attrs["data-summarize"] = "0"
+  if feed.summarize:
+    attrs["data-summarize"] = "1"
   ET.SubElement(parent, "outline", **attrs)
 
 
 # -- Import --
 
-_REDDIT_URL_RE = re.compile(r"reddit\.com/r/([^/]+)")
+_JA_KANA = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")
+
+
+def _detect_lang(name: str, url: str | None = None) -> str:
+  if _JA_KANA.search(name):
+    return "ja"
+  if url:
+    try:
+      host = urlparse(url).hostname or ""
+      if host.endswith(".jp"):
+        return "ja"
+    except Exception:
+      pass
+  return "en"
 
 
 def parse_opml(xml_content: str) -> tuple[list[ImportFolder], list[ImportFeed]]:
@@ -116,26 +122,17 @@ def _parse_feed_outline(el: ET.Element) -> ImportFeed | None:
     return None
 
   name = el.get("text") or el.get("title") or xml_url
-
-  subreddit = el.get("data-subreddit")
-  if not subreddit:
-    m = _REDDIT_URL_RE.search(xml_url)
-    if m:
-      subreddit = m.group(1)
-
-  feed_type = "reddit" if subreddit else "rss"
-  lang = el.get("data-lang", "en")
+  site_url = el.get("htmlUrl") or None
+  lang = el.get("data-lang") or _detect_lang(name, xml_url)
   max_items_str = el.get("data-max-items")
   max_items = int(max_items_str) if max_items_str else 20
   summarize_str = el.get("data-summarize")
-  summarize = summarize_str != "0" if summarize_str else True
+  summarize = summarize_str == "1" if summarize_str else False
 
   return ImportFeed(
     name=name,
-    type=feed_type,
-    url=xml_url if feed_type == "rss" else None,
-    subreddit=subreddit,
-    sort=el.get("data-sort"),
+    url=xml_url,
+    site_url=site_url,
     lang=lang,
     max_items=max_items,
     summarize=summarize,

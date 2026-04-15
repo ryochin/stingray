@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+import httpx
 import log
 import repo
 from feeds import fetch_all  # type: ignore[import-untyped]
@@ -108,7 +109,24 @@ async def refresh_all(
       else:
         log.success("  All articles already have translations.")
 
-    # 5. Persist to DB
+    # 5. Backfill site_url for feeds missing it
+    feeds_needing_site_url = [f for f in feeds if not f.site_url and f.url]
+    if feeds_needing_site_url:
+      log.step(f"Backfilling site_url for {len(feeds_needing_site_url)} feeds...")
+      import feedparser as fp
+      for f in feeds_needing_site_url:
+        try:
+          async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(f.url)
+            resp.raise_for_status()
+          parsed = fp.parse(resp.text)
+          site_url = (parsed.feed or {}).get("link", "")
+          if site_url:
+            repo.update_feed_site_url(f.id, site_url.strip())
+        except Exception:
+          pass
+
+    # 6. Persist to DB
     new_count = repo.upsert_articles(articles, feed_id_map)
     result.new_count = new_count
     log.info(f"  {new_count} new articles saved.")

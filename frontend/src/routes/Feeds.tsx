@@ -5,21 +5,14 @@ import type { Feed, Folder, FeedCreate, NgWord } from "../api/client"
 import Header from "../components/Header"
 
 function AddFeedForm({ onAdd, isAdding, folders }: { onAdd: (f: FeedCreate) => void, isAdding: boolean, folders: Folder[] }) {
-  const [type, setType] = useState("rss")
   const [name, setName] = useState("")
   const [url, setUrl] = useState("")
-  const [subreddit, setSubreddit] = useState("")
-  const [lang, setLang] = useState("en")
+  const [lang, setLang] = useState("")
   const [folderId, setFolderId] = useState<number | undefined>(undefined)
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
-    const body: FeedCreate = { name, type, lang }
-    if (type === "reddit") {
-      body.subreddit = subreddit
-    } else {
-      body.url = url
-    }
+    const body: FeedCreate = { name, url, ...(lang ? { lang } : {}) }
     if (folderId != null) body.folder_id = folderId
     onAdd(body)
   }
@@ -27,45 +20,28 @@ function AddFeedForm({ onAdd, isAdding, folders }: { onAdd: (f: FeedCreate) => v
   const reset = () => {
     setName("")
     setUrl("")
-    setSubreddit("")
     setFolderId(undefined)
   }
 
   return (
     <form onSubmit={submit} onReset={reset} className="flex flex-wrap gap-3 items-end p-4 bg-bg-secondary rounded-lg border border-border mb-6">
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-text-muted">Type</label>
-        <select value={type} onChange={(e) => setType(e.target.value)}
-          className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm">
-          <option value="rss">RSS</option>
-          <option value="reddit">Reddit</option>
-        </select>
+      <div className="flex flex-col gap-1 flex-1 min-w-48">
+        <label className="text-xs text-text-muted">URL</label>
+        <input value={url} onChange={(e) => setUrl(e.target.value)} required
+          className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
+          placeholder="https://example.com/feed" />
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs text-text-muted">Name</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} required
+        <input value={name} onChange={(e) => setName(e.target.value)}
           className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm w-40"
-          placeholder="Feed name" />
+          placeholder="Auto-detect" />
       </div>
-      {type === "rss" ? (
-        <div className="flex flex-col gap-1 flex-1 min-w-48">
-          <label className="text-xs text-text-muted">URL</label>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} required
-            className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
-            placeholder="https://example.com/feed" />
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-text-muted">Subreddit</label>
-          <input value={subreddit} onChange={(e) => setSubreddit(e.target.value)} required
-            className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm w-36"
-            placeholder="programming" />
-        </div>
-      )}
       <div className="flex flex-col gap-1">
         <label className="text-xs text-text-muted">Lang</label>
         <select value={lang} onChange={(e) => setLang(e.target.value)}
           className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm">
+          <option value="">Auto</option>
           <option value="en">en</option>
           <option value="ja">ja</option>
         </select>
@@ -80,7 +56,7 @@ function AddFeedForm({ onAdd, isAdding, folders }: { onAdd: (f: FeedCreate) => v
       </div>
       <button type="submit" disabled={isAdding}
         className="px-4 py-1.5 rounded bg-accent text-white text-sm hover:opacity-90 transition-opacity disabled:opacity-40">
-        Add
+        {isAdding ? "Adding..." : "Add"}
       </button>
     </form>
   )
@@ -336,6 +312,8 @@ function OpmlButtons({ onError, onImported }: { onError: (e: Error) => void, onI
 export default function Feeds() {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
+  const [editingFeedId, setEditingFeedId] = useState<number | null>(null)
+  const [editFeedName, setEditFeedName] = useState("")
   const { data: feeds, isLoading, isError } = useQuery({
     queryKey: ["feeds"],
     queryFn: api.getFeeds,
@@ -360,6 +338,19 @@ export default function Feeds() {
   const toggleFeed = useMutation({ mutationFn: api.toggleFeed, onSuccess: invalidate, onError })
   const toggleSummarize = useMutation({ mutationFn: api.toggleSummarize, onSuccess: invalidate, onError })
   const deleteFeed = useMutation({ mutationFn: api.deleteFeed, onSuccess: invalidate, onError })
+  const fetchFeed = useMutation({ mutationFn: api.fetchFeed, onError })
+  const renameFeed = useMutation({
+    mutationFn: ({ feedId, name }: { feedId: number, name: string }) =>
+      api.renameFeed(feedId, name),
+    onSuccess: invalidate,
+    onError,
+  })
+  const updateLang = useMutation({
+    mutationFn: ({ feedId, lang }: { feedId: number, lang: string }) =>
+      api.updateFeedLang(feedId, lang),
+    onSuccess: invalidate,
+    onError,
+  })
   const moveFeed = useMutation({
     mutationFn: ({ feedId, folderId }: { feedId: number, folderId: number | null }) =>
       api.moveFeedToFolder(feedId, folderId),
@@ -383,17 +374,58 @@ export default function Feeds() {
           <img src={faviconUrl(feed)!} alt="" className="w-4 h-4 shrink-0 mt-1" loading="lazy" />
         )}
         <div className="flex-1 min-w-0">
-        <div className={`font-medium ${feed.enabled ? "text-text-heading" : "text-text-dim line-through"}`}>
-          {feed.name}
-        </div>
+        {editingFeedId === feed.id ? (
+          <input
+            value={editFeedName}
+            onChange={(e) => setEditFeedName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && editFeedName.trim()) {
+                renameFeed.mutate({ feedId: feed.id, name: editFeedName.trim() })
+                setEditingFeedId(null)
+              }
+              if (e.key === "Escape") setEditingFeedId(null)
+            }}
+            onBlur={() => {
+              if (editFeedName.trim() && editFeedName.trim() !== feed.name) {
+                renameFeed.mutate({ feedId: feed.id, name: editFeedName.trim() })
+              }
+              setEditingFeedId(null)
+            }}
+            autoFocus
+            className="bg-bg-card text-text border border-border rounded px-2 py-0.5 text-sm font-medium w-full"
+          />
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <span className={`font-medium ${feed.enabled ? "text-text-heading" : "text-text-dim line-through"}`}>
+              {feed.name}
+            </span>
+            <button
+              onClick={() => { setEditingFeedId(feed.id); setEditFeedName(feed.name) }}
+              className="text-text-dim hover:text-text transition-colors text-xs"
+              title="Rename"
+            >
+              ✎
+            </button>
+          </div>
+        )}
         <div className="text-xs text-text-muted mt-0.5">
-          {feed.type === "reddit" ? `r/${feed.subreddit}` : feed.url}
-          {" "}&middot;{" "}{feed.lang}
+          <a href={feed.site_url ?? feed.url ?? ""} target="_blank" rel="noopener noreferrer" className="text-link hover:text-link-hover hover:underline">{feed.site_url ?? feed.url}</a>
+          {feed.site_url && feed.url && (
+            <a href={feed.url} target="_blank" rel="noopener noreferrer" className="text-text-dim hover:text-link-hover ml-1" title={feed.url}>⊕</a>
+          )}
           {" "}&middot;{" "}max {feed.max_items}
         </div>
         </div>
       </div>
       <div className="flex items-center gap-2 ml-4 shrink-0">
+        <select
+          value={feed.lang}
+          onChange={(e) => updateLang.mutate({ feedId: feed.id, lang: e.target.value })}
+          className="bg-bg-card text-text-muted border border-border rounded px-1.5 py-1 text-xs"
+        >
+          <option value="en">en</option>
+          <option value="ja">ja</option>
+        </select>
         <select
           value={feed.folder_id ?? ""}
           onChange={(e) => moveFeed.mutate({
@@ -405,6 +437,11 @@ export default function Feeds() {
           <option value="">--</option>
           {sortedFolders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select>
+        <button onClick={() => fetchFeed.mutate(feed.id)}
+          title="Fetch now"
+          className="px-2 py-1 rounded text-xs bg-bg-card text-text-muted hover:text-text transition-colors">
+          ↻
+        </button>
         <button onClick={() => toggleSummarize.mutate(feed.id)}
           className={`px-2 py-1 rounded text-xs transition-colors ${
             feed.summarize
@@ -436,10 +473,22 @@ export default function Feeds() {
   return (
     <div className="flex flex-col h-screen">
       <Header />
-      <main className="flex-1 overflow-y-auto px-7 py-5 max-w-4xl">
+      <main className="flex-1 overflow-y-auto px-7 py-5 max-w-6xl">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-text-heading">Feeds</h2>
-          <OpmlButtons onError={onError} onImported={invalidate} />
+          <div className="flex items-center gap-2">
+            <OpmlButtons onError={onError} onImported={invalidate} />
+            <button
+              onClick={() => {
+                if (confirm("Delete ALL feeds, folders, and articles? This cannot be undone.")) {
+                  api.deleteAllFeeds().then(invalidate).catch(onError)
+                }
+              }}
+              className="px-3 py-1.5 rounded text-sm bg-bg-card text-red-400 border border-border hover:bg-red-900 hover:text-red-200 transition-colors"
+            >
+              Delete All
+            </button>
+          </div>
         </div>
 
         <FolderManager folders={sortedFolders} onError={onError} />

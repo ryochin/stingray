@@ -27,10 +27,8 @@ class FolderRow(BaseModel):
 class FeedRow(BaseModel):
   id: int = 0
   name: str
-  type: str = "rss"
   url: str | None = None
-  subreddit: str | None = None
-  sort: str | None = None
+  site_url: str | None = None
   lang: str = "en"
   max_items: int = 20
   summarize: bool = True
@@ -40,19 +38,12 @@ class FeedRow(BaseModel):
 
   def to_feed_cfg(self) -> dict[str, object]:
     """Convert to the dict format expected by feeds.fetch_all()."""
-    cfg: dict[str, object] = {
+    return {
       "name": self.name,
-      "type": self.type,
+      "url": self.url,
       "lang": self.lang,
       "max_items": self.max_items,
     }
-    if self.type == "reddit":
-      cfg["subreddit"] = self.subreddit
-      if self.sort:
-        cfg["sort"] = self.sort
-    else:
-      cfg["url"] = self.url
-    return cfg
 
 
 class ArticleRow(BaseModel):
@@ -104,4 +95,3 @@ class AppConfig(BaseModel):
   cache_dir: str = "cache"
   article_cache_max_age_days: int = 30
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)
-  feeds: list[dict[str, str | int | float | bool | None]] = Field(default_factory=lambda: [])

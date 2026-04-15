@@ -306,15 +306,22 @@ export default function Articles() {
               {showUnreadOnly ? "No unread articles" : "No articles"}
             </div>
           ) : (
-            filtered.map((article, i) => (
-              <ArticleCard
-                key={article.url}
-                article={article}
-                focused={i === focusIndex}
-                ref={(el) => setRef(i, el)}
-                onClick={() => handleCardClick(i)}
-              />
-            ))
+            <>
+              {filtered.map((article, i) => (
+                <ArticleCard
+                  key={article.url}
+                  article={article}
+                  focused={i === focusIndex}
+                  ref={(el) => setRef(i, el)}
+                  onClick={() => handleCardClick(i)}
+                />
+              ))}
+              <div className="flex items-center gap-3 py-6 text-text-dim text-sm">
+                <div className="flex-1 border-t border-border" />
+                <span>All caught up</span>
+                <div className="flex-1 border-t border-border" />
+              </div>
+            </>
           )}
           </div>
         </main>

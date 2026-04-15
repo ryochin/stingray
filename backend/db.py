@@ -9,10 +9,8 @@ _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS feeds (
   id         INTEGER PRIMARY KEY,
   name       TEXT NOT NULL,
-  type       TEXT NOT NULL CHECK (type IN ('rss','reddit')),
   url        TEXT,
-  subreddit  TEXT,
-  sort       TEXT,
+  site_url   TEXT,
   lang       TEXT NOT NULL DEFAULT 'en',
   max_items  INTEGER NOT NULL DEFAULT 20,
   summarize  INTEGER NOT NULL DEFAULT 1,
@@ -83,6 +81,10 @@ _MIGRATIONS = [
   """\
   ALTER TABLE articles ADD COLUMN content_html TEXT;
   """,
+  # Migration 6: add site_url to feeds
+  """\
+  ALTER TABLE feeds ADD COLUMN site_url TEXT;
+  """,
 ]
 
 _db_path: Path = Path("data/news.db")
@@ -129,6 +131,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
   art_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
   if "content_html" not in art_cols:
     conn.execute(_MIGRATIONS[4])
+    conn.commit()
+
+  feed_cols = {r[1] for r in conn.execute("PRAGMA table_info(feeds)").fetchall()}
+  if "site_url" not in feed_cols:
+    conn.execute(_MIGRATIONS[5])
     conn.commit()
 
 

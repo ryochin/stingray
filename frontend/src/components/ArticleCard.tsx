@@ -52,7 +52,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       >
         {hasTranslation ? (
           <>
-            <div className={`${titleColor} font-medium text-lg leading-snug`}>
+            <div className={`${titleColor} font-medium text-2xl leading-snug`}>
               {article.title_ja}
             </div>
             <div className="mt-0.5">
@@ -68,7 +68,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
             </div>
           </>
         ) : (
-          <div className={`${titleColor} font-medium text-lg leading-snug`}>
+          <div className={`${titleColor} font-medium text-2xl leading-snug`}>
             <a
               href={article.url}
               target="_blank"

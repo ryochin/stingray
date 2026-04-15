@@ -1,40 +1,13 @@
-"""First-run seeding and legacy data migration."""
+"""Legacy data migration."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
 import log
-import repo
 from models import Article
-from schemas import FeedRow
-
-
-def seed_feeds_from_config(feeds_cfg: Sequence[Mapping[str, object]]) -> None:
-  """Insert feeds from config.yml if the feeds table is empty."""
-  existing = repo.list_feeds()
-  if existing:
-    return
-
-  log.step("Seeding feeds from config.yml...")
-  for cfg in feeds_cfg:
-    feed = FeedRow(
-      name=str(cfg.get("name", "")),
-      type=str(cfg.get("type", "rss")),
-      url=str(cfg["url"]) if "url" in cfg else None,
-      subreddit=str(cfg["subreddit"]) if "subreddit" in cfg else None,
-      sort=str(cfg["sort"]) if "sort" in cfg else None,
-      lang=str(cfg.get("lang", "en")),
-      max_items=int(cfg.get("max_items", 20)),  # type: ignore[arg-type]
-      summarize=True,
-      enabled=True,
-    )
-    fid = repo.add_feed(feed)
-    log.info(f"  [{fid}] {feed.name} ({feed.type})")
-  log.success(f"  Seeded {len(feeds_cfg)} feeds.")
 
 
 def enrich_from_legacy_cache(
