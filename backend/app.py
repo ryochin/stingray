@@ -26,6 +26,16 @@ from schemas import AppConfig, ArticleRow, FeedRow, FolderRow, NgWordRow, Status
 # -- Globals for background refresh --
 _refresh_lock = asyncio.Lock()
 _refresh_task: asyncio.Task[None] | None = None
+_summarize_lock = asyncio.Lock()
+
+
+def _log_task_exception(task: asyncio.Task[object]) -> None:
+  if task.cancelled():
+    return
+  exc = task.exception()
+  if exc is not None:
+    import log as _log
+    _log.warn(f"  Background task failed: {exc}")
 
 
 def _load_config() -> AppConfig:
@@ -45,12 +55,16 @@ async def _background_summarizer(config: AppConfig) -> None:
   import log as _log
   await asyncio.sleep(10)  # initial delay
   while True:
-    try:
-      count = await summarize_pending(config)
-      if count > 0:
-        _log.info(f"  Background summarizer processed {count} articles.")
-    except Exception as e:
-      _log.warn(f"  Background summarizer error: {e}")
+    if _summarize_lock.locked():
+      _log.info("  Background summarizer skipped (refresh in progress).")
+    else:
+      async with _summarize_lock:
+        try:
+          count = await summarize_pending(config)
+          if count > 0:
+            _log.info(f"  Background summarizer processed {count} articles.")
+        except Exception as e:
+          _log.warn(f"  Background summarizer error: {e}")
     await asyncio.sleep(60)
 
 
@@ -260,13 +274,13 @@ async def create_feed(body: FeedCreate) -> FeedRow:
   created = next((f for f in feeds if f.id == feed_id), None)
   if created is None:
     raise HTTPException(404, "Feed not found after creation")
-  asyncio.create_task(_fetch_single_feed(created))
+  asyncio.create_task(_fetch_single_feed(created)).add_done_callback(_log_task_exception)
   return created
 
 
 @app.delete("/api/feeds", status_code=204)
-def delete_all_feeds() -> None:
-  repo.delete_all_feeds()
+def delete_all_data() -> None:
+  repo.delete_all_data()
 
 
 @app.post("/api/feeds/{feed_id}/fetch", status_code=202)
@@ -274,7 +288,7 @@ async def fetch_feed(feed_id: int) -> dict[str, str]:
   feed = next((f for f in repo.list_feeds() if f.id == feed_id), None)
   if feed is None:
     raise HTTPException(404, "Feed not found")
-  asyncio.create_task(_fetch_single_feed(feed))
+  asyncio.create_task(_fetch_single_feed(feed)).add_done_callback(_log_task_exception)
   return {"message": "Fetch started"}
 
 
@@ -382,9 +396,15 @@ def opml_export() -> Response:
 
 @app.post("/api/opml/import")
 async def opml_import(file: UploadFile) -> dict[str, int]:
+  import xml.etree.ElementTree as _ET
   from opml import parse_opml
-  content = (await file.read()).decode("utf-8")
-  imported_folders, uncategorized = parse_opml(content)
+  try:
+    content = (await file.read()).decode("utf-8")
+    imported_folders, uncategorized = parse_opml(content)
+  except UnicodeDecodeError as e:
+    raise HTTPException(400, f"Invalid file encoding: {e}")
+  except _ET.ParseError as e:
+    raise HTTPException(400, f"Invalid OPML XML: {e}")
 
   existing_urls = {f.url for f in repo.list_feeds() if f.url}
   folders_created = 0
@@ -435,7 +455,8 @@ async def opml_import(file: UploadFile) -> dict[str, int]:
 async def _run_refresh(config: AppConfig) -> None:
   global _refresh_task
   try:
-    await refresh_all(config, source="web")
+    async with _summarize_lock:
+      await refresh_all(config, source="web")
   finally:
     _refresh_task = None
 
@@ -480,7 +501,7 @@ if _frontend_dist.is_dir():
 
   @app.get("/{path:path}")
   async def spa_fallback(path: str) -> FileResponse:
-    file = _frontend_dist / path
-    if path and file.is_file():
+    file = (_frontend_dist / path).resolve()
+    if path and file.is_file() and str(file).startswith(str(_frontend_dist.resolve())):
       return FileResponse(str(file))
     return FileResponse(str(_frontend_dist / "index.html"))

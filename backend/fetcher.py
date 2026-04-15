@@ -81,10 +81,11 @@ async def refresh_all(
 
     # 4. Summarize (respecting per-feed summarize setting)
     if not no_summary:
-      # Short ja snippets: reuse as summary
+      # Short ja snippets: reuse as summary (only for feeds with summarize enabled)
       for a in articles:
         if (
-          a.lang == "ja"
+          summarize_map.get(a.source, False)
+          and a.lang == "ja"
           and not a.summary
           and a.content_snippet
           and len(a.content_snippet) < SHORT_SNIPPET_CHARS
@@ -135,7 +136,7 @@ async def refresh_all(
     result.new_count = new_count
     log.info(f"  {new_count} new articles saved.")
 
-    # 6. Prune old articles
+    # 7. Prune old articles
     pruned = repo.prune_articles(config.article_cache_max_age_days)
     if pruned:
       log.info(f"  Pruned {pruned} old articles.")

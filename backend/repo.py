@@ -76,7 +76,9 @@ def _article_matches_ng(article: ArticleRow, ng_words: list[NgWordRow]) -> bool:
         continue
       if is_regex:
         try:
-          if re.search(pat, text, re.IGNORECASE):
+          if len(pat) > 200:
+            continue
+          if re.search(pat, text[:10_000], re.IGNORECASE):
             return True
         except re.error:
           continue
@@ -228,7 +230,8 @@ def delete_feed(feed_id: int) -> None:
     conn.close()
 
 
-def delete_all_feeds() -> None:
+def delete_all_data() -> None:
+  """Delete all feeds, articles, and folders."""
   conn = db.get_conn()
   try:
     conn.execute("DELETE FROM articles")
@@ -432,16 +435,17 @@ def list_articles(
     if unread:
       clauses.append("read_at IS NULL")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    params.append(limit)
+    ng_words = list_ng_words()
+    fetch_limit = limit * 2 if ng_words else limit
+    params.append(fetch_limit)
     rows = conn.execute(
       f"SELECT * FROM articles {where} ORDER BY published ASC LIMIT ?",
       params,
     ).fetchall()
     articles = [_row_to_article(r) for r in rows]
-    ng_words = list_ng_words()
     if ng_words:
       articles = [a for a in articles if not _article_matches_ng(a, ng_words)]
-    return articles
+    return articles[:limit]
   finally:
     conn.close()
 

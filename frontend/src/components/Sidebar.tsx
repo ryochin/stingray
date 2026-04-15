@@ -89,16 +89,17 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
 
   return (
     <nav className="w-80 shrink-0 bg-bg-secondary border-r border-border overflow-y-auto py-2">
-      {/* All */}
+      {/* All Feeds */}
       <button
         onClick={() => onSelect({ type: "all" })}
         className={btnClass(isActive({ type: "all" }))}
       >
-        <span>All</span>
+        <span>All Feeds</span>
         {totalUnread > 0 && (
           <span className={badgeClass(isActive({ type: "all" }))}>{totalUnread}</span>
         )}
       </button>
+      <div className="border-b border-border mx-3 my-1" />
 
       {/* Folders */}
       {sortedFolders.map((folder: Folder) => {
