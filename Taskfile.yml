@@ -11,10 +11,10 @@ tasks:
   serve:api:
     desc: "Start FastAPI dev server with hot reload"
     cmds:
-      - PYTHONPATH=backend uv run uvicorn app:app --host 127.0.0.1 --port 10180 --reload
+      - PYTHONPATH=backend uv run uvicorn app:app --host 127.0.0.1 --port 20080 --reload
 
   serve:web:
-    desc: "Start Vite dev server (proxies /api to :10180)"
+    desc: "Start Vite dev server (proxies /api to :20080)"
     dir: frontend
     cmds:
       - npm run dev

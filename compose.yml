@@ -3,14 +3,14 @@ services:
     build: .
     image: news-reader:latest
     container_name: news-reader-web
-    command: ["/app/.venv/bin/uvicorn", "app:app", "--host", "0.0.0.0", "--port", "10180"]
+    command: ["/app/.venv/bin/uvicorn", "app:app", "--host", "0.0.0.0", "--port", "20080"]
     working_dir: /app
     environment:
       TZ: Asia/Tokyo
       PYTHONPATH: /app/backend
       OLLAMA_BASE_URL: http://host.docker.internal:11434
     ports:
-      - "10180:10180"
+      - "20080:20080"
     volumes:
       - ./config.yml:/app/config.yml:ro
       - ./data:/app/data
