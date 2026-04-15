@@ -75,6 +75,9 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
             <img src={faviconUrl(feed)!} alt="" className="w-4 h-4 shrink-0" loading="lazy" />
           )}
           <span className="truncate">{feed.name}</span>
+          {feed.consecutive_failures >= 3 && (
+            <span className="text-yellow-400 text-xs shrink-0" title="Feed has consecutive fetch failures">!!!</span>
+          )}
         </span>
         {unread > 0 && <span className={badgeClass(active)}>{unread}</span>}
       </button>

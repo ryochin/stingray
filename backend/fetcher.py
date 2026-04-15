@@ -62,7 +62,11 @@ async def refresh_all(
 
     # 2. Fetch articles
     log.step("Fetching feeds...")
-    articles = await fetch_all(feeds_cfg, max_age_hours=config.max_age_hours)
+    articles, feed_results = await fetch_all(
+      feeds_cfg, max_age_hours=config.max_age_hours, max_items=config.max_items_per_feed,
+    )
+    for feed_id, success, error_msg in feed_results:
+      repo.update_feed_fetch_status(feed_id, success=success, error=error_msg)
     log.info(f"  {len(articles)} articles total.")
     result.total_articles = len(articles)
 
@@ -142,3 +146,49 @@ async def refresh_all(
   except Exception as e:
     repo.finish_refresh_job(job_id, "failed", 0, str(e))
     raise
+
+
+async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
+  """Summarize articles that are pending (feed.summarize=True but no summary yet).
+
+  Returns the number of articles processed.
+  """
+  pending = repo.list_pending_summaries(limit=batch_size)
+  if not pending:
+    return 0
+
+  # Convert ArticleRow to Article for summarizer
+  articles = [
+    Article(
+      title=row.title,
+      url=row.url,
+      source=row.source,
+      published=row.published,
+      content_snippet=row.content_snippet or "",
+      lang=row.lang or "en",
+      title_ja=row.title_ja or "",
+      summary=row.summary or "",
+      content_html=row.content_html or "",
+    )
+    for row in pending
+  ]
+
+  # Short ja snippets: reuse as summary
+  for a in articles:
+    if a.lang == "ja" and not a.summary and a.content_snippet and len(a.content_snippet) < SHORT_SNIPPET_CHARS:
+      a.summary = a.content_snippet
+
+  need_llm = [a for a in articles if _should_summarize(a)]
+  if need_llm:
+    model = config.ollama.model
+    base_url = os.environ.get("OLLAMA_BASE_URL") or config.ollama.base_url
+    timeout = config.ollama.timeout
+    log.step(f"Background summarizing {len(need_llm)} articles with {model}...")
+    await summarize_all(need_llm, model=model, base_url=base_url, timeout=timeout)
+
+  # Persist results
+  for a in articles:
+    if a.title_ja or a.summary:
+      repo.update_article_summary(a.url, a.title_ja or None, a.summary or None)
+
+  return len(articles)

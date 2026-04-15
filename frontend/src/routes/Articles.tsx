@@ -8,11 +8,22 @@ import ArticleCard from "../components/ArticleCard"
 
 export default function Articles() {
   const queryClient = useQueryClient()
-  const [selection, setSelection] = useState<Selection>({ type: "all" })
+  const [selection, setSelection] = useState<Selection>(() => {
+    try {
+      const saved = sessionStorage.getItem("feed-selection")
+      if (saved) return JSON.parse(saved) as Selection
+    } catch {}
+    return { type: "all" }
+  })
+  const updateSelection = useCallback((sel: Selection) => {
+    setSelection(sel)
+    sessionStorage.setItem("feed-selection", JSON.stringify(sel))
+  }, [])
   const [showUnreadOnly, setShowUnreadOnly] = useState(true)
   const [focusIndex, setFocusIndex] = useState(-1)
   const [showHelp, setShowHelp] = useState(false)
   const sessionReadUrls = useRef<Set<string>>(new Set())
+  const [localReadCount, setLocalReadCount] = useState(0)
   const articleRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const mainRef = useRef<HTMLElement>(null)
 
@@ -30,8 +41,11 @@ export default function Articles() {
   }, [queryClient])
 
   const scheduleRead = useCallback((url: string) => {
-    pendingReadUrls.current.add(url)
-    sessionReadUrls.current.add(url)
+    if (!sessionReadUrls.current.has(url)) {
+      pendingReadUrls.current.add(url)
+      sessionReadUrls.current.add(url)
+      setLocalReadCount((c) => c + 1)
+    }
     if (flushTimer.current) clearTimeout(flushTimer.current)
     flushTimer.current = setTimeout(flushReads, 500)
   }, [flushReads])
@@ -81,6 +95,11 @@ export default function Articles() {
     return new Set(feeds.filter((f) => f.enabled).map((f) => f.id))
   }, [feeds])
 
+  const summarizeFeedIds = useMemo(() => {
+    if (!feeds) return new Set<number>()
+    return new Set(feeds.filter((f) => f.summarize).map((f) => f.id))
+  }, [feeds])
+
   const enabledArticles = useMemo(() => {
     if (!enabledFeedIds) return allArticles ?? []
     return (allArticles ?? []).filter(
@@ -90,14 +109,15 @@ export default function Articles() {
 
   // Unread counts (always from full list, not filtered)
   const unreadCounts = useMemo(() => {
+    void localReadCount // trigger recomputation on local reads
     const map = new Map<number, number>()
     for (const a of enabledArticles) {
-      if (a.feed_id != null && a.read_at == null) {
+      if (a.feed_id != null && a.read_at == null && !sessionReadUrls.current.has(a.url)) {
         map.set(a.feed_id, (map.get(a.feed_id) ?? 0) + 1)
       }
     }
     return map
-  }, [enabledArticles])
+  }, [enabledArticles, localReadCount])
 
   const folderFeedIds = useMemo(() => {
     if (selection.type !== "folder" || !feeds) return null
@@ -118,6 +138,16 @@ export default function Articles() {
     }
     return list
   }, [enabledArticles, selection, folderFeedIds, showUnreadOnly])
+
+  // Validate restored selection against current data
+  useEffect(() => {
+    if (!feeds || !folders) return
+    if (selection.type === "feed" && !feeds.some((f) => f.id === selection.id)) {
+      updateSelection({ type: "all" })
+    } else if (selection.type === "folder" && !folders.some((f) => f.id === selection.id)) {
+      updateSelection({ type: "all" })
+    }
+  }, [feeds, folders])
 
   // Clear session reads and reset focus when selection changes
   useEffect(() => {
@@ -167,8 +197,8 @@ export default function Articles() {
     if (selection.type !== "feed" || orderedFeedIds.length === 0) return
     const idx = orderedFeedIds.indexOf(selection.id)
     if (idx < 0 || idx >= orderedFeedIds.length - 1) return
-    setSelection({ type: "feed", id: orderedFeedIds[idx + 1] })
-  }, [selection, orderedFeedIds])
+    updateSelection({ type: "feed", id: orderedFeedIds[idx + 1] })
+  }, [selection, orderedFeedIds, updateSelection])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName
@@ -258,7 +288,7 @@ export default function Articles() {
       <div className="flex flex-1 min-h-0">
         <Sidebar
           selection={selection}
-          onSelect={setSelection}
+          onSelect={updateSelection}
           unreadCounts={unreadCounts}
         />
         <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 flex flex-col items-center" style={{ scrollBehavior: "smooth" }}>
@@ -312,6 +342,7 @@ export default function Articles() {
                   key={article.url}
                   article={article}
                   focused={i === focusIndex}
+                  pendingSummary={!article.summary && article.feed_id != null && summarizeFeedIds.has(article.feed_id)}
                   ref={(el) => setRef(i, el)}
                   onClick={() => handleCardClick(i)}
                 />
@@ -340,6 +371,8 @@ export default function Articles() {
                   ["m", "Toggle read/unread"],
                   ["Shift+A", "Mark all as read"],
                   ["?", "Show/hide this help"],
+                  ["a", "Go to Articles"],
+                  ["f", "Go to Feeds"],
                 ].map(([key, desc]) => (
                   <tr key={key}>
                     <td className="pr-4 py-1"><kbd className="px-1.5 py-0.5 rounded bg-bg-card text-accent-text text-xs font-mono">{key}</kbd></td>

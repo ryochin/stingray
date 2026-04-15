@@ -16,7 +16,6 @@ class ImportFeed:
   url: str
   site_url: str | None = None
   lang: str = "en"
-  max_items: int = 20
   summarize: bool = False
 
 
@@ -63,8 +62,6 @@ def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
     attrs["htmlUrl"] = feed.site_url
   if feed.lang != "en":
     attrs["data-lang"] = feed.lang
-  if feed.max_items != 20:
-    attrs["data-max-items"] = str(feed.max_items)
   if feed.summarize:
     attrs["data-summarize"] = "1"
   ET.SubElement(parent, "outline", **attrs)
@@ -124,8 +121,6 @@ def _parse_feed_outline(el: ET.Element) -> ImportFeed | None:
   name = el.get("text") or el.get("title") or xml_url
   site_url = el.get("htmlUrl") or None
   lang = el.get("data-lang") or _detect_lang(name, xml_url)
-  max_items_str = el.get("data-max-items")
-  max_items = int(max_items_str) if max_items_str else 20
   summarize_str = el.get("data-summarize")
   summarize = summarize_str == "1" if summarize_str else False
 
@@ -134,6 +129,5 @@ def _parse_feed_outline(el: ET.Element) -> ImportFeed | None:
     url=xml_url,
     site_url=site_url,
     lang=lang,
-    max_items=max_items,
     summarize=summarize,
   )

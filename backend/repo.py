@@ -184,6 +184,9 @@ def list_feeds(*, enabled: bool | None = None) -> list[FeedRow]:
         summarize=bool(r["summarize"]),
         enabled=bool(r["enabled"]),
         folder_id=r["folder_id"],
+        last_fetched_at=datetime.fromisoformat(r["last_fetched_at"]) if r["last_fetched_at"] else None,
+        consecutive_failures=r["consecutive_failures"],
+        last_error=r["last_error"],
         created_at=datetime.fromisoformat(r["created_at"]),
       )
       for r in rows
@@ -284,6 +287,58 @@ def update_feed_lang(feed_id: int, lang: str) -> None:
     conn.close()
 
 
+def get_feed_stats() -> dict[int, dict]:
+  """Return per-feed article statistics."""
+  conn = db.get_conn()
+  try:
+    rows = conn.execute(
+      """SELECT
+           feed_id,
+           COUNT(*) AS article_count,
+           SUM(CASE WHEN read_at IS NULL THEN 1 ELSE 0 END) AS unread_count,
+           MAX(published) AS latest_published,
+           MIN(published) AS oldest_published
+         FROM articles
+         WHERE feed_id IS NOT NULL
+         GROUP BY feed_id""",
+    ).fetchall()
+    return {
+      r["feed_id"]: {
+        "article_count": r["article_count"],
+        "unread_count": r["unread_count"],
+        "latest_published": r["latest_published"],
+        "oldest_published": r["oldest_published"],
+      }
+      for r in rows
+    }
+  finally:
+    conn.close()
+
+
+def update_feed_fetch_status(
+  feed_id: int,
+  *,
+  success: bool,
+  error: str | None = None,
+) -> None:
+  conn = db.get_conn()
+  try:
+    now = _now_iso()
+    if success:
+      conn.execute(
+        "UPDATE feeds SET last_fetched_at = ?, consecutive_failures = 0, last_error = NULL WHERE id = ?",
+        (now, feed_id),
+      )
+    else:
+      conn.execute(
+        "UPDATE feeds SET consecutive_failures = consecutive_failures + 1, last_error = ? WHERE id = ?",
+        (error, feed_id),
+      )
+    conn.commit()
+  finally:
+    conn.close()
+
+
 def toggle_summarize(feed_id: int) -> None:
   conn = db.get_conn()
   try:
@@ -334,14 +389,26 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
       if cur.rowcount > 0:
         new_count += 1
       else:
-        # Update title_ja and summary for existing articles if they were enriched
-        if a.title_ja or a.summary:
+        # Update existing articles: content_html always, title_ja/summary only if missing
+        updates = []
+        params: list[object] = []
+        if a.content_html:
+          updates.append("content_html = ?")
+          params.append(a.content_html)
+        if a.content_snippet:
+          updates.append("content_snippet = COALESCE(?, content_snippet)")
+          params.append(a.content_snippet)
+        if a.title_ja:
+          updates.append("title_ja = COALESCE(?, title_ja)")
+          params.append(a.title_ja)
+        if a.summary:
+          updates.append("summary = COALESCE(?, summary)")
+          params.append(a.summary)
+        if updates:
+          params.append(a.url)
           conn.execute(
-            """UPDATE articles SET
-                 title_ja = COALESCE(?, title_ja),
-                 summary = COALESCE(?, summary)
-               WHERE url = ? AND (title_ja IS NULL AND summary IS NULL)""",
-            (a.title_ja or None, a.summary or None, a.url),
+            f"UPDATE articles SET {', '.join(updates)} WHERE url = ?",
+            params,
           )
     conn.commit()
     return new_count
@@ -395,6 +462,36 @@ def _row_to_article(r: object) -> ArticleRow:
     fetched_at=datetime.fromisoformat(r["fetched_at"]),  # type: ignore[index]
     read_at=datetime.fromisoformat(r["read_at"]) if r["read_at"] else None,  # type: ignore[index]
   )
+
+
+def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:
+  """Find articles needing summarization (feed.summarize=1, missing summary)."""
+  conn = db.get_conn()
+  try:
+    rows = conn.execute(
+      """SELECT a.* FROM articles a
+         JOIN feeds f ON a.feed_id = f.id
+         WHERE f.summarize = 1
+           AND (a.summary IS NULL OR (a.lang != 'ja' AND a.title_ja IS NULL))
+         ORDER BY a.published ASC
+         LIMIT ?""",
+      (limit,),
+    ).fetchall()
+    return [_row_to_article(r) for r in rows]
+  finally:
+    conn.close()
+
+
+def update_article_summary(url: str, title_ja: str | None, summary: str | None) -> None:
+  conn = db.get_conn()
+  try:
+    conn.execute(
+      "UPDATE articles SET title_ja = COALESCE(?, title_ja), summary = COALESCE(?, summary) WHERE url = ?",
+      (title_ja, summary, url),
+    )
+    conn.commit()
+  finally:
+    conn.close()
 
 
 def mark_read(urls: list[str]) -> None:

@@ -1,7 +1,7 @@
 import { useState, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api, faviconUrl } from "../api/client"
-import type { Feed, Folder, FeedCreate, NgWord } from "../api/client"
+import type { Feed, Folder, FeedCreate, FeedStats } from "../api/client"
 import Header from "../components/Header"
 
 function AddFeedForm({ onAdd, isAdding, folders }: { onAdd: (f: FeedCreate) => void, isAdding: boolean, folders: Folder[] }) {
@@ -166,91 +166,6 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
   )
 }
 
-function NgWordManager({ onError }: { onError: (e: Error) => void }) {
-  const queryClient = useQueryClient()
-  const [pattern, setPattern] = useState("")
-  const [target, setTarget] = useState("title")
-
-  const { data: ngWords } = useQuery({
-    queryKey: ["ng-words"],
-    queryFn: api.getNgWords,
-  })
-
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["ng-words"] })
-    queryClient.invalidateQueries({ queryKey: ["articles"] })
-  }
-
-  const createNgWord = useMutation({
-    mutationFn: ({ pattern, target }: { pattern: string, target: string }) =>
-      api.createNgWord(pattern, target),
-    onSuccess: () => { invalidate(); setPattern("") },
-    onError,
-  })
-  const deleteNgWord = useMutation({
-    mutationFn: api.deleteNgWord,
-    onSuccess: invalidate,
-    onError,
-  })
-
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!pattern.trim()) return
-    createNgWord.mutate({ pattern: pattern.trim(), target })
-  }
-
-  const isRegex = (p: string) => p.length > 2 && p.startsWith("/") && p.endsWith("/")
-
-  return (
-    <div className="mb-6">
-      <h3 className="text-sm font-semibold text-text-heading mb-3">NG Words</h3>
-      <form onSubmit={handleCreate} className="flex gap-2 mb-3">
-        <input
-          value={pattern}
-          onChange={(e) => setPattern(e.target.value)}
-          className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm flex-1"
-          placeholder="keyword or /regex/"
-        />
-        <select
-          value={target}
-          onChange={(e) => setTarget(e.target.value)}
-          className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
-        >
-          <option value="title">Title</option>
-          <option value="both">Both</option>
-        </select>
-        <button
-          type="submit"
-          disabled={createNgWord.isPending || !pattern.trim()}
-          className="px-3 py-1.5 rounded bg-accent text-white text-sm hover:opacity-90 transition-opacity disabled:opacity-40"
-        >
-          Add
-        </button>
-      </form>
-      {(ngWords ?? []).length > 0 && (
-        <div className="space-y-1">
-          {(ngWords ?? []).map((ng: NgWord) => (
-            <div key={ng.id} className="flex items-center gap-2 p-2 bg-bg-secondary rounded border border-border">
-              <span className={`flex-1 text-sm ${isRegex(ng.pattern) ? "font-mono text-amber-400" : "text-text"}`}>
-                {ng.pattern}
-              </span>
-              <span className="text-xs text-text-dim px-1.5 py-0.5 bg-bg-card rounded">
-                {ng.target}
-              </span>
-              <button
-                onClick={() => deleteNgWord.mutate(ng.id)}
-                className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors"
-              >
-                Delete
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function OpmlButtons({ onError, onImported }: { onError: (e: Error) => void, onImported: () => void }) {
   const [importResult, setImportResult] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -309,11 +224,64 @@ function OpmlButtons({ onError, onImported }: { onError: (e: Error) => void, onI
   )
 }
 
+function FeedDetails({ feed, stats, onDelete }: { feed: Feed, stats?: FeedStats, onDelete: () => void }) {
+  return (
+    <div className="px-3 pb-3 border-t border-border ml-7">
+      <div className="flex items-center gap-x-4 gap-y-1 text-xs text-text-muted mt-2">
+        {stats && (
+          <>
+            <span>Articles: {stats.article_count}</span>
+            <span>Unread: {stats.unread_count}</span>
+            {stats.latest_published && (
+              <span>Latest: {formatRelativeTime(stats.latest_published)}</span>
+            )}
+            {stats.oldest_published && (
+              <span>Oldest: {formatRelativeTime(stats.oldest_published)}</span>
+            )}
+          </>
+        )}
+        <span>Added: {formatRelativeTime(feed.created_at)}</span>
+        {feed.last_fetched_at && (
+          <span>Last fetched: {formatRelativeTime(feed.last_fetched_at)}</span>
+        )}
+        {feed.consecutive_failures > 0 && (
+          <span className="text-yellow-400">
+            Failures: {feed.consecutive_failures}
+          </span>
+        )}
+        <span className="flex-1" />
+        <button onClick={onDelete}
+          className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors shrink-0">
+          Delete
+        </button>
+      </div>
+      {feed.last_error && (
+        <div className="text-xs text-red-400 mt-1 truncate" title={feed.last_error}>
+          Error: {feed.last_error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function formatRelativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  if (diffMins < 1) return "just now"
+  if (diffMins < 60) return `${diffMins}m ago`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  const diffDays = Math.floor(diffHours / 24)
+  return `${diffDays}d ago`
+}
+
 export default function Feeds() {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [editingFeedId, setEditingFeedId] = useState<number | null>(null)
   const [editFeedName, setEditFeedName] = useState("")
+  const [expandedFeeds, setExpandedFeeds] = useState<Set<number>>(new Set())
+  const [fetchingFeeds, setFetchingFeeds] = useState<Set<number>>(new Set())
   const { data: feeds, isLoading, isError } = useQuery({
     queryKey: ["feeds"],
     queryFn: api.getFeeds,
@@ -322,11 +290,16 @@ export default function Feeds() {
     queryKey: ["folders"],
     queryFn: api.getFolders,
   })
+  const { data: feedStats } = useQuery({
+    queryKey: ["feed-stats"],
+    queryFn: api.getFeedStats,
+  })
 
   const sortedFolders = (folders ?? []).slice().sort((a, b) => a.position - b.position || a.id - b.id)
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["feeds"] })
     queryClient.invalidateQueries({ queryKey: ["folders"] })
+    queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
   }
   const onError = (e: Error) => setError(e.message)
 
@@ -338,7 +311,23 @@ export default function Feeds() {
   const toggleFeed = useMutation({ mutationFn: api.toggleFeed, onSuccess: invalidate, onError })
   const toggleSummarize = useMutation({ mutationFn: api.toggleSummarize, onSuccess: invalidate, onError })
   const deleteFeed = useMutation({ mutationFn: api.deleteFeed, onSuccess: invalidate, onError })
-  const fetchFeed = useMutation({ mutationFn: api.fetchFeed, onError })
+  const fetchFeed = useMutation({
+    mutationFn: api.fetchFeed,
+    onMutate: (feedId: number) => {
+      setFetchingFeeds((prev) => new Set(prev).add(feedId))
+    },
+    onSettled: (_data, _error, feedId) => {
+      setTimeout(() => {
+        setFetchingFeeds((prev) => {
+          const next = new Set(prev)
+          next.delete(feedId)
+          return next
+        })
+        invalidate()
+      }, 5000)
+    },
+    onError,
+  })
   const renameFeed = useMutation({
     mutationFn: ({ feedId, name }: { feedId: number, name: string }) =>
       api.renameFeed(feedId, name),
@@ -366,107 +355,141 @@ export default function Feeds() {
     feedsByFolder.get(key)!.push(feed)
   }
 
-  const renderFeed = (feed: Feed) => (
-    <div key={feed.id}
-      className="flex items-center justify-between p-3 bg-bg-secondary rounded-lg border border-border">
-      <div className="flex-1 min-w-0 flex items-start gap-2.5">
-        {faviconUrl(feed) && (
-          <img src={faviconUrl(feed)!} alt="" className="w-4 h-4 shrink-0 mt-1" loading="lazy" />
-        )}
-        <div className="flex-1 min-w-0">
-        {editingFeedId === feed.id ? (
-          <input
-            value={editFeedName}
-            onChange={(e) => setEditFeedName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && editFeedName.trim()) {
-                renameFeed.mutate({ feedId: feed.id, name: editFeedName.trim() })
-                setEditingFeedId(null)
-              }
-              if (e.key === "Escape") setEditingFeedId(null)
-            }}
-            onBlur={() => {
-              if (editFeedName.trim() && editFeedName.trim() !== feed.name) {
-                renameFeed.mutate({ feedId: feed.id, name: editFeedName.trim() })
-              }
-              setEditingFeedId(null)
-            }}
-            autoFocus
-            className="bg-bg-card text-text border border-border rounded px-2 py-0.5 text-sm font-medium w-full"
-          />
-        ) : (
-          <div className="flex items-center gap-1.5">
-            <span className={`font-medium ${feed.enabled ? "text-text-heading" : "text-text-dim line-through"}`}>
-              {feed.name}
-            </span>
-            <button
-              onClick={() => { setEditingFeedId(feed.id); setEditFeedName(feed.name) }}
-              className="text-text-dim hover:text-text transition-colors text-xs"
-              title="Rename"
+  const toggleExpand = (feedId: number) => {
+    setExpandedFeeds((prev) => {
+      const next = new Set(prev)
+      if (next.has(feedId)) next.delete(feedId)
+      else next.add(feedId)
+      return next
+    })
+  }
+
+  const renderFeed = (feed: Feed) => {
+    const isExpanded = expandedFeeds.has(feed.id)
+    const isUnhealthy = feed.consecutive_failures >= 3
+
+    return (
+      <div key={feed.id} className="bg-bg-secondary rounded-lg border border-border">
+        <div className="flex items-center justify-between p-3">
+          <div className="flex-1 min-w-0 flex items-start gap-2.5">
+            {faviconUrl(feed) && (
+              <img src={faviconUrl(feed)!} alt="" className="w-4 h-4 shrink-0 mt-1" loading="lazy" />
+            )}
+            <div className="flex-1 min-w-0">
+              {editingFeedId === feed.id ? (
+                <input
+                  value={editFeedName}
+                  onChange={(e) => setEditFeedName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && editFeedName.trim()) {
+                      renameFeed.mutate({ feedId: feed.id, name: editFeedName.trim() })
+                      setEditingFeedId(null)
+                    }
+                    if (e.key === "Escape") setEditingFeedId(null)
+                  }}
+                  onBlur={() => {
+                    if (editFeedName.trim() && editFeedName.trim() !== feed.name) {
+                      renameFeed.mutate({ feedId: feed.id, name: editFeedName.trim() })
+                    }
+                    setEditingFeedId(null)
+                  }}
+                  autoFocus
+                  className="bg-bg-card text-text border border-border rounded px-2 py-0.5 text-sm font-medium w-full"
+                />
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  {isUnhealthy && (
+                    <span
+                      className="text-yellow-400 text-sm shrink-0"
+                      title={`${feed.consecutive_failures} consecutive failures${feed.last_error ? ": " + feed.last_error : ""}`}
+                    >
+                      !!!
+                    </span>
+                  )}
+                  <span className={`font-medium ${feed.enabled ? "text-text-heading" : "text-text-dim line-through"}`}>
+                    {feed.name}
+                  </span>
+                  <button
+                    onClick={() => { setEditingFeedId(feed.id); setEditFeedName(feed.name) }}
+                    className="text-text-dim hover:text-text transition-colors text-xs"
+                    title="Rename"
+                  >
+                    ✎
+                  </button>
+                </div>
+              )}
+              <div className="text-xs text-text-muted mt-0.5">
+                <a href={feed.site_url ?? feed.url ?? ""} target="_blank" rel="noopener noreferrer" className="text-link hover:text-link-hover hover:underline">{feed.site_url ?? feed.url}</a>
+                {feed.site_url && feed.url && (
+                  <a href={feed.url} target="_blank" rel="noopener noreferrer" className="text-text-dim hover:text-link-hover ml-1" title={feed.url}>&#8853;</a>
+                )}
+                {feed.last_fetched_at && (
+                  <>{" "}&middot;{" "}{formatRelativeTime(feed.last_fetched_at)}</>
+                )}
+                <button
+                  onClick={() => toggleExpand(feed.id)}
+                  className="text-text-dim hover:text-text ml-1"
+                  title="Details"
+                >
+                  {isExpanded ? "\u25BE" : "\u25B8"}
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 ml-4 shrink-0">
+            <select
+              value={feed.lang}
+              onChange={(e) => updateLang.mutate({ feedId: feed.id, lang: e.target.value })}
+              className="bg-bg-card text-text-muted border border-border rounded px-1.5 py-1 text-xs"
             >
-              ✎
+              <option value="en">en</option>
+              <option value="ja">ja</option>
+            </select>
+            <select
+              value={feed.folder_id ?? ""}
+              onChange={(e) => moveFeed.mutate({
+                feedId: feed.id,
+                folderId: e.target.value ? Number(e.target.value) : null,
+              })}
+              className="bg-bg-card text-text-muted border border-border rounded px-1.5 py-1 text-xs"
+            >
+              <option value="">--</option>
+              {sortedFolders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+            <button onClick={() => fetchFeed.mutate(feed.id)}
+              disabled={fetchingFeeds.has(feed.id)}
+              title="Fetch now"
+              className="px-2 py-1 rounded text-xs bg-bg-card text-text-muted hover:text-text transition-colors disabled:opacity-40">
+              <span className={`inline-block ${fetchingFeeds.has(feed.id) ? "animate-spin" : ""}`}>↻</span>
+            </button>
+            <button onClick={() => toggleSummarize.mutate(feed.id)}
+              className={`px-2 py-1 rounded text-xs transition-colors ${
+                feed.summarize
+                  ? "bg-accent-bg text-accent-text"
+                  : "bg-bg-card text-text-dim"
+              }`}>
+              LLM
+            </button>
+            <button onClick={() => toggleFeed.mutate(feed.id)}
+              className={`px-2 py-1 rounded text-xs transition-colors ${
+                feed.enabled
+                  ? "bg-green-900 text-green-300"
+                  : "bg-bg-card text-text-dim"
+              }`}>
+              {feed.enabled ? "ON" : "OFF"}
             </button>
           </div>
+        </div>
+
+        {/* Expandable details */}
+        {isExpanded && (
+          <FeedDetails feed={feed} stats={feedStats?.[feed.id]} onDelete={() => {
+            if (confirm(`Delete "${feed.name}"?`)) deleteFeed.mutate(feed.id)
+          }} />
         )}
-        <div className="text-xs text-text-muted mt-0.5">
-          <a href={feed.site_url ?? feed.url ?? ""} target="_blank" rel="noopener noreferrer" className="text-link hover:text-link-hover hover:underline">{feed.site_url ?? feed.url}</a>
-          {feed.site_url && feed.url && (
-            <a href={feed.url} target="_blank" rel="noopener noreferrer" className="text-text-dim hover:text-link-hover ml-1" title={feed.url}>⊕</a>
-          )}
-          {" "}&middot;{" "}max {feed.max_items}
-        </div>
-        </div>
       </div>
-      <div className="flex items-center gap-2 ml-4 shrink-0">
-        <select
-          value={feed.lang}
-          onChange={(e) => updateLang.mutate({ feedId: feed.id, lang: e.target.value })}
-          className="bg-bg-card text-text-muted border border-border rounded px-1.5 py-1 text-xs"
-        >
-          <option value="en">en</option>
-          <option value="ja">ja</option>
-        </select>
-        <select
-          value={feed.folder_id ?? ""}
-          onChange={(e) => moveFeed.mutate({
-            feedId: feed.id,
-            folderId: e.target.value ? Number(e.target.value) : null,
-          })}
-          className="bg-bg-card text-text-muted border border-border rounded px-1.5 py-1 text-xs"
-        >
-          <option value="">--</option>
-          {sortedFolders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-        </select>
-        <button onClick={() => fetchFeed.mutate(feed.id)}
-          title="Fetch now"
-          className="px-2 py-1 rounded text-xs bg-bg-card text-text-muted hover:text-text transition-colors">
-          ↻
-        </button>
-        <button onClick={() => toggleSummarize.mutate(feed.id)}
-          className={`px-2 py-1 rounded text-xs transition-colors ${
-            feed.summarize
-              ? "bg-accent-bg text-accent-text"
-              : "bg-bg-card text-text-dim"
-          }`}>
-          LLM
-        </button>
-        <button onClick={() => toggleFeed.mutate(feed.id)}
-          className={`px-2 py-1 rounded text-xs transition-colors ${
-            feed.enabled
-              ? "bg-green-900 text-green-300"
-              : "bg-bg-card text-text-dim"
-          }`}>
-          {feed.enabled ? "ON" : "OFF"}
-        </button>
-        <button onClick={() => {
-          if (confirm(`Delete "${feed.name}"?`)) deleteFeed.mutate(feed.id)
-        }}
-          className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors">
-          Delete
-        </button>
-      </div>
-    </div>
-  )
+    )
+  }
 
   const uncategorized = feedsByFolder.get(null) ?? []
 
@@ -492,7 +515,6 @@ export default function Feeds() {
         </div>
 
         <FolderManager folders={sortedFolders} onError={onError} />
-        <NgWordManager onError={onError} />
 
         <AddFeedForm onAdd={(f) => addFeed.mutate(f)} isAdding={addFeed.isPending} folders={sortedFolders} />
 

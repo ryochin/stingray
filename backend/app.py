@@ -39,13 +39,30 @@ def _load_config() -> AppConfig:
   return AppConfig()
 
 
+async def _background_summarizer(config: AppConfig) -> None:
+  """Periodically check for unsummarized articles and process them."""
+  from fetcher import summarize_pending
+  import log as _log
+  await asyncio.sleep(10)  # initial delay
+  while True:
+    try:
+      count = await summarize_pending(config)
+      if count > 0:
+        _log.info(f"  Background summarizer processed {count} articles.")
+    except Exception as e:
+      _log.warn(f"  Background summarizer error: {e}")
+    await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
   config = _load_config()
   db.configure(config.db_path)
   db.init_schema()
   app.state.config = config  # type: ignore[attr-defined]
+  task = asyncio.create_task(_background_summarizer(config))
   yield
+  task.cancel()
 
 
 app = FastAPI(title="News Reader", lifespan=lifespan)
@@ -144,7 +161,6 @@ class FeedCreate(BaseModel):
   name: str = ""
   url: str
   lang: str = ""
-  max_items: int = 20
   summarize: bool = False
   folder_id: int | None = None
 
@@ -152,6 +168,11 @@ class FeedCreate(BaseModel):
 @app.get("/api/feeds")
 def get_feeds() -> list[FeedRow]:
   return repo.list_feeds()
+
+
+@app.get("/api/feeds/stats")
+def get_feed_stats() -> dict[int, dict]:
+  return repo.get_feed_stats()
 
 
 _JA_KANA = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")
@@ -219,9 +240,11 @@ async def _fetch_single_feed(feed: FeedRow) -> None:
       probe = await _probe_feed(feed.url)
       if probe.site_url:
         repo.update_feed_site_url(feed.id, probe.site_url)
+    repo.update_feed_fetch_status(feed.id, success=True)
   except Exception as e:
     import log
     log.warn(f"Failed to fetch feed '{feed.name}': {e}")
+    repo.update_feed_fetch_status(feed.id, success=False, error=str(e))
 
 
 @app.post("/api/feeds", status_code=201)
@@ -378,7 +401,6 @@ async def opml_import(file: UploadFile) -> dict[str, int]:
       url=feed_data.url,
       site_url=feed_data.site_url,
       lang=feed_data.lang,
-      max_items=feed_data.max_items,
       summarize=feed_data.summarize,
       folder_id=folder_id,
     )

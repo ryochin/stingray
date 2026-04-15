@@ -59,7 +59,7 @@ async def _fetch_with_cache(
     resp = await client.get(url, headers=req_headers)
   except (httpx.TransportError, OSError) as e:
     if cached:
-      log.warn(f"    Network error, using cached feed: {e}")
+      log.warn(f"    Network error, using cached feed: {url} ({type(e).__name__}: {e or 'no details'})")
       return cached["body"], True
     raise
 
@@ -104,11 +104,14 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
 
     raw_html = ""
     snippet = ""
-    if hasattr(entry, "summary"):
+    # Prefer content:encoded (full article) over description (often truncated)
+    if hasattr(entry, "content") and entry.content:
+      raw_html = entry.content[0].get("value", "")
+    if not raw_html and hasattr(entry, "summary"):
       raw_html = entry.summary
-      snippet = _strip_html(raw_html)
-    elif hasattr(entry, "description"):
+    if not raw_html and hasattr(entry, "description"):
       raw_html = entry.description
+    if raw_html:
       snippet = _strip_html(raw_html)
 
     link = entry.get("link", "")
@@ -145,8 +148,14 @@ async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
     return await _fetch_rss(client, feed)
 
 
-async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Article]:  # type: ignore[type-arg]
+async def fetch_all(
+  feeds_cfg: list[dict],
+  max_age_hours: float = 25,
+  max_items: int = 20,
+) -> tuple[list[Article], list[tuple[int, bool, str | None]]]:
   sem = asyncio.Semaphore(_CONCURRENCY)
+  for feed in feeds_cfg:
+    feed.setdefault("max_items", max_items)
   async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
     tasks = []
     task_feeds = []
@@ -159,18 +168,24 @@ async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Ar
 
   cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
   articles = []
+  feed_results: list[tuple[int, bool, str | None]] = []
   seen_urls: set[str] = set()
   cached_feeds = 0
   fetched_feeds = 0
   for i, result in enumerate(results):
+    feed_id = task_feeds[i].get("id")
     if isinstance(result, Exception):
       log.error(f"  Error: {task_feeds[i].get('name')}: {result}")
+      if feed_id is not None:
+        feed_results.append((feed_id, False, str(result)))
     else:
       feed_articles, was_cached = result
       if was_cached:
         cached_feeds += 1
       else:
         fetched_feeds += 1
+      if feed_id is not None:
+        feed_results.append((feed_id, True, None))
       for a in feed_articles:
         if a.url in seen_urls:
           continue
@@ -183,4 +198,4 @@ async def fetch_all(feeds_cfg: list[dict], max_age_hours: float = 25) -> list[Ar
           articles.append(a)
 
   log.info(f"  Feeds: {fetched_feeds} fetched, {cached_feeds} from cache.")
-  return articles
+  return articles, feed_results

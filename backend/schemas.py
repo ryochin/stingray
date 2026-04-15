@@ -34,15 +34,18 @@ class FeedRow(BaseModel):
   summarize: bool = True
   enabled: bool = True
   folder_id: int | None = None
+  last_fetched_at: datetime | None = None
+  consecutive_failures: int = 0
+  last_error: str | None = None
   created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
   def to_feed_cfg(self) -> dict[str, object]:
     """Convert to the dict format expected by feeds.fetch_all()."""
     return {
+      "id": self.id,
       "name": self.name,
       "url": self.url,
       "lang": self.lang,
-      "max_items": self.max_items,
     }
 
 
@@ -90,6 +93,7 @@ class OllamaConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
+  max_items_per_feed: int = 20
   max_age_hours: float = 25
   db_path: str = "data/news.db"
   cache_dir: str = "cache"

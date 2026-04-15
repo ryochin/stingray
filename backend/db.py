@@ -6,16 +6,27 @@ import sqlite3
 from pathlib import Path
 
 _SCHEMA = """\
-CREATE TABLE IF NOT EXISTS feeds (
+CREATE TABLE IF NOT EXISTS folders (
   id         INTEGER PRIMARY KEY,
   name       TEXT NOT NULL,
-  url        TEXT,
-  site_url   TEXT,
-  lang       TEXT NOT NULL DEFAULT 'en',
-  max_items  INTEGER NOT NULL DEFAULT 20,
-  summarize  INTEGER NOT NULL DEFAULT 1,
-  enabled    INTEGER NOT NULL DEFAULT 1,
+  position   INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS feeds (
+  id                    INTEGER PRIMARY KEY,
+  name                  TEXT NOT NULL,
+  url                   TEXT,
+  site_url              TEXT,
+  lang                  TEXT NOT NULL DEFAULT 'en',
+  max_items             INTEGER NOT NULL DEFAULT 20,
+  summarize             INTEGER NOT NULL DEFAULT 1,
+  enabled               INTEGER NOT NULL DEFAULT 1,
+  folder_id             INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+  last_fetched_at       TEXT,
+  consecutive_failures  INTEGER NOT NULL DEFAULT 0,
+  last_error            TEXT,
+  created_at            TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS articles (
@@ -27,8 +38,10 @@ CREATE TABLE IF NOT EXISTS articles (
   published       TEXT,
   content_snippet TEXT,
   summary         TEXT,
+  content_html    TEXT,
   lang            TEXT,
-  fetched_at      TEXT NOT NULL
+  fetched_at      TEXT NOT NULL,
+  read_at         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS refresh_jobs (
@@ -41,11 +54,15 @@ CREATE TABLE IF NOT EXISTS refresh_jobs (
   error       TEXT
 );
 
+CREATE TABLE IF NOT EXISTS ng_words (
+  id         INTEGER PRIMARY KEY,
+  pattern    TEXT NOT NULL,
+  target     TEXT NOT NULL DEFAULT 'title',
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_articles_feed      ON articles(feed_id);
 CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published DESC);
-"""
-
-_POST_MIGRATION_INDEXES = """\
 CREATE INDEX IF NOT EXISTS idx_articles_read_at   ON articles(read_at);
 CREATE INDEX IF NOT EXISTS idx_feeds_folder_id    ON feeds(folder_id);
 """
@@ -137,6 +154,13 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
   if "site_url" not in feed_cols:
     conn.execute(_MIGRATIONS[5])
     conn.commit()
+    feed_cols.add("site_url")
+
+  if "last_fetched_at" not in feed_cols:
+    conn.execute("ALTER TABLE feeds ADD COLUMN last_fetched_at TEXT")
+    conn.execute("ALTER TABLE feeds ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE feeds ADD COLUMN last_error TEXT")
+    conn.commit()
 
 
 def init_schema() -> None:
@@ -145,6 +169,5 @@ def init_schema() -> None:
   try:
     conn.executescript(_SCHEMA)
     _run_migrations(conn)
-    conn.executescript(_POST_MIGRATION_INDEXES)
   finally:
     conn.close()

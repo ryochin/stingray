@@ -12,10 +12,20 @@ export interface Feed {
   url: string | null
   site_url: string | null
   lang: string
-  max_items: number
   summarize: boolean
   enabled: boolean
   folder_id: number | null
+  last_fetched_at: string | null
+  consecutive_failures: number
+  last_error: string | null
+  created_at: string
+}
+
+export interface FeedStats {
+  article_count: number
+  unread_count: number
+  latest_published: string | null
+  oldest_published: string | null
 }
 
 export interface Article {
@@ -45,7 +55,6 @@ export interface FeedCreate {
   name?: string
   url: string
   lang?: string
-  max_items?: number
   summarize?: boolean
   folder_id?: number
 }
@@ -116,6 +125,8 @@ export const api = {
     }),
 
   getFeeds: () => fetchJson<Feed[]>("/feeds"),
+
+  getFeedStats: () => fetchJson<Record<string, FeedStats>>("/feeds/stats"),
 
   moveFeedToFolder: (feedId: number, folderId: number | null) =>
     fetchJson<Feed>(`/feeds/${feedId}/folder`, {
