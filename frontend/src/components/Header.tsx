@@ -46,6 +46,7 @@ export default function Header() {
         <nav className="flex gap-4 text-sm">
           <Link to="/" className="text-text-muted hover:text-text no-underline">Articles</Link>
           <Link to="/feeds" className="text-text-muted hover:text-text no-underline">Feeds</Link>
+          <Link to="/filters" className="text-text-muted hover:text-text no-underline">Filters</Link>
         </nav>
       </div>
       <div className="flex items-center gap-3 text-sm">
