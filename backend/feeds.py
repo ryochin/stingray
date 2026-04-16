@@ -96,11 +96,13 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
   articles = []
   for entry in parsed.entries[:max_items]:
     published = None
-    if hasattr(entry, "published_parsed") and entry.published_parsed:
-      try:
-        published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-      except (ValueError, TypeError):
-        pass
+    for attr in ("published_parsed", "updated_parsed"):
+      if hasattr(entry, attr) and getattr(entry, attr):
+        try:
+          published = datetime(*getattr(entry, attr)[:6], tzinfo=timezone.utc)
+          break
+        except (ValueError, TypeError):
+          pass
 
     raw_html = ""
     snippet = ""

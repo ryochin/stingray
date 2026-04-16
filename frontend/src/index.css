@@ -24,12 +24,31 @@ body {
   margin: 0;
 }
 
-.article-html a { color: var(--color-link); text-decoration: underline; }
-.article-html a:hover { color: var(--color-link-hover); }
-.article-html img { max-width: 100%; height: auto; border-radius: 4px; margin: 0.5em 0; }
-.article-html p { margin: 0.5em 0; }
-.article-html ul, .article-html ol { padding-left: 1.5em; margin: 0.5em 0; }
-.article-html blockquote { border-left: 2px solid var(--color-border); padding-left: 0.75em; margin: 0.5em 0; color: var(--color-text-muted); }
+.article-html { line-height: 1.75; }
+
+.article-html h1 { font-size: 1.4em; font-weight: 600; color: var(--color-text-heading); margin: 1.5em 0 0.6em; }
+.article-html h2 { font-size: 1.25em; font-weight: 600; color: var(--color-text-heading); margin: 0.8em 0 0.4em; padding-bottom: 0.3em; border-bottom: 1px solid var(--color-border); }
+.article-html h3 { font-size: 1.1em; font-weight: 600; color: var(--color-text-heading); margin: 1.2em 0 0.4em; }
+.article-html h4, .article-html h5, .article-html h6 { font-size: 1em; font-weight: 600; color: var(--color-text-heading); margin: 1em 0 0.3em; }
+
+.article-html p { margin: 0.75em 0; }
+.article-html a { color: var(--color-accent); text-decoration: underline; }
+.article-html a:hover { color: var(--color-accent-text); }
+.article-html img { max-width: 100%; height: auto; border-radius: 4px; margin: 0.75em 0; }
+.article-html ul { padding-left: 1.5em; margin: 0.75em 0; list-style: disc; }
+.article-html ol { padding-left: 1.5em; margin: 0.75em 0; list-style: decimal; }
+.article-html li { margin: 0.3em 0; }
+.article-html li::marker { color: var(--color-text-dim); }
+
+.article-html hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); margin: 0.5em 0; }
+
+.article-html blockquote { border-left: 3px solid var(--color-accent-bg); padding-left: 1em; margin: 1em 0; color: var(--color-text-muted); }
+
 .article-html pre, .article-html code { background: var(--color-bg-card); padding: 0.15em 0.3em; border-radius: 3px; font-size: 0.9em; }
-.article-html pre { padding: 0.75em; overflow-x: auto; }
+.article-html pre { padding: 0.75em 1em; overflow-x: auto; margin: 1em 0; border: 1px solid var(--color-border); }
 .article-html pre code { padding: 0; background: none; }
+
+.article-html table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 0.9em; }
+.article-html th, .article-html td { border: 1px solid var(--color-border); padding: 0.5em 0.75em; text-align: left; }
+.article-html th { background: var(--color-bg-card); font-weight: 600; color: var(--color-text-heading); }
+.article-html tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }

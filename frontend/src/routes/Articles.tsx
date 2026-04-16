@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
-import { api } from "../api/client"
-import type { Selection } from "../api/client"
+import { api, faviconUrl } from "../api/client"
+import type { Feed, Selection } from "../api/client"
 import Header from "../components/Header"
 import Sidebar from "../components/Sidebar"
 import ArticleCard from "../components/ArticleCard"
@@ -72,6 +72,12 @@ export default function Articles() {
     queryKey: ["folders"],
     queryFn: api.getFolders,
   })
+
+  const feedMap = useMemo(() => {
+    const map = new Map<number, Feed>()
+    for (const feed of feeds ?? []) map.set(feed.id, feed)
+    return map
+  }, [feeds])
 
   // Ordered feed list matching sidebar display order
   const orderedFeedIds = useMemo(() => {
@@ -293,6 +299,22 @@ export default function Articles() {
         />
         <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 flex flex-col items-center" style={{ scrollBehavior: "smooth" }}>
           <div className="w-[95%] max-w-4xl pl-1">
+          {selection.type !== "all" && (
+            <h2 className="text-2xl font-medium text-text-heading mb-3 flex items-center gap-2">
+              {selection.type === "feed" && (() => {
+                const selectedFeed = feedMap.get(selection.id)
+                if (!selectedFeed) return null
+                const icon = faviconUrl(selectedFeed)
+                return (
+                  <>
+                    {icon && <img src={icon} alt="" className="w-5 h-5" loading="lazy" />}
+                    {selectedFeed.name}
+                  </>
+                )
+              })()}
+              {selection.type === "folder" && folders?.find((folder) => folder.id === selection.id)?.name}
+            </h2>
+          )}
           <div className="flex items-center justify-between mb-4">
             <div className="flex gap-1 text-sm">
               <button
@@ -337,16 +359,21 @@ export default function Articles() {
             </div>
           ) : (
             <>
-              {filtered.map((article, i) => (
-                <ArticleCard
-                  key={article.url}
-                  article={article}
-                  focused={i === focusIndex}
-                  pendingSummary={!article.summary && article.feed_id != null && summarizeFeedIds.has(article.feed_id)}
-                  ref={(el) => setRef(i, el)}
-                  onClick={() => handleCardClick(i)}
-                />
-              ))}
+              {filtered.map((article, index) => {
+                const feed = article.feed_id != null ? feedMap.get(article.feed_id) : undefined
+                return (
+                  <ArticleCard
+                    key={article.url}
+                    article={article}
+                    focused={index === focusIndex}
+                    pendingSummary={!article.summary && article.feed_id != null && summarizeFeedIds.has(article.feed_id)}
+                    feedName={feed?.name}
+                    feedFaviconUrl={feed ? faviconUrl(feed) : null}
+                    ref={(el) => setRef(index, el)}
+                    onClick={() => handleCardClick(index)}
+                  />
+                )
+              })}
               <div className="flex items-center gap-3 py-6 text-text-dim text-sm">
                 <div className="flex-1 border-t border-border" />
                 <span>All caught up</span>

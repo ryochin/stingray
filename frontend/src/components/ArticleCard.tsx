@@ -11,14 +11,6 @@ function parseSummary(summary: string): { text: string, imageUrls: string[] } {
   return { text: text.trim(), imageUrls }
 }
 
-function domain(url: string): string {
-  try {
-    return new URL(url).hostname
-  } catch {
-    return ""
-  }
-}
-
 function formatDate(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleString("ja-JP", {
@@ -35,11 +27,13 @@ interface Props {
   article: Article
   focused?: boolean
   pendingSummary?: boolean
+  feedName?: string
+  feedFaviconUrl?: string | null
   onClick?: () => void
 }
 
 const ArticleCard = forwardRef<HTMLDivElement, Props>(
-  ({ article, focused, pendingSummary, onClick }, ref) => {
+  ({ article, focused, pendingSummary, feedName, feedFaviconUrl, onClick }, ref) => {
     const isRead = article.read_at != null
     const hasTranslation = article.title_ja && article.title_ja !== article.title
     const titleColor = focused ? "text-accent-text" : isRead ? "text-text-muted" : "text-text-heading"
@@ -97,7 +91,6 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
               >
                 {article.title}
               </a>
-              <span className="text-xs text-text-dim ml-1">({domain(article.url)})</span>
             </div>
           </>
         ) : (
@@ -110,13 +103,21 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
             >
               {article.title}
             </a>
-            <span className="text-xs text-text-dim ml-1">({domain(article.url)})</span>
           </div>
         )}
 
-        {article.published && (
-          <div className="text-sm text-text-muted mt-0.5">
-            {formatDate(article.published)}
+        {(article.published || feedName) && (
+          <div className="text-sm text-text-muted mt-0.5 flex items-center gap-2">
+            {feedName && (
+              <span className="flex items-center gap-1">
+                {feedFaviconUrl && (
+                  <img src={feedFaviconUrl} alt="" className="w-3.5 h-3.5" loading="lazy" />
+                )}
+                <span>{feedName}</span>
+              </span>
+            )}
+            {feedName && article.published && <span className="text-text-dim">·</span>}
+            {article.published && <span>{formatDate(article.published)}</span>}
           </div>
         )}
 
