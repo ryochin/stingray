@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, Selection } from "../api/client"
@@ -19,7 +19,13 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     queryFn: api.getFolders,
   })
 
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+  const [collapsed, setCollapsed] = useState<Set<number>>(() => {
+    try {
+      const saved = sessionStorage.getItem("collapsed-folders")
+      if (saved) return new Set(JSON.parse(saved) as number[])
+    } catch {}
+    return new Set()
+  })
 
   const enabledFeeds = feeds?.filter((f: Feed) => f.enabled) ?? []
   const totalUnread = Array.from(unreadCounts.values()).reduce((a, b) => a + b, 0)
@@ -31,6 +37,20 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     feedsByFolder.get(key)!.push(feed)
   }
 
+  // Auto-expand folder containing the selected feed
+  useEffect(() => {
+    if (selection.type !== "feed") return
+    const selectedFeed = enabledFeeds.find((feed) => feed.id === selection.id)
+    if (!selectedFeed?.folder_id) return
+    if (!collapsed.has(selectedFeed.folder_id)) return
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      next.delete(selectedFeed.folder_id!)
+      sessionStorage.setItem("collapsed-folders", JSON.stringify([...next]))
+      return next
+    })
+  }, [selection, enabledFeeds]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const folderUnread = (folderId: number) => {
     const feeds = feedsByFolder.get(folderId) ?? []
     return feeds.reduce((sum, f) => sum + (unreadCounts.get(f.id) ?? 0), 0)
@@ -41,6 +61,7 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
       const next = new Set(prev)
       if (next.has(folderId)) next.delete(folderId)
       else next.add(folderId)
+      sessionStorage.setItem("collapsed-folders", JSON.stringify([...next]))
       return next
     })
   }
@@ -52,7 +73,7 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
   }
 
   const btnClass = (active: boolean) =>
-    `flex justify-between items-center w-full px-4 py-2.5 text-sm text-left transition-colors cursor-pointer ${
+    `flex justify-between items-center w-full px-4 py-1.5 text-xs text-left transition-colors cursor-pointer ${
       active ? "text-accent-text" : "text-text-muted hover:text-text"
     }`
 
@@ -113,13 +134,13 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
             <div className="flex items-center">
               <button
                 onClick={() => toggleCollapse(folder.id)}
-                className="pl-3 pr-1 py-2.5 text-text-dim text-xs"
+                className="pl-3 pr-1 py-1.5 text-text-dim text-xs"
               >
                 {isOpen ? "\u25BE" : "\u25B8"}
               </button>
               <button
                 onClick={() => onSelect({ type: "folder", id: folder.id })}
-                className={`flex-1 flex justify-between items-center pr-4 py-2.5 text-sm text-left transition-colors cursor-pointer ${
+                className={`flex-1 flex justify-between items-center pr-4 py-1.5 text-xs text-left transition-colors cursor-pointer ${
                   folderActive ? "text-accent-text font-medium" : "text-text-muted hover:text-text"
                 }`}
               >
