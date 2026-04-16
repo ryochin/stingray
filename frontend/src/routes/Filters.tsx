@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import type { NgWord } from "../api/client"
@@ -32,10 +32,26 @@ export default function Filters() {
     onError: (e: Error) => setError(e.message),
   })
 
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
     if (!pattern.trim()) return
     createNgWord.mutate({ pattern: pattern.trim(), target })
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const result = await api.importFilters(file)
+      invalidate()
+      setError(null)
+      alert(`Imported ${result.created} filters (${result.skipped} skipped)`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed")
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
   const isRegex = (p: string) => p.length > 2 && p.startsWith("/") && p.endsWith("/")
@@ -44,7 +60,28 @@ export default function Filters() {
     <div className="flex flex-col h-screen">
       <Header />
       <main className="flex-1 overflow-y-auto px-7 py-5 max-w-6xl">
-        <h2 className="text-lg font-semibold text-text-heading mb-4">Filters</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-text-heading">Filters</h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => api.exportFilters()}
+              disabled={!ngWords?.length}
+              className="px-3 py-1.5 rounded text-sm bg-bg-card text-text-muted border border-border hover:text-text transition-colors disabled:opacity-40"
+            >
+              Export JSON
+            </button>
+            <label className="px-3 py-1.5 rounded text-sm bg-bg-card text-text-muted border border-border hover:text-text transition-colors cursor-pointer">
+              Import JSON
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImport}
+                className="hidden"
+              />
+            </label>
+          </div>
+        </div>
 
         {error && (
           <div className="text-red-400 text-sm mb-4">{error}</div>

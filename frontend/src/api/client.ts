@@ -208,6 +208,26 @@ export const api = {
   deleteNgWord: (id: number) =>
     fetchJson<void>(`/ng-words/${id}`, { method: "DELETE" }),
 
+  exportFilters: async () => {
+    const resp = await fetch(`${BASE}/ng-words/export`)
+    if (!resp.ok) throw new Error("Export failed")
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = "filters.json"
+    anchor.click()
+    URL.revokeObjectURL(url)
+  },
+
+  importFilters: async (file: File) => {
+    const form = new FormData()
+    form.append("file", file)
+    const resp = await fetch(`${BASE}/ng-words/import`, { method: "POST", body: form })
+    if (!resp.ok) throw new Error("Import failed")
+    return resp.json() as Promise<{ created: number, skipped: number }>
+  },
+
   exportOpml: async () => {
     const res = await fetch(`${BASE}/opml/export`)
     if (!res.ok) throw new Error(`API error: ${res.status}`)

@@ -378,6 +378,47 @@ def delete_ng_word(ng_word_id: int) -> None:
   repo.delete_ng_word(ng_word_id)
 
 
+@app.get("/api/ng-words/export")
+def export_ng_words() -> Response:
+  import json
+  words = repo.list_ng_words()
+  data = [{"pattern": w.pattern, "target": w.target} for w in words]
+  return Response(
+    content=json.dumps(data, ensure_ascii=False, indent=2),
+    media_type="application/json",
+    headers={"Content-Disposition": 'attachment; filename="filters.json"'},
+  )
+
+
+@app.post("/api/ng-words/import")
+async def import_ng_words(file: UploadFile) -> dict[str, int]:
+  import json
+  try:
+    content = (await file.read()).decode("utf-8")
+    data = json.loads(content)
+  except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    raise HTTPException(400, f"Invalid JSON: {exc}")
+  if not isinstance(data, list):
+    raise HTTPException(400, "Expected a JSON array")
+  existing = {(w.pattern, w.target) for w in repo.list_ng_words()}
+  created = 0
+  skipped = 0
+  for item in data:
+    if not isinstance(item, dict) or "pattern" not in item:
+      continue
+    pattern = str(item["pattern"]).strip()
+    target = str(item.get("target", "title")).strip()
+    if not pattern or target not in ("title", "both"):
+      continue
+    if (pattern, target) in existing:
+      skipped += 1
+      continue
+    repo.add_ng_word(pattern, target)
+    existing.add((pattern, target))
+    created += 1
+  return {"created": created, "skipped": skipped}
+
+
 # -- OPML --
 
 
