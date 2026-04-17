@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -222,35 +223,93 @@ class ProbeResult:
   title: str | None = None
   translate: bool = False
   site_url: str | None = None
+  is_web_page: bool = False
+  html: str = ""
+
+
+def _is_html(content_type: str, body: str) -> bool:
+  """Determine if the response is an HTML page based on content-type and body heuristics."""
+  ct = content_type.lower().split(";")[0].strip()
+  if ct == "text/html" or ct == "application/xhtml+xml":
+    return True
+  # Check for feed content types
+  if ct in ("application/rss+xml", "application/atom+xml", "text/xml", "application/xml"):
+    return False
+  # Heuristic: inspect the first non-whitespace characters
+  prefix = body.lstrip()[:500].lower()
+  if prefix.startswith("<!doctype html"):
+    return True
+  if prefix.startswith("<html"):
+    return True
+  if prefix.startswith("<?xml"):
+    # XML declaration — check what follows for RSS/Atom root elements
+    return False
+  if any(prefix.startswith(tag) for tag in ("<rss", "<feed", "<rdf:rdf")):
+    return False
+  # Contains <html> tag anywhere in the prefix
+  if "<html" in prefix:
+    return True
+  return False
 
 
 async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
-  """Fetch a feed URL and extract its title, translate flag, and site URL."""
+  """Fetch a feed URL and extract its title, translate flag, and site URL.
+
+  If the URL is not a valid RSS/Atom feed, detect it as a web page.
+  """
   try:
     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
       resp = await client.get(url)
       resp.raise_for_status()
-    parsed = feedparser.parse(resp.text)
-    feed_meta = parsed.feed or {}
-    title = feed_meta.get("title", "")
-    detected_lang = _detect_feed_lang(parsed, url)
-    site_url = feed_meta.get("link", "")
-    return ProbeResult(
-      title=title.strip() or None,
-      translate=detected_lang is None or detected_lang != native_lang,
-      site_url=site_url.strip() or None,
-    )
-  except Exception:
-    pass
+    body = resp.text
+    content_type = resp.headers.get("content-type", "")
+
+    # Determine format before parsing
+    if _is_html(content_type, body):
+      title_match = re.search(r"<title[^>]*>(.*?)</title>", body, re.IGNORECASE | re.DOTALL)
+      title = title_match.group(1).strip() if title_match else None
+      return ProbeResult(
+        title=title,
+        translate=False,
+        site_url=url,
+        is_web_page=True,
+        html=body,
+      )
+
+    # Try RSS/Atom parsing
+    parsed = feedparser.parse(body)
+    if parsed.entries:
+      feed_meta = parsed.feed or {}
+      title = feed_meta.get("title", "")
+      detected_lang = _detect_feed_lang(parsed, url)
+      site_url = feed_meta.get("link", "")
+      return ProbeResult(
+        title=title.strip() or None,
+        translate=detected_lang is None or detected_lang != native_lang,
+        site_url=site_url.strip() or None,
+      )
+  except Exception as e:
+    import log
+    log.warn(f"  Probe failed: {e}")
   return ProbeResult()
 
 
 async def _fetch_single_feed(feed: FeedRow) -> None:
   """Fetch articles from a single feed and persist to DB."""
+  import log
   try:
     feed_cfg = feed.to_feed_cfg()
+    log.step(f"Fetching feed: {feed.name}")
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-      articles, _ = await _fetch_rss(client, feed_cfg)
+      if feed.extraction_rules and feed.extraction_rules != "{}":
+        from scraper import fetch_web_page
+        articles, _ = await fetch_web_page(client, feed_cfg)
+      elif feed.extraction_rules is not None:
+        log.info("  Skipping: extraction rules not configured yet.")
+        return
+      else:
+        articles, _ = await _fetch_rss(client, feed_cfg)
+    log.info(f"  Got {len(articles)} articles.")
     if articles:
       repo.upsert_articles(articles, {feed.name: feed.id})
     if not feed.site_url and feed.url:
@@ -259,25 +318,37 @@ async def _fetch_single_feed(feed: FeedRow) -> None:
         repo.update_feed_site_url(feed.id, probe.site_url)
     repo.update_feed_fetch_status(feed.id, success=True)
   except Exception as e:
-    import log
     log.warn(f"Failed to fetch feed '{feed.name}': {e}")
     repo.update_feed_fetch_status(feed.id, success=False, error=str(e))
 
 
 @app.post("/api/feeds", status_code=201)
 async def create_feed(body: FeedCreate) -> FeedRow:
+  import log
   config = _load_config()
+  log.step(f"Probing feed: {body.url}")
   probe = await _probe_feed(body.url, native_lang=config.native_lang)
   if not body.name.strip():
     body.name = probe.title or body.url
   if not body.translate:
     body.translate = probe.translate
-  feed = FeedRow(**body.model_dump(), site_url=probe.site_url)
+
+  extraction_rules = None
+  if probe.is_web_page:
+    extraction_rules = "{}"
+    log.info("  Web page detected. Extraction rules can be set in feed settings.")
+  else:
+    if not probe.title and not probe.site_url:
+      raise HTTPException(422, "Could not parse this URL. Check the URL and server logs for details.")
+    log.info(f"  RSS feed: {probe.title or '(no title)'}")
+
+  feed = FeedRow(**body.model_dump(), site_url=probe.site_url, extraction_rules=extraction_rules)
   feed_id = repo.add_feed(feed)
   feeds = repo.list_feeds()
   created = next((f for f in feeds if f.id == feed_id), None)
   if created is None:
     raise HTTPException(404, "Feed not found after creation")
+  log.info(f"  Feed created: id={feed_id}, name={created.name}")
   asyncio.create_task(_fetch_single_feed(created)).add_done_callback(_log_task_exception)
   return created
 
@@ -313,6 +384,27 @@ def toggle_feed(feed_id: int) -> FeedRow:
 @app.post("/api/feeds/{feed_id}/summarize")
 def toggle_summarize(feed_id: int) -> FeedRow:
   repo.toggle_summarize(feed_id)
+  updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  if updated is None:
+    raise HTTPException(404, "Feed not found")
+  return updated
+
+
+@app.patch("/api/feeds/{feed_id}/rules")
+async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
+  import json as _json
+  feed = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  if feed is None:
+    raise HTTPException(404, "Feed not found")
+  if feed.extraction_rules is None:
+    raise HTTPException(400, "Not a web page feed")
+  rules = await request.json()
+  if not isinstance(rules, dict):
+    raise HTTPException(422, "Must be a JSON object")
+  for key in ("item", "title", "link"):
+    if not rules.get(key) or not isinstance(rules[key], str):
+      raise HTTPException(422, f"Missing or empty required field: {key}")
+  repo.update_feed_extraction_rules(feed_id, _json.dumps(rules))
   updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
   if updated is None:
     raise HTTPException(404, "Feed not found")
@@ -468,6 +560,7 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
       translate=feed_data.translate,
       summarize=feed_data.summarize,
       folder_id=folder_id,
+      extraction_rules=feed_data.extraction_rules,
     )
     repo.add_feed(row)
     existing_urls.add(feed_data.url)

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS feeds (
   last_fetched_at       TEXT,
   consecutive_failures  INTEGER NOT NULL DEFAULT 0,
   last_error            TEXT,
+  extraction_rules      TEXT,
   created_at            TEXT NOT NULL
 );
 
@@ -217,6 +218,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_read_at ON articles(read_at)")
     conn.commit()
     conn.execute("PRAGMA foreign_keys = ON")
+
+  feed_cols = {r[1] for r in conn.execute("PRAGMA table_info(feeds)").fetchall()}
+  if "extraction_rules" not in feed_cols:
+    conn.execute("ALTER TABLE feeds ADD COLUMN extraction_rules TEXT")
+    conn.commit()
 
 
 def init_schema() -> None:

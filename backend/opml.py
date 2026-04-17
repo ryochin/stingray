@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-import defusedxml.ElementTree as ET
+import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as SafeET
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -17,6 +18,7 @@ class ImportFeed:
   site_url: str | None = None
   translate: bool = False
   summarize: bool = False
+  extraction_rules: str | None = None
 
 
 @dataclass
@@ -55,15 +57,25 @@ def export_opml(folders: list[FolderRow], feeds: list[FeedRow]) -> str:
 
 
 def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
-  attrs: dict[str, str] = {"type": "rss", "text": feed.name, "title": feed.name}
+  is_web = feed.extraction_rules is not None
+  attrs: dict[str, str] = {
+    "type": "web" if is_web else "rss",
+    "text": feed.name,
+    "title": feed.name,
+  }
   if feed.url:
-    attrs["xmlUrl"] = feed.url
+    if is_web:
+      attrs["htmlUrl"] = feed.url
+    else:
+      attrs["xmlUrl"] = feed.url
   if feed.site_url:
     attrs["htmlUrl"] = feed.site_url
   if feed.translate:
     attrs["data-translate"] = "1"
   if feed.summarize:
     attrs["data-summarize"] = "1"
+  if is_web and feed.extraction_rules and feed.extraction_rules != "{}":
+    attrs["data-extraction-rules"] = feed.extraction_rules
   ET.SubElement(parent, "outline", **attrs)
 
 
@@ -90,7 +102,7 @@ def _should_translate(name: str, url: str | None = None, native_lang: str = "ja"
 
 def parse_opml(xml_content: str) -> tuple[list[ImportFolder], list[ImportFeed]]:
   """Parse OPML XML. Returns (folders_with_feeds, uncategorized_feeds)."""
-  root = ET.fromstring(xml_content)
+  root = SafeET.fromstring(xml_content)
   body = root.find("body")
   if body is None:
     return [], []
@@ -117,21 +129,28 @@ def parse_opml(xml_content: str) -> tuple[list[ImportFolder], list[ImportFeed]]:
 
 
 def _parse_feed_outline(el: ET.Element) -> ImportFeed | None:
+  feed_type = el.get("type", "rss")
+  is_web = feed_type == "web"
   xml_url = el.get("xmlUrl")
-  if not xml_url:
+  html_url = el.get("htmlUrl")
+
+  url = xml_url or (html_url if is_web else None)
+  if not url:
     return None
 
-  name = el.get("text") or el.get("title") or xml_url
-  site_url = el.get("htmlUrl") or None
+  name = el.get("text") or el.get("title") or url
+  site_url = html_url if not is_web else None
   translate_str = el.get("data-translate")
-  translate = translate_str == "1" if translate_str else _should_translate(name, xml_url)
+  translate = translate_str == "1" if translate_str else _should_translate(name, url)
   summarize_str = el.get("data-summarize")
   summarize = summarize_str == "1" if summarize_str else False
+  extraction_rules = el.get("data-extraction-rules") if is_web else None
 
   return ImportFeed(
     name=name,
-    url=xml_url,
+    url=url,
     site_url=site_url,
     translate=translate,
     summarize=summarize,
+    extraction_rules=extraction_rules or ("{}" if is_web else None),
   )

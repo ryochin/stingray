@@ -72,11 +72,12 @@ async def refresh_all(
 
     # 2. Fetch articles
     log.step("Fetching feeds...")
-    articles, feed_results = await fetch_all(
+    articles, feed_results, stale_web_feeds = await fetch_all(
       feeds_cfg, max_age_hours=config.max_age_hours, max_items=config.max_items_per_feed,
     )
     for feed_id, success, error_msg in feed_results:
       repo.update_feed_fetch_status(feed_id, success=success, error=error_msg)
+
     log.info(f"  {len(articles)} articles total.")
     result.total_articles = len(articles)
 

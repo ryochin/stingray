@@ -214,6 +214,18 @@ async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
   async with sem:
     if delay > 0:
       await asyncio.sleep(delay)
+    rules_json = feed.get("extraction_rules")
+    if rules_json and rules_json != "{}":
+      import json as _json
+      rules = _json.loads(rules_json) if isinstance(rules_json, str) else rules_json
+      if rules.get("item"):
+        from scraper import fetch_web_page
+        return await fetch_web_page(client, feed)
+      # Web feed with incomplete rules — skip
+      return [], False
+    if rules_json is not None:
+      # Web feed with no rules yet — skip
+      return [], False
     return await _fetch_rss(client, feed)
 
 
@@ -221,7 +233,7 @@ async def fetch_all(
   feeds_cfg: list[dict],
   max_age_hours: float = 25,
   max_items: int = 20,
-) -> tuple[list[Article], list[tuple[int, bool, str | None]]]:
+) -> tuple[list[Article], list[tuple[int, bool, str | None]], list[int]]:
   sem = asyncio.Semaphore(_CONCURRENCY)
   for feed in feeds_cfg:
     feed.setdefault("max_items", max_items)
@@ -242,11 +254,13 @@ async def fetch_all(
   cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
   articles = []
   feed_results: list[tuple[int, bool, str | None]] = []
+  stale_web_feeds: list[int] = []
   seen_urls: set[str] = set()
   cached_feeds = 0
   fetched_feeds = 0
   for i, result in enumerate(results):
     feed_id = task_feeds[i].get("id")
+    is_web_feed = bool(task_feeds[i].get("extraction_rules"))
     if isinstance(result, Exception):
       log.error(f"  Error: {task_feeds[i].get('name')}: {result}")
       if feed_id is not None:
@@ -259,6 +273,8 @@ async def fetch_all(
         fetched_feeds += 1
       if feed_id is not None:
         feed_results.append((feed_id, True, None))
+      if is_web_feed and len(feed_articles) == 0 and feed_id is not None:
+        stale_web_feeds.append(feed_id)
       for a in feed_articles:
         if a.url in seen_urls:
           continue
@@ -271,4 +287,4 @@ async def fetch_all(
           articles.append(a)
 
   log.info(f"  Feeds: {fetched_feeds} fetched, {cached_feeds} from cache.")
-  return articles, feed_results
+  return articles, feed_results, stale_web_feeds

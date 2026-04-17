@@ -37,15 +37,19 @@ class FeedRow(BaseModel):
   last_fetched_at: datetime | None = None
   consecutive_failures: int = 0
   last_error: str | None = None
+  extraction_rules: str | None = None
   created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
   def to_feed_cfg(self) -> dict[str, object]:
     """Convert to the dict format expected by feeds.fetch_all()."""
-    return {
+    cfg: dict[str, object] = {
       "id": self.id,
       "name": self.name,
       "url": self.url,
     }
+    if self.extraction_rules:
+      cfg["extraction_rules"] = self.extraction_rules
+    return cfg
 
 
 class ArticleRow(BaseModel):

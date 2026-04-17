@@ -18,6 +18,7 @@ export interface Feed {
   last_fetched_at: string | null
   consecutive_failures: number
   last_error: string | null
+  extraction_rules: string | null
   created_at: string
 }
 
@@ -207,6 +208,13 @@ export const api = {
 
   deleteFilter: (id: number) =>
     fetchJson<void>(`/filters/${id}`, { method: "DELETE" }),
+
+  updateFeedRules: (feedId: number, rules: Record<string, string | null>) =>
+    fetchJson<Feed>(`/feeds/${feedId}/rules`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rules),
+    }),
 
   exportFilters: async () => {
     const resp = await fetch(`${BASE}/filters/export`)

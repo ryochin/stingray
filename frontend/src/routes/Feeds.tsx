@@ -186,7 +186,7 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
   )
 }
 
-function OpmlButtons({ onError, onImported }: { onError: (e: Error) => void, onImported: () => void }) {
+function OpmlButtons({ onError, onImported, feedCount }: { onError: (e: Error) => void, onImported: () => void, feedCount: number }) {
   const [importResult, setImportResult] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -226,7 +226,8 @@ function OpmlButtons({ onError, onImported }: { onError: (e: Error) => void, onI
       )}
       <button
         onClick={handleExport}
-        className="px-3 py-1.5 rounded text-sm bg-bg-card text-text-muted border border-border hover:text-text transition-colors"
+        disabled={feedCount === 0}
+        className="px-3 py-1.5 rounded text-sm bg-bg-card text-text-muted border border-border hover:text-text transition-colors disabled:opacity-40 disabled:pointer-events-none"
       >
         Export OPML
       </button>
@@ -244,11 +245,82 @@ function OpmlButtons({ onError, onImported }: { onError: (e: Error) => void, onI
   )
 }
 
-function FeedDetails({ feed, stats, onDelete, onToggleTranslate }: {
+function ExtractionRulesEditor({ feed, onSaved }: { feed: Feed, onSaved: () => void }) {
+  const pretty = (() => {
+    try {
+      const parsed = JSON.parse(feed.extraction_rules || "{}")
+      return Object.keys(parsed).length > 0 ? JSON.stringify(parsed, null, 2) : ""
+    } catch { return feed.extraction_rules || "" }
+  })()
+  const [json, setJson] = useState(pretty)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const validate = (): Record<string, string | null> | null => {
+    try {
+      const parsed = JSON.parse(json)
+      if (typeof parsed !== "object" || Array.isArray(parsed)) {
+        setError("Must be a JSON object")
+        return null
+      }
+      if (!parsed.item || !parsed.title || !parsed.link) {
+        setError("item, title, link are required")
+        return null
+      }
+      return parsed
+    } catch {
+      setError("Invalid JSON")
+      return null
+    }
+  }
+
+  const handleSave = async () => {
+    const parsed = validate()
+    if (!parsed) return
+    setSaving(true)
+    setError(null)
+    try {
+      await api.updateFeedRules(feed.id, parsed)
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 p-2 bg-bg-card rounded border border-border">
+      <div className="text-xs font-semibold text-text-heading mb-1">CSS Extraction Rules</div>
+      <div className="text-xs text-text-dim mb-1.5">{"Keys: item*, title*, link*, link_attr, date, date_attr, thumbnail, thumbnail_attr"}</div>
+      <textarea
+        value={json}
+        onChange={(e) => setJson(e.target.value)}
+        rows={12}
+        spellCheck={false}
+        className="bg-bg-secondary text-text border border-border rounded px-2 py-1.5 text-xs font-mono w-full resize-y"
+        placeholder='{"item": "p", "title": "b a", "link": "b a", "link_attr": "href"}'
+      />
+      {error && <div className="text-xs text-red-400 mt-1">{error}</div>}
+      <div className="flex justify-end mt-1.5">
+        <button
+          onClick={handleSave}
+          disabled={saving || !json.trim()}
+          className="px-3 py-1 rounded text-xs bg-accent text-white hover:opacity-90 transition-opacity disabled:opacity-40"
+        >
+          {saving ? "Saving..." : "Save Rules"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function FeedDetails({ feed, stats, onDelete, onToggleTranslate, onRulesUpdated }: {
   feed: Feed
   stats?: FeedStats
   onDelete: () => void
   onToggleTranslate: () => void
+  onRulesUpdated?: () => void
 }) {
   return (
     <div className="px-3 pb-3 border-t border-border ml-7">
@@ -294,6 +366,9 @@ function FeedDetails({ feed, stats, onDelete, onToggleTranslate }: {
         <div className="text-xs text-red-400 mt-1 truncate" title={feed.last_error}>
           Error: {feed.last_error}
         </div>
+      )}
+      {feed.extraction_rules != null && onRulesUpdated && (
+        <ExtractionRulesEditor feed={feed} onSaved={onRulesUpdated} />
       )}
     </div>
   )
@@ -432,7 +507,26 @@ export default function Feeds() {
                   className="bg-bg-card text-text border border-border rounded px-2 py-0.5 text-sm font-medium w-full"
                 />
               ) : (
-                <div className="flex items-center gap-1.5">
+                <div
+                  className="flex items-center gap-1.5 cursor-pointer"
+                  onClick={() => toggleExpand(feed.id)}
+                >
+                  <span className="text-text-dim text-xs shrink-0">{isExpanded ? "\u25BE" : "\u25B8"}</span>
+                  {feed.extraction_rules != null && (() => {
+                    const hasRules = feed.extraction_rules !== "{}"
+                    return (
+                      <span
+                        className={`text-xs px-1 rounded shrink-0 ${
+                          hasRules
+                            ? "text-accent-text bg-accent-bg"
+                            : "text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 border-solid"
+                        }`}
+                        title={hasRules ? "Web page feed" : "Web page feed — rules not configured"}
+                      >
+                        WEB{hasRules ? "" : " ⚠"}
+                      </span>
+                    )
+                  })()}
                   {isUnhealthy && (
                     <span
                       className="text-yellow-400 text-sm shrink-0"
@@ -445,7 +539,7 @@ export default function Feeds() {
                     {feed.name}
                   </span>
                   <button
-                    onClick={() => { setEditingFeedId(feed.id); setEditFeedName(feed.name) }}
+                    onClick={(e) => { e.stopPropagation(); setEditingFeedId(feed.id); setEditFeedName(feed.name) }}
                     className="text-text-dim hover:text-text transition-colors text-xs"
                     title="Rename"
                   >
@@ -461,13 +555,6 @@ export default function Feeds() {
                 {feed.last_fetched_at && (
                   <>{" "}&middot;{" "}{formatRelativeTime(feed.last_fetched_at)}</>
                 )}
-                <button
-                  onClick={() => toggleExpand(feed.id)}
-                  className="text-text-dim hover:text-text ml-1"
-                  title="Details"
-                >
-                  {isExpanded ? "\u25BE" : "\u25B8"}
-                </button>
               </div>
             </div>
           </div>
@@ -517,6 +604,7 @@ export default function Feeds() {
               if (confirm(`Delete "${feed.name}"?`)) deleteFeed.mutate(feed.id)
             }}
             onToggleTranslate={() => updateTranslate.mutate({ feedId: feed.id, translate: !feed.translate })}
+            onRulesUpdated={feed.extraction_rules != null ? invalidate : undefined}
           />
         )}
       </div>
@@ -532,14 +620,15 @@ export default function Feeds() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-text-heading">Feeds</h2>
           <div className="flex items-center gap-2">
-            <OpmlButtons onError={onError} onImported={invalidate} />
+            <OpmlButtons onError={onError} onImported={invalidate} feedCount={feeds?.length ?? 0} />
             <button
               onClick={() => {
                 if (confirm("Delete ALL feeds, folders, and articles? This cannot be undone.")) {
                   api.deleteAllFeeds().then(invalidate).catch(onError)
                 }
               }}
-              className="px-3 py-1.5 rounded text-sm bg-bg-card text-red-400 border border-border hover:bg-red-900 hover:text-red-200 transition-colors"
+              disabled={!feeds || feeds.length === 0}
+              className="px-3 py-1.5 rounded text-sm bg-bg-card text-red-400 border border-border hover:bg-red-900 hover:text-red-200 transition-colors disabled:opacity-40 disabled:pointer-events-none"
             >
               Delete All
             </button>

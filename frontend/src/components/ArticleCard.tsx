@@ -150,6 +150,12 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
           </div>
         )}
 
+        {!parsedSummary && !article.content_translated && article.content_snippet && (
+          <p className={`mt-2 text-sm ${isRead ? "text-text-dim" : "text-text-muted"}`}>
+            {article.content_snippet}
+          </p>
+        )}
+
         {sanitizedHtml && (
           <div
             className="mt-2 text-base text-text article-html prose prose-invert max-w-none"

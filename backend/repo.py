@@ -189,6 +189,7 @@ def list_feeds(*, enabled: bool | None = None) -> list[FeedRow]:
         last_fetched_at=datetime.fromisoformat(r["last_fetched_at"]) if r["last_fetched_at"] else None,
         consecutive_failures=r["consecutive_failures"],
         last_error=r["last_error"],
+        extraction_rules=r["extraction_rules"],
         created_at=datetime.fromisoformat(r["created_at"]),
       )
       for r in rows
@@ -201,8 +202,8 @@ def add_feed(feed: FeedRow) -> int:
   conn = db.get_conn()
   try:
     cur = conn.execute(
-      """INSERT INTO feeds (name, url, site_url, translate, max_items, summarize, enabled, folder_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+      """INSERT INTO feeds (name, url, site_url, translate, max_items, summarize, enabled, folder_id, extraction_rules, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
       (
         feed.name,
         feed.url,
@@ -212,6 +213,7 @@ def add_feed(feed: FeedRow) -> int:
         int(feed.summarize),
         int(feed.enabled),
         feed.folder_id,
+        feed.extraction_rules,
         _now_iso(),
       ),
     )
@@ -272,6 +274,18 @@ def update_feed_site_url(feed_id: int, site_url: str) -> None:
     conn.execute(
       "UPDATE feeds SET site_url = ? WHERE id = ?",
       (site_url, feed_id),
+    )
+    conn.commit()
+  finally:
+    conn.close()
+
+
+def update_feed_extraction_rules(feed_id: int, rules: str | None) -> None:
+  conn = db.get_conn()
+  try:
+    conn.execute(
+      "UPDATE feeds SET extraction_rules = ? WHERE id = ?",
+      (rules, feed_id),
     )
     conn.commit()
   finally:
