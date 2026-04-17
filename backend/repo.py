@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 
 from models import Article
-from schemas import ArticleRow, FeedRow, FolderRow, NgWordRow, RefreshJob
+from schemas import ArticleRow, FeedRow, FilterRow, FolderRow, RefreshJob
 
 import db
 
@@ -15,15 +15,15 @@ def _now_iso() -> str:
   return datetime.now(tz=timezone.utc).isoformat()
 
 
-# -- NG words --
+# -- Filters --
 
 
-def list_ng_words() -> list[NgWordRow]:
+def list_filters() -> list[FilterRow]:
   conn = db.get_conn()
   try:
-    rows = conn.execute("SELECT * FROM ng_words ORDER BY id").fetchall()
+    rows = conn.execute("SELECT * FROM filters ORDER BY id").fetchall()
     return [
-      NgWordRow(
+      FilterRow(
         id=r["id"],
         pattern=r["pattern"],
         target=r["target"],
@@ -35,11 +35,11 @@ def list_ng_words() -> list[NgWordRow]:
     conn.close()
 
 
-def add_ng_word(pattern: str, target: str = "title") -> int:
+def add_filter(pattern: str, target: str = "title") -> int:
   conn = db.get_conn()
   try:
     cur = conn.execute(
-      "INSERT INTO ng_words (pattern, target, created_at) VALUES (?, ?, ?)",
+      "INSERT INTO filters (pattern, target, created_at) VALUES (?, ?, ?)",
       (pattern, target, _now_iso()),
     )
     conn.commit()
@@ -48,25 +48,25 @@ def add_ng_word(pattern: str, target: str = "title") -> int:
     conn.close()
 
 
-def delete_ng_word(ng_word_id: int) -> None:
+def delete_filter(filter_id: int) -> None:
   conn = db.get_conn()
   try:
-    conn.execute("DELETE FROM ng_words WHERE id = ?", (ng_word_id,))
+    conn.execute("DELETE FROM filters WHERE id = ?", (filter_id,))
     conn.commit()
   finally:
     conn.close()
 
 
-def _parse_ng_pattern(pattern: str) -> tuple[bool, str]:
+def _parse_filter_pattern(pattern: str) -> tuple[bool, str]:
   if len(pattern) > 2 and pattern.startswith("/") and pattern.endswith("/"):
     return True, pattern[1:-1]
   return False, pattern
 
 
-def _article_matches_ng(article: ArticleRow, ng_words: list[NgWordRow]) -> bool:
-  for ng in ng_words:
-    is_regex, pat = _parse_ng_pattern(ng.pattern)
-    if ng.target == "title":
+def _article_matches_filter(article: ArticleRow, filters: list[FilterRow]) -> bool:
+  for f in filters:
+    is_regex, pat = _parse_filter_pattern(f.pattern)
+    if f.target == "title":
       texts = [article.title, article.title_ja or ""]
     else:
       texts = [article.title, article.title_ja or "",
@@ -435,16 +435,16 @@ def list_articles(
     if unread:
       clauses.append("read_at IS NULL")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    ng_words = list_ng_words()
-    fetch_limit = limit * 2 if ng_words else limit
+    filters = list_filters()
+    fetch_limit = limit * 2 if filters else limit
     params.append(fetch_limit)
     rows = conn.execute(
       f"SELECT * FROM articles {where} ORDER BY published ASC LIMIT ?",
       params,
     ).fetchall()
     articles = [_row_to_article(r) for r in rows]
-    if ng_words:
-      articles = [a for a in articles if not _article_matches_ng(a, ng_words)]
+    if filters:
+      articles = [a for a in articles if not _article_matches_filter(a, filters)]
     return articles[:limit]
   finally:
     conn.close()

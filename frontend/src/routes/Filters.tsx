@@ -1,7 +1,7 @@
 import { useState, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
-import type { NgWord } from "../api/client"
+import type { FilterRule } from "../api/client"
 import Header from "../components/Header"
 
 export default function Filters() {
@@ -10,24 +10,24 @@ export default function Filters() {
   const [pattern, setPattern] = useState("")
   const [target, setTarget] = useState("title")
 
-  const { data: ngWords } = useQuery({
-    queryKey: ["ng-words"],
-    queryFn: api.getNgWords,
+  const { data: filters } = useQuery({
+    queryKey: ["filters"],
+    queryFn: api.getFilters,
   })
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["ng-words"] })
+    queryClient.invalidateQueries({ queryKey: ["filters"] })
     queryClient.invalidateQueries({ queryKey: ["articles"] })
   }
 
-  const createNgWord = useMutation({
+  const createFilter = useMutation({
     mutationFn: ({ pattern, target }: { pattern: string, target: string }) =>
-      api.createNgWord(pattern, target),
+      api.createFilter(pattern, target),
     onSuccess: () => { invalidate(); setPattern("") },
     onError: (e: Error) => setError(e.message),
   })
-  const deleteNgWord = useMutation({
-    mutationFn: api.deleteNgWord,
+  const deleteFilter = useMutation({
+    mutationFn: api.deleteFilter,
     onSuccess: invalidate,
     onError: (e: Error) => setError(e.message),
   })
@@ -37,7 +37,7 @@ export default function Filters() {
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
     if (!pattern.trim()) return
-    createNgWord.mutate({ pattern: pattern.trim(), target })
+    createFilter.mutate({ pattern: pattern.trim(), target })
   }
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -65,7 +65,7 @@ export default function Filters() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => api.exportFilters()}
-              disabled={!ngWords?.length}
+              disabled={!filters?.length}
               className="px-3 py-1.5 rounded text-sm bg-bg-card text-text-muted border border-border hover:text-text transition-colors disabled:opacity-40"
             >
               Export JSON
@@ -87,7 +87,7 @@ export default function Filters() {
           <div className="text-red-400 text-sm mb-4">{error}</div>
         )}
 
-        <h3 className="text-sm font-semibold text-text-heading mb-3">NG Words</h3>
+        <h3 className="text-sm font-semibold text-text-heading mb-3">Filter Rules</h3>
         <form onSubmit={handleCreate} className="flex gap-2 mb-3">
           <input
             value={pattern}
@@ -105,24 +105,24 @@ export default function Filters() {
           </select>
           <button
             type="submit"
-            disabled={createNgWord.isPending || !pattern.trim()}
+            disabled={createFilter.isPending || !pattern.trim()}
             className="px-3 py-1.5 rounded bg-accent text-white text-sm hover:opacity-90 transition-opacity disabled:opacity-40"
           >
             Add
           </button>
         </form>
-        {(ngWords ?? []).length > 0 && (
+        {(filters ?? []).length > 0 && (
           <div className="space-y-1">
-            {(ngWords ?? []).map((ng: NgWord) => (
-              <div key={ng.id} className="flex items-center gap-2 p-2 bg-bg-secondary rounded border border-border">
-                <span className={`flex-1 text-sm ${isRegex(ng.pattern) ? "font-mono text-amber-400" : "text-text"}`}>
-                  {ng.pattern}
+            {(filters ?? []).map((filter: FilterRule) => (
+              <div key={filter.id} className="flex items-center gap-2 p-2 bg-bg-secondary rounded border border-border">
+                <span className={`flex-1 text-sm ${isRegex(filter.pattern) ? "font-mono text-amber-400" : "text-text"}`}>
+                  {filter.pattern}
                 </span>
                 <span className="text-xs text-text-dim px-1.5 py-0.5 bg-bg-card rounded">
-                  {ng.target}
+                  {filter.target}
                 </span>
                 <button
-                  onClick={() => deleteNgWord.mutate(ng.id)}
+                  onClick={() => deleteFilter.mutate(filter.id)}
                   className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors"
                 >
                   Delete

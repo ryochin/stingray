@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS refresh_jobs (
   error       TEXT
 );
 
-CREATE TABLE IF NOT EXISTS ng_words (
+CREATE TABLE IF NOT EXISTS filters (
   id         INTEGER PRIMARY KEY,
   pattern    TEXT NOT NULL,
   target     TEXT NOT NULL DEFAULT 'title',
@@ -85,9 +85,9 @@ _MIGRATIONS = [
   """\
   ALTER TABLE feeds ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL;
   """,
-  # Migration 4: ng_words table
+  # Migration 4: filters table (originally ng_words)
   """\
-  CREATE TABLE IF NOT EXISTS ng_words (
+  CREATE TABLE IF NOT EXISTS filters (
     id         INTEGER PRIMARY KEY,
     pattern    TEXT NOT NULL,
     target     TEXT NOT NULL DEFAULT 'title',
@@ -141,8 +141,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     conn.commit()
     tables.add("folders")
 
-  if "ng_words" not in tables:
+  if "filters" not in tables and "ng_words" not in tables:
     conn.execute(_MIGRATIONS[3])
+    conn.commit()
+  elif "ng_words" in tables and "filters" not in tables:
+    conn.execute("ALTER TABLE ng_words RENAME TO filters")
     conn.commit()
 
   art_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}

@@ -21,7 +21,7 @@ import db
 import repo
 from feeds import _fetch_rss
 from fetcher import refresh_all
-from schemas import AppConfig, ArticleRow, FeedRow, FolderRow, NgWordRow, StatusResponse
+from schemas import AppConfig, ArticleRow, FeedRow, FilterRow, FolderRow, StatusResponse
 
 # -- Globals for background refresh --
 _refresh_lock = asyncio.Lock()
@@ -350,39 +350,39 @@ def move_feed_to_folder(feed_id: int, body: FeedMove) -> FeedRow:
   return updated
 
 
-# -- NG words --
+# -- Filters --
 
 
-class NgWordCreate(BaseModel):
+class FilterCreate(BaseModel):
   pattern: str
   target: str = "title"
 
 
-@app.get("/api/ng-words")
-def get_ng_words() -> list[NgWordRow]:
-  return repo.list_ng_words()
+@app.get("/api/filters")
+def get_filters() -> list[FilterRow]:
+  return repo.list_filters()
 
 
-@app.post("/api/ng-words", status_code=201)
-def create_ng_word(body: NgWordCreate) -> NgWordRow:
-  ng_id = repo.add_ng_word(body.pattern, body.target)
-  words = repo.list_ng_words()
-  for w in words:
-    if w.id == ng_id:
-      return w
-  raise HTTPException(404, "NG word not found after creation")
+@app.post("/api/filters", status_code=201)
+def create_filter(body: FilterCreate) -> FilterRow:
+  filter_id = repo.add_filter(body.pattern, body.target)
+  filters = repo.list_filters()
+  for f in filters:
+    if f.id == filter_id:
+      return f
+  raise HTTPException(404, "Filter not found after creation")
 
 
-@app.delete("/api/ng-words/{ng_word_id}", status_code=204)
-def delete_ng_word(ng_word_id: int) -> None:
-  repo.delete_ng_word(ng_word_id)
+@app.delete("/api/filters/{filter_id}", status_code=204)
+def delete_filter(filter_id: int) -> None:
+  repo.delete_filter(filter_id)
 
 
-@app.get("/api/ng-words/export")
-def export_ng_words() -> Response:
+@app.get("/api/filters/export")
+def export_filters() -> Response:
   import json
-  words = repo.list_ng_words()
-  data = [{"pattern": w.pattern, "target": w.target} for w in words]
+  filters = repo.list_filters()
+  data = [{"pattern": f.pattern, "target": f.target} for f in filters]
   return Response(
     content=json.dumps(data, ensure_ascii=False, indent=2),
     media_type="application/json",
@@ -390,8 +390,8 @@ def export_ng_words() -> Response:
   )
 
 
-@app.post("/api/ng-words/import")
-async def import_ng_words(file: UploadFile) -> dict[str, int]:
+@app.post("/api/filters/import")
+async def import_filters(file: UploadFile) -> dict[str, int]:
   import json
   try:
     content = (await file.read()).decode("utf-8")
@@ -400,7 +400,7 @@ async def import_ng_words(file: UploadFile) -> dict[str, int]:
     raise HTTPException(400, f"Invalid JSON: {exc}")
   if not isinstance(data, list):
     raise HTTPException(400, "Expected a JSON array")
-  existing = {(w.pattern, w.target) for w in repo.list_ng_words()}
+  existing = {(f.pattern, f.target) for f in repo.list_filters()}
   created = 0
   skipped = 0
   for item in data:
@@ -413,7 +413,7 @@ async def import_ng_words(file: UploadFile) -> dict[str, int]:
     if (pattern, target) in existing:
       skipped += 1
       continue
-    repo.add_ng_word(pattern, target)
+    repo.add_filter(pattern, target)
     existing.add((pattern, target))
     created += 1
   return {"created": created, "skipped": skipped}

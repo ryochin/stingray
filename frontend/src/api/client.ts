@@ -59,7 +59,7 @@ export interface FeedCreate {
   folder_id?: number
 }
 
-export interface NgWord {
+export interface FilterRule {
   id: number
   pattern: string
   target: string
@@ -196,20 +196,20 @@ export const api = {
     return fetchJson<{ marked: number }>(`/articles/read-all?${params}`, { method: "POST" })
   },
 
-  getNgWords: () => fetchJson<NgWord[]>("/ng-words"),
+  getFilters: () => fetchJson<FilterRule[]>("/filters"),
 
-  createNgWord: (pattern: string, target: string = "title") =>
-    fetchJson<NgWord>("/ng-words", {
+  createFilter: (pattern: string, target: string = "title") =>
+    fetchJson<FilterRule>("/filters", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pattern, target }),
     }),
 
-  deleteNgWord: (id: number) =>
-    fetchJson<void>(`/ng-words/${id}`, { method: "DELETE" }),
+  deleteFilter: (id: number) =>
+    fetchJson<void>(`/filters/${id}`, { method: "DELETE" }),
 
   exportFilters: async () => {
-    const resp = await fetch(`${BASE}/ng-words/export`)
+    const resp = await fetch(`${BASE}/filters/export`)
     if (!resp.ok) throw new Error("Export failed")
     const blob = await resp.blob()
     const url = URL.createObjectURL(blob)
@@ -223,7 +223,7 @@ export const api = {
   importFilters: async (file: File) => {
     const form = new FormData()
     form.append("file", file)
-    const resp = await fetch(`${BASE}/ng-words/import`, { method: "POST", body: form })
+    const resp = await fetch(`${BASE}/filters/import`, { method: "POST", body: form })
     if (!resp.ok) throw new Error("Import failed")
     return resp.json() as Promise<{ created: number, skipped: number }>
   },

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 # -- DB row models --
 
 
-class NgWordRow(BaseModel):
+class FilterRow(BaseModel):
   id: int = 0
   pattern: str
   target: str = "title"
