@@ -85,7 +85,12 @@ export type Selection =
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init)
   if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText}`)
+    let detail = ""
+    try {
+      const body = await res.json()
+      detail = body.detail ?? ""
+    } catch {}
+    throw new Error(detail || `API error: ${res.status} ${res.statusText}`)
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>

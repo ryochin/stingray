@@ -207,6 +207,7 @@ export default function Articles() {
   }, [selection, orderedFeedIds, updateSelection])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
     const tag = (e.target as HTMLElement).tagName
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
 

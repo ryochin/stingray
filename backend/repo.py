@@ -169,10 +169,10 @@ def list_feeds(*, enabled: bool | None = None) -> list[FeedRow]:
   conn = db.get_conn()
   try:
     if enabled is None:
-      rows = conn.execute("SELECT * FROM feeds ORDER BY id").fetchall()
+      rows = conn.execute("SELECT * FROM feeds ORDER BY id DESC").fetchall()
     else:
       rows = conn.execute(
-        "SELECT * FROM feeds WHERE enabled = ? ORDER BY id",
+        "SELECT * FROM feeds WHERE enabled = ? ORDER BY id DESC",
         (int(enabled),),
       ).fetchall()
     return [
