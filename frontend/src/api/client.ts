@@ -11,7 +11,7 @@ export interface Feed {
   name: string
   url: string | null
   site_url: string | null
-  lang: string
+  translate: boolean
   summarize: boolean
   enabled: boolean
   folder_id: number | null
@@ -32,13 +32,13 @@ export interface Article {
   url: string
   feed_id: number | null
   title: string
-  title_ja: string | null
+  title_translated: string | null
   source: string
   published: string | null
   content_snippet: string | null
   summary: string | null
   content_html: string | null
-  lang: string | null
+  content_translated: string | null
   read_at: string | null
 }
 
@@ -54,7 +54,7 @@ export interface RefreshStatus {
 export interface FeedCreate {
   name?: string
   url: string
-  lang?: string
+  translate?: boolean
   summarize?: boolean
   folder_id?: number
 }
@@ -164,11 +164,11 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
-  updateFeedLang: (id: number, lang: string) =>
-    fetchJson<Feed>(`/feeds/${id}/lang`, {
+  updateFeedTranslate: (id: number, translate: boolean) =>
+    fetchJson<Feed>(`/feeds/${id}/translate`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lang }),
+      body: JSON.stringify({ translate }),
     }),
 
   refresh: () =>

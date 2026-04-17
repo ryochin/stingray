@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS feeds (
   url                   TEXT,
   site_url              TEXT,
   lang                  TEXT NOT NULL DEFAULT 'en',
+  translate             INTEGER NOT NULL DEFAULT 0,
   max_items             INTEGER NOT NULL DEFAULT 20,
   summarize             INTEGER NOT NULL DEFAULT 1,
   enabled               INTEGER NOT NULL DEFAULT 1,
@@ -31,14 +32,16 @@ CREATE TABLE IF NOT EXISTS feeds (
 
 CREATE TABLE IF NOT EXISTS articles (
   url             TEXT PRIMARY KEY,
-  feed_id         INTEGER REFERENCES feeds(id) ON DELETE SET NULL,
+  feed_id         INTEGER REFERENCES feeds(id) ON DELETE CASCADE,
   title           TEXT NOT NULL,
   title_ja        TEXT,
+  title_translated TEXT,
   source          TEXT NOT NULL,
   published       TEXT,
   content_snippet TEXT,
   summary         TEXT,
   content_html    TEXT,
+  content_translated TEXT,
   lang            TEXT,
   fetched_at      TEXT NOT NULL,
   read_at         TEXT
@@ -164,6 +167,56 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE feeds ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0")
     conn.execute("ALTER TABLE feeds ADD COLUMN last_error TEXT")
     conn.commit()
+    feed_cols.update(("last_fetched_at", "consecutive_failures", "last_error"))
+
+  if "translate" not in feed_cols:
+    conn.execute("ALTER TABLE feeds ADD COLUMN translate INTEGER NOT NULL DEFAULT 0")
+    conn.execute("UPDATE feeds SET translate = 1 WHERE lang != 'ja'")
+    conn.commit()
+
+  art_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
+  if "title_translated" not in art_cols:
+    conn.execute("ALTER TABLE articles ADD COLUMN title_translated TEXT")
+    conn.execute("ALTER TABLE articles ADD COLUMN content_translated TEXT")
+    conn.execute("UPDATE articles SET title_translated = title_ja WHERE title_ja IS NOT NULL")
+    conn.commit()
+
+  # Migrate articles foreign key from SET NULL to CASCADE
+  fk_info = conn.execute("PRAGMA foreign_key_list(articles)").fetchall()
+  needs_cascade = True
+  for fk in fk_info:
+    if fk[2] == "feeds" and fk[6] == "CASCADE":
+      needs_cascade = False
+      break
+  if needs_cascade and fk_info:
+    conn.execute("PRAGMA foreign_keys = OFF")
+    art_cols = [r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()]
+    cols = ", ".join(art_cols)
+    conn.execute(f"""\
+      CREATE TABLE articles_new (
+        url             TEXT PRIMARY KEY,
+        feed_id         INTEGER REFERENCES feeds(id) ON DELETE CASCADE,
+        title           TEXT NOT NULL,
+        title_ja        TEXT,
+        title_translated TEXT,
+        source          TEXT NOT NULL,
+        published       TEXT,
+        content_snippet TEXT,
+        summary         TEXT,
+        content_html    TEXT,
+        content_translated TEXT,
+        lang            TEXT,
+        fetched_at      TEXT NOT NULL,
+        read_at         TEXT
+      )""")
+    conn.execute(f"INSERT INTO articles_new ({cols}) SELECT {cols} FROM articles")
+    conn.execute("DROP TABLE articles")
+    conn.execute("ALTER TABLE articles_new RENAME TO articles")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_feed ON articles(feed_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_read_at ON articles(read_at)")
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
 
 
 def init_schema() -> None:

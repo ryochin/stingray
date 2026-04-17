@@ -9,10 +9,10 @@ class Article:
   source: str
   published: datetime | None
   content_snippet: str
-  lang: str = "en"
-  title_ja: str = ""
+  title_translated: str = ""
   summary: str = ""
   content_html: str = ""
+  content_translated: str = ""
 
   def to_dict(self) -> dict:
     return {
@@ -21,9 +21,10 @@ class Article:
       "source": self.source,
       "published": self.published.isoformat() if self.published else None,
       "content_snippet": self.content_snippet,
-      "title_ja": self.title_ja,
+      "title_translated": self.title_translated,
       "summary": self.summary,
       "content_html": self.content_html,
+      "content_translated": self.content_translated,
     }
 
   @classmethod
@@ -37,7 +38,8 @@ class Article:
       source=d["source"],
       published=published,
       content_snippet=d.get("content_snippet", ""),
-      title_ja=d.get("title_ja", ""),
+      title_translated=d.get("title_translated", ""),
       summary=d.get("summary", ""),
       content_html=d.get("content_html", ""),
+      content_translated=d.get("content_translated", ""),
     )

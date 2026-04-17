@@ -35,7 +35,7 @@ interface Props {
 const ArticleCard = forwardRef<HTMLDivElement, Props>(
   ({ article, focused, pendingSummary, feedName, feedFaviconUrl, onClick }, ref) => {
     const isRead = article.read_at != null
-    const hasTranslation = article.title_ja && article.title_ja !== article.title
+    const hasTranslation = article.title_translated && article.title_translated !== article.title
     const titleColor = focused ? "text-accent-text" : isRead ? "text-text-muted" : "text-text-heading"
     const parsedSummary = useMemo(
       () => article.summary ? parseSummary(article.summary) : null,
@@ -62,7 +62,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       <div
         ref={ref}
         onClick={onClick}
-        className={`py-5 px-6 rounded-lg mb-4 border cursor-pointer transition-colors ${
+        className={`py-5 px-6 rounded-lg mb-4 border cursor-pointer transition-all duration-500 ${
           focused
             ? "bg-bg-hover border-accent-bg"
             : isRead
@@ -79,7 +79,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
                 rel="noopener noreferrer"
                 className={`${titleColor} hover:underline no-underline`}
               >
-                {article.title_ja}
+                {article.title_translated}
               </a>
             </div>
             <div className="mt-0.5">
@@ -121,12 +121,12 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
           </div>
         )}
 
-        {!parsedSummary && pendingSummary && (
+        {!parsedSummary && !article.content_translated && pendingSummary && (
           <div className="mt-1 text-sm text-text-dim italic">Awaiting summary...</div>
         )}
 
         {parsedSummary && (
-          <div className={`mt-2 pl-3 border-l-2 border-border ${isRead ? "text-text-muted" : "text-text"}`}>
+          <div className={`mt-2 pl-3 border-l-2 border-solid border-accent-bg ${isRead ? "text-text-muted" : "text-text"}`}>
             {parsedSummary.text && <p>{parsedSummary.text}</p>}
             {!sanitizedHtml && parsedSummary.imageUrls.length > 0 && (
               <div className="mt-2 space-y-2">
@@ -141,6 +141,12 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {article.content_translated && (
+          <div className={`mt-2 pl-3 border-l-2 border-solid border-accent-bg ${isRead ? "text-text-muted" : "text-text"}`}>
+            <p>{article.content_translated}</p>
           </div>
         )}
 

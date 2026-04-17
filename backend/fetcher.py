@@ -28,11 +28,20 @@ def _build_feed_id_map(feeds: list[FeedRow]) -> dict[str, int]:
   return {f.name: f.id for f in feeds}
 
 
-def _should_summarize(article: Article) -> bool:
+def _needs_llm(article: Article, *, translate: bool) -> bool:
   """Check if an article needs LLM processing."""
-  if article.summary and (article.lang == "ja" or article.title_ja):
-    return False
-  return True
+  if translate:
+    # Non-native: need both title_translated and (summary or content_translated)
+    if article.title_translated and (article.summary or article.content_translated):
+      return False
+    return True
+  else:
+    # Native: only need summary for long content
+    if article.summary:
+      return False
+    if article.content_snippet and len(article.content_snippet) < SHORT_SNIPPET_CHARS:
+      return False  # Native + short → nothing to do
+    return True
 
 
 async def refresh_all(
@@ -59,6 +68,7 @@ async def refresh_all(
     feeds_cfg = [f.to_feed_cfg() for f in feeds]
     feed_id_map = _build_feed_id_map(feeds)
     summarize_map = {f.name: f.summarize for f in feeds}
+    translate_map = {f.name: f.translate for f in feeds}
 
     # 2. Fetch articles
     log.step("Fetching feeds...")
@@ -79,40 +89,38 @@ async def refresh_all(
     cache_dir = Path(config.cache_dir)
     articles = enrich_from_legacy_cache(articles, cache_dir)
 
-    # 4. Summarize (respecting per-feed summarize setting)
+    # 4. LLM processing (respecting per-feed summarize + translate settings)
     if not no_summary:
-      # Short ja snippets: reuse as summary (only for feeds with summarize enabled)
-      for a in articles:
-        if (
-          summarize_map.get(a.source, False)
-          and a.lang == "ja"
-          and not a.summary
-          and a.content_snippet
-          and len(a.content_snippet) < SHORT_SNIPPET_CHARS
-        ):
-          a.summary = a.content_snippet
-
-      need_summary = [
+      need_llm = [
         a for a in articles
         if summarize_map.get(a.source, False)
-        and _should_summarize(a)
+        and _needs_llm(a, translate=translate_map.get(a.source, False))
       ]
 
-      if need_summary:
+      # Build sets for summarize_all
+      translate_set = {name for name, flag in translate_map.items() if flag}
+      short_set = {
+        a.url for a in need_llm
+        if a.content_snippet and len(a.content_snippet) < SHORT_SNIPPET_CHARS
+      }
+
+      if need_llm:
         model = config.ollama.model
         base_url = os.environ.get("OLLAMA_BASE_URL") or config.ollama.base_url
         timeout = config.ollama.timeout
-        log.step(f"Summarizing {len(need_summary)} articles with {model}...")
+        log.step(f"Processing {len(need_llm)} articles with {model}...")
         failures = await summarize_all(
-          need_summary, model=model, base_url=base_url, timeout=timeout,
+          need_llm, model=model, base_url=base_url, timeout=timeout,
+          translate_set=translate_set, short_set=short_set,
+          native_lang=config.native_lang,
         )
         result.summarize_failures = failures
         if failures:
-          log.warn(f"  Done ({failures}/{len(need_summary)} failed).")
+          log.warn(f"  Done ({failures}/{len(need_llm)} failed).")
         else:
           log.success("  Done.")
       else:
-        log.success("  All articles already have translations.")
+        log.success("  All articles already processed.")
 
     # 5. Backfill site_url for feeds missing it
     feeds_needing_site_url = [f for f in feeds if not f.site_url and f.url]
@@ -144,19 +152,23 @@ async def refresh_all(
     repo.finish_refresh_job(job_id, "completed", new_count, None)
     return result
 
-  except Exception as e:
-    repo.finish_refresh_job(job_id, "failed", 0, str(e))
+  except Exception as exc:
+    repo.finish_refresh_job(job_id, "failed", 0, str(exc))
     raise
 
 
 async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
-  """Summarize articles that are pending (feed.summarize=True but no summary yet).
+  """Process articles that are pending (feed.summarize=True but not yet processed).
 
   Returns the number of articles processed.
   """
   pending = repo.list_pending_summaries(limit=batch_size)
   if not pending:
     return 0
+
+  # Build translate map from feeds
+  feeds = repo.list_feeds(enabled=True)
+  feed_translate = {f.id: f.translate for f in feeds}
 
   # Convert ArticleRow to Article for summarizer
   articles = [
@@ -166,30 +178,49 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
       source=row.source,
       published=row.published,
       content_snippet=row.content_snippet or "",
-      lang=row.lang or "en",
-      title_ja=row.title_ja or "",
+      title_translated=row.title_translated or "",
       summary=row.summary or "",
       content_html=row.content_html or "",
+      content_translated=row.content_translated or "",
     )
     for row in pending
   ]
 
-  # Short ja snippets: reuse as summary
-  for a in articles:
-    if a.lang == "ja" and not a.summary and a.content_snippet and len(a.content_snippet) < SHORT_SNIPPET_CHARS:
-      a.summary = a.content_snippet
+  # Determine which articles need translation based on feed
+  translate_set: set[str] = set()
+  for row in pending:
+    if row.feed_id and feed_translate.get(row.feed_id, False):
+      translate_set.add(row.source)
 
-  need_llm = [a for a in articles if _should_summarize(a)]
+  # Filter to articles that actually need LLM
+  need_llm = [
+    a for a in articles
+    if _needs_llm(a, translate=a.source in translate_set)
+  ]
+
   if need_llm:
+    short_set = {
+      a.url for a in need_llm
+      if a.content_snippet and len(a.content_snippet) < SHORT_SNIPPET_CHARS
+    }
     model = config.ollama.model
     base_url = os.environ.get("OLLAMA_BASE_URL") or config.ollama.base_url
     timeout = config.ollama.timeout
-    log.step(f"Background summarizing {len(need_llm)} articles with {model}...")
-    await summarize_all(need_llm, model=model, base_url=base_url, timeout=timeout)
+    log.step(f"Background processing {len(need_llm)} articles with {model}...")
+    await summarize_all(
+      need_llm, model=model, base_url=base_url, timeout=timeout,
+      translate_set=translate_set, short_set=short_set,
+      native_lang=config.native_lang,
+    )
 
   # Persist results
-  for a in articles:
-    if a.title_ja or a.summary:
-      repo.update_article_summary(a.url, a.title_ja or None, a.summary or None)
+  for article in articles:
+    if article.title_translated or article.summary or article.content_translated:
+      repo.update_article_summary(
+        article.url,
+        article.title_translated or None,
+        article.summary or None,
+        article.content_translated or None,
+      )
 
   return len(articles)

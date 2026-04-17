@@ -59,13 +59,13 @@ export default function Articles() {
   const { data: allArticles, isLoading, isError } = useQuery({
     queryKey: ["articles"],
     queryFn: () => api.getArticles(),
-    refetchInterval: 60_000,
+    refetchInterval: 15_000,
   })
 
   const { data: feeds } = useQuery({
     queryKey: ["feeds"],
     queryFn: api.getFeeds,
-    refetchInterval: 60_000,
+    refetchInterval: 15_000,
   })
 
   const { data: folders } = useQuery({
@@ -221,9 +221,13 @@ export default function Articles() {
     }
 
     const len = filtered.length
-    if (len === 0 && e.key !== "A") return
 
-    if (e.key === "j") {
+    if (e.key === "j" || e.key === " ") {
+      if (len === 0) {
+        e.preventDefault()
+        goToNextFeed()
+        return
+      }
       e.preventDefault()
       setFocusIndex((prev) => {
         markFocusedAsRead(prev)
@@ -233,13 +237,15 @@ export default function Articles() {
         }
         return prev + 1
       })
+    } else if (len === 0) {
+      return
     } else if (e.key === "k") {
       e.preventDefault()
       setFocusIndex((prev) => {
         markFocusedAsRead(prev)
         return Math.max(prev - 1, 0)
       })
-    } else if (e.key === "o" || e.key === "Enter") {
+    } else if (e.key === "v" || e.key === "o" || e.key === "Enter") {
       e.preventDefault()
       setFocusIndex((i) => {
         if (i >= 0 && i < len) {
@@ -286,7 +292,15 @@ export default function Articles() {
     })
   }, [markFocusedAsRead])
 
-  const totalUnread = Array.from(unreadCounts.values()).reduce((a, b) => a + b, 0)
+  const selectedUnread = useMemo(() => {
+    if (selection.type === "feed") return unreadCounts.get(selection.id) ?? 0
+    if (selection.type === "folder" && folderFeedIds) {
+      let sum = 0
+      for (const feedId of folderFeedIds) sum += unreadCounts.get(feedId) ?? 0
+      return sum
+    }
+    return Array.from(unreadCounts.values()).reduce((a, b) => a + b, 0)
+  }, [selection, unreadCounts, folderFeedIds])
 
   return (
     <div className="flex flex-col h-screen">
@@ -325,7 +339,7 @@ export default function Articles() {
                     : "bg-bg-card text-text-muted hover:text-text"
                 }`}
               >
-                Unread{totalUnread > 0 ? ` (${totalUnread})` : ""}
+                Unread{selectedUnread > 0 ? ` (${selectedUnread})` : ""}
               </button>
               <button
                 onClick={() => setShowUnreadOnly(false)}
@@ -366,7 +380,7 @@ export default function Articles() {
                     key={article.url}
                     article={article}
                     focused={index === focusIndex}
-                    pendingSummary={!article.summary && article.feed_id != null && summarizeFeedIds.has(article.feed_id)}
+                    pendingSummary={!article.summary && !article.content_translated && article.feed_id != null && summarizeFeedIds.has(article.feed_id)}
                     feedName={feed?.name}
                     feedFaviconUrl={feed ? faviconUrl(feed) : null}
                     ref={(el) => setRef(index, el)}
@@ -392,9 +406,9 @@ export default function Articles() {
             <table className="text-sm w-full">
               <tbody>
                 {[
-                  ["j", "Next article"],
+                  ["j / Space", "Next article"],
                   ["k", "Previous article"],
-                  ["o / Enter", "Open in new tab"],
+                  ["v / o / Enter", "Open in new tab"],
                   ["m", "Toggle read/unread"],
                   ["Shift+A", "Mark all as read"],
                   ["?", "Show/hide this help"],

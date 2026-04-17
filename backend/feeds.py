@@ -3,6 +3,7 @@ import hashlib
 import html
 import random
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
 import feedparser
@@ -87,11 +88,73 @@ async def _fetch_with_cache(
   return body, False
 
 
+def _extract_item_images(body: str) -> dict[str, str]:
+  """Extract thumbnail images from RSS/Atom XML that feedparser ignores.
+
+  Checks: <image>, <media:content>, <media:thumbnail>, <enclosure type="image/*">.
+  Returns a dict mapping item link URL to image URL.
+  """
+  images: dict[str, str] = {}
+  try:
+    root = ET.fromstring(body)
+  except ET.ParseError:
+    return images
+
+  ns = {
+    "media": "http://search.yahoo.com/mrss/",
+    "atom": "http://www.w3.org/2005/Atom",
+  }
+
+  # RSS items
+  for item in root.iter("item"):
+    link_el = item.find("link")
+    link = link_el.text.strip() if link_el is not None and link_el.text else None
+    if not link:
+      continue
+    # <image>url</image> (non-standard, e.g. wired.jp)
+    img_el = item.find("image")
+    if img_el is not None and img_el.text and img_el.text.strip():
+      images[link] = img_el.text.strip()
+      continue
+    # <media:content url="..."/>
+    media = item.find("media:content", ns)
+    if media is not None and media.get("url"):
+      images[link] = media.get("url", "")
+      continue
+    # <media:thumbnail url="..."/>
+    thumb = item.find("media:thumbnail", ns)
+    if thumb is not None and thumb.get("url"):
+      images[link] = thumb.get("url", "")
+      continue
+    # <enclosure type="image/..." url="..."/>
+    enc = item.find("enclosure")
+    if enc is not None and (enc.get("type", "").startswith("image/")) and enc.get("url"):
+      images[link] = enc.get("url", "")
+
+  # Atom entries
+  for entry in root.iter("{http://www.w3.org/2005/Atom}entry"):
+    link_el = entry.find("atom:link[@rel='alternate']", ns)
+    if link_el is None:
+      link_el = entry.find("atom:link", ns)
+    link = link_el.get("href", "").strip() if link_el is not None else ""
+    if not link:
+      continue
+    media = entry.find("media:content", ns)
+    if media is not None and media.get("url"):
+      images[link] = media.get("url", "")
+      continue
+    thumb = entry.find("media:thumbnail", ns)
+    if thumb is not None and thumb.get("url"):
+      images[link] = thumb.get("url", "")
+
+  return images
+
+
 def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
   max_items = feed_cfg.get("max_items", 20)
   source = feed_cfg["name"]
-  default_lang = feed_cfg.get("lang", "en")
   parsed = feedparser.parse(body)
+  item_images = _extract_item_images(body)
 
   articles = []
   for entry in parsed.entries[:max_items]:
@@ -120,6 +183,11 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
     if not link or not link.startswith(("http://", "https://")):
       continue
 
+    # Inject thumbnail image into content_html if not already present
+    thumb_url = item_images.get(link)
+    if thumb_url and thumb_url not in raw_html:
+      raw_html = f'<img src="{html.escape(thumb_url)}" alt="" />\n{raw_html}'
+
     title = entry.get("title", "(no title)")
     articles.append(Article(
       title=title,
@@ -128,7 +196,6 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
       published=published,
       content_snippet=_truncate(snippet),
       content_html=raw_html,
-      lang=_detect_lang(title, default_lang),
     ))
 
   return articles
@@ -158,7 +225,11 @@ async def fetch_all(
   sem = asyncio.Semaphore(_CONCURRENCY)
   for feed in feeds_cfg:
     feed.setdefault("max_items", max_items)
-  async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+  async with httpx.AsyncClient(
+    timeout=httpx.Timeout(60, connect=30),
+    follow_redirects=True,
+    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+  ) as client:
     tasks = []
     task_feeds = []
     for feed in feeds_cfg:

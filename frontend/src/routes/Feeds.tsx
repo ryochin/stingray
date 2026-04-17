@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useCallback } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, FeedCreate, FeedStats } from "../api/client"
@@ -7,12 +7,11 @@ import Header from "../components/Header"
 function AddFeedForm({ onAdd, isAdding, folders }: { onAdd: (f: FeedCreate) => void, isAdding: boolean, folders: Folder[] }) {
   const [name, setName] = useState("")
   const [url, setUrl] = useState("")
-  const [lang, setLang] = useState("")
   const [folderId, setFolderId] = useState<number | undefined>(undefined)
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
-    const body: FeedCreate = { name, url, ...(lang ? { lang } : {}) }
+    const body: FeedCreate = { name, url }
     if (folderId != null) body.folder_id = folderId
     onAdd(body)
   }
@@ -38,15 +37,6 @@ function AddFeedForm({ onAdd, isAdding, folders }: { onAdd: (f: FeedCreate) => v
           placeholder="Auto-detect" />
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-xs text-text-muted">Lang</label>
-        <select value={lang} onChange={(e) => setLang(e.target.value)}
-          className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm">
-          <option value="">Auto</option>
-          <option value="en">en</option>
-          <option value="ja">ja</option>
-        </select>
-      </div>
-      <div className="flex flex-col gap-1">
         <label className="text-xs text-text-muted">Folder</label>
         <select value={folderId ?? ""} onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : undefined)}
           className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm">
@@ -67,6 +57,8 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
   const [newName, setNewName] = useState("")
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState("")
+  const dragSrcId = useRef<number | null>(null)
+  const [dragOverId, setDragOverId] = useState<number | null>(null)
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["folders"] })
@@ -105,6 +97,22 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
     renameFolder.mutate({ id: editingId, name: editName.trim() })
   }
 
+  const handleDrop = useCallback((targetId: number) => {
+    const srcId = dragSrcId.current
+    dragSrcId.current = null
+    setDragOverId(null)
+    if (srcId == null || srcId === targetId) return
+    const ids = folders.map((f) => f.id)
+    const fromIdx = ids.indexOf(srcId)
+    const toIdx = ids.indexOf(targetId)
+    if (fromIdx < 0 || toIdx < 0) return
+    ids.splice(fromIdx, 1)
+    ids.splice(toIdx, 0, srcId)
+    api.reorderFolders(ids).then(() => {
+      queryClient.invalidateQueries({ queryKey: ["folders"] })
+    })
+  }, [folders, queryClient])
+
   return (
     <div className="mb-6">
       <h3 className="text-sm font-semibold text-text-heading mb-3">Folders</h3>
@@ -126,7 +134,19 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
       {folders.length > 0 && (
         <div className="space-y-1">
           {folders.map((folder) => (
-            <div key={folder.id} className="flex items-center gap-2 p-2 bg-bg-secondary rounded border border-border">
+            <div
+              key={folder.id}
+              className={`flex items-center gap-2 p-2 bg-bg-secondary rounded border transition-colors ${
+                dragOverId === folder.id ? "border-accent border-solid" : "border-border"
+              }`}
+              draggable={editingId !== folder.id}
+              onDragStart={() => { dragSrcId.current = folder.id }}
+              onDragOver={(e) => { e.preventDefault(); setDragOverId(folder.id) }}
+              onDragLeave={() => setDragOverId((prev) => prev === folder.id ? null : prev)}
+              onDragEnd={() => { dragSrcId.current = null; setDragOverId(null) }}
+              onDrop={() => handleDrop(folder.id)}
+            >
+              <span className="text-text-dim cursor-grab active:cursor-grabbing select-none" title="Drag to reorder">⠿</span>
               {editingId === folder.id ? (
                 <>
                   <input
@@ -224,7 +244,12 @@ function OpmlButtons({ onError, onImported }: { onError: (e: Error) => void, onI
   )
 }
 
-function FeedDetails({ feed, stats, onDelete }: { feed: Feed, stats?: FeedStats, onDelete: () => void }) {
+function FeedDetails({ feed, stats, onDelete, onToggleTranslate }: {
+  feed: Feed
+  stats?: FeedStats
+  onDelete: () => void
+  onToggleTranslate: () => void
+}) {
   return (
     <div className="px-3 pb-3 border-t border-border ml-7">
       <div className="flex items-center gap-x-4 gap-y-1 text-xs text-text-muted mt-2">
@@ -249,6 +274,16 @@ function FeedDetails({ feed, stats, onDelete }: { feed: Feed, stats?: FeedStats,
             Failures: {feed.consecutive_failures}
           </span>
         )}
+        <button onClick={onToggleTranslate}
+          className={`px-1.5 py-0.5 rounded text-xs transition-colors ${
+            feed.translate
+              ? "text-accent-text"
+              : "text-text-dim hover:text-text-muted"
+          }`}
+          title="Toggle translation for this feed"
+        >
+          Translate: {feed.translate ? "ON" : "OFF"}
+        </button>
         <span className="flex-1" />
         <button onClick={onDelete}
           className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors shrink-0">
@@ -334,9 +369,9 @@ export default function Feeds() {
     onSuccess: invalidate,
     onError,
   })
-  const updateLang = useMutation({
-    mutationFn: ({ feedId, lang }: { feedId: number, lang: string }) =>
-      api.updateFeedLang(feedId, lang),
+  const updateTranslate = useMutation({
+    mutationFn: ({ feedId, translate }: { feedId: number, translate: boolean }) =>
+      api.updateFeedTranslate(feedId, translate),
     onSuccess: invalidate,
     onError,
   })
@@ -437,14 +472,16 @@ export default function Feeds() {
             </div>
           </div>
           <div className="flex items-center gap-2 ml-4 shrink-0">
-            <select
-              value={feed.lang}
-              onChange={(e) => updateLang.mutate({ feedId: feed.id, lang: e.target.value })}
-              className="bg-bg-card text-text-muted border border-border rounded px-1.5 py-1 text-xs"
+            <button onClick={() => toggleSummarize.mutate(feed.id)}
+              className={`px-2 py-1 rounded text-xs border transition-colors ${
+                feed.summarize
+                  ? "bg-accent-bg text-accent-text border-accent-bg"
+                  : "bg-bg-card text-text-muted border-border hover:text-text"
+              }`}
+              title="Summarize articles from this feed"
             >
-              <option value="en">en</option>
-              <option value="ja">ja</option>
-            </select>
+              Summarize
+            </button>
             <select
               value={feed.folder_id ?? ""}
               onChange={(e) => moveFeed.mutate({
@@ -462,14 +499,6 @@ export default function Feeds() {
               className="px-2 py-1 rounded text-xs bg-bg-card text-text-muted hover:text-text transition-colors disabled:opacity-40">
               <span className={`inline-block ${fetchingFeeds.has(feed.id) ? "animate-spin" : ""}`}>↻</span>
             </button>
-            <button onClick={() => toggleSummarize.mutate(feed.id)}
-              className={`px-2 py-1 rounded text-xs transition-colors ${
-                feed.summarize
-                  ? "bg-accent-bg text-accent-text"
-                  : "bg-bg-card text-text-dim"
-              }`}>
-              LLM
-            </button>
             <button onClick={() => toggleFeed.mutate(feed.id)}
               className={`px-2 py-1 rounded text-xs transition-colors ${
                 feed.enabled
@@ -483,9 +512,12 @@ export default function Feeds() {
 
         {/* Expandable details */}
         {isExpanded && (
-          <FeedDetails feed={feed} stats={feedStats?.[feed.id]} onDelete={() => {
-            if (confirm(`Delete "${feed.name}"?`)) deleteFeed.mutate(feed.id)
-          }} />
+          <FeedDetails feed={feed} stats={feedStats?.[feed.id]}
+            onDelete={() => {
+              if (confirm(`Delete "${feed.name}"?`)) deleteFeed.mutate(feed.id)
+            }}
+            onToggleTranslate={() => updateTranslate.mutate({ feedId: feed.id, translate: !feed.translate })}
+          />
         )}
       </div>
     )

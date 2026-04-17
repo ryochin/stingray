@@ -174,7 +174,7 @@ class FeedMove(BaseModel):
 class FeedCreate(BaseModel):
   name: str = ""
   url: str
-  lang: str = ""
+  translate: bool = False
   summarize: bool = False
   folder_id: int | None = None
 
@@ -192,13 +192,16 @@ def get_feed_stats() -> dict[int, dict]:
 _JA_KANA = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")
 
 
-def _detect_feed_lang(parsed: feedparser.FeedParserDict, url: str | None = None) -> str:
-  """Detect language from feed metadata, article titles, and URL domain."""
+def _detect_feed_lang(parsed: feedparser.FeedParserDict, url: str | None = None) -> str | None:
+  """Detect language from feed metadata, article titles, and URL domain.
+
+  Returns a 2-letter language code or None if detection fails.
+  """
   feed_lang = (parsed.feed or {}).get("language", "")
   if feed_lang:
     lang = feed_lang.split("-")[0].lower()
-    if lang == "ja":
-      return "ja"
+    if len(lang) == 2:
+      return lang
 
   for entry in parsed.entries[:5]:
     title = entry.get("title", "")
@@ -211,18 +214,18 @@ def _detect_feed_lang(parsed: feedparser.FeedParserDict, url: str | None = None)
     if host.endswith(".jp"):
       return "ja"
 
-  return "en"
+  return None
 
 
 @dataclass
 class ProbeResult:
   title: str | None = None
-  lang: str | None = None
+  translate: bool = False
   site_url: str | None = None
 
 
-async def _probe_feed(url: str) -> ProbeResult:
-  """Fetch a feed URL and extract its title, language, and site URL."""
+async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
+  """Fetch a feed URL and extract its title, translate flag, and site URL."""
   try:
     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
       resp = await client.get(url)
@@ -230,11 +233,11 @@ async def _probe_feed(url: str) -> ProbeResult:
     parsed = feedparser.parse(resp.text)
     feed_meta = parsed.feed or {}
     title = feed_meta.get("title", "")
-    lang = _detect_feed_lang(parsed, url)
+    detected_lang = _detect_feed_lang(parsed, url)
     site_url = feed_meta.get("link", "")
     return ProbeResult(
       title=title.strip() or None,
-      lang=lang,
+      translate=detected_lang is None or detected_lang != native_lang,
       site_url=site_url.strip() or None,
     )
   except Exception:
@@ -263,11 +266,12 @@ async def _fetch_single_feed(feed: FeedRow) -> None:
 
 @app.post("/api/feeds", status_code=201)
 async def create_feed(body: FeedCreate) -> FeedRow:
-  probe = await _probe_feed(body.url)
+  config = _load_config()
+  probe = await _probe_feed(body.url, native_lang=config.native_lang)
   if not body.name.strip():
     body.name = probe.title or body.url
-  if not body.lang:
-    body.lang = probe.lang or "en"
+  if not body.translate:
+    body.translate = probe.translate
   feed = FeedRow(**body.model_dump(), site_url=probe.site_url)
   feed_id = repo.add_feed(feed)
   feeds = repo.list_feeds()
@@ -315,13 +319,13 @@ def toggle_summarize(feed_id: int) -> FeedRow:
   return updated
 
 
-class FeedLangUpdate(BaseModel):
-  lang: str
+class FeedTranslateUpdate(BaseModel):
+  translate: bool
 
 
-@app.patch("/api/feeds/{feed_id}/lang")
-def update_feed_lang(feed_id: int, body: FeedLangUpdate) -> FeedRow:
-  repo.update_feed_lang(feed_id, body.lang)
+@app.patch("/api/feeds/{feed_id}/translate")
+def update_feed_translate(feed_id: int, body: FeedTranslateUpdate) -> FeedRow:
+  repo.update_feed_translate(feed_id, body.translate)
   updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
   if updated is None:
     raise HTTPException(404, "Feed not found")
@@ -436,7 +440,7 @@ def opml_export() -> Response:
 
 
 @app.post("/api/opml/import")
-async def opml_import(file: UploadFile) -> dict[str, int]:
+async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
   import xml.etree.ElementTree as _ET
   from opml import parse_opml
   try:
@@ -461,7 +465,7 @@ async def opml_import(file: UploadFile) -> dict[str, int]:
       name=feed_data.name,
       url=feed_data.url,
       site_url=feed_data.site_url,
-      lang=feed_data.lang,
+      translate=feed_data.translate,
       summarize=feed_data.summarize,
       folder_id=folder_id,
     )
@@ -482,6 +486,14 @@ async def opml_import(file: UploadFile) -> dict[str, int]:
 
   for feed_data in uncategorized:
     _add_feed(feed_data, None)
+
+  # Auto-refresh if new feeds were added
+  if feeds_created > 0:
+    global _refresh_task
+    async with _refresh_lock:
+      if _refresh_task is None or _refresh_task.done():
+        config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
+        _refresh_task = asyncio.create_task(_run_refresh(config))
 
   return {
     "folders_created": folders_created,

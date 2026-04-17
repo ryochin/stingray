@@ -15,7 +15,7 @@ class ImportFeed:
   name: str
   url: str
   site_url: str | None = None
-  lang: str = "en"
+  translate: bool = False
   summarize: bool = False
 
 
@@ -60,8 +60,8 @@ def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
     attrs["xmlUrl"] = feed.url
   if feed.site_url:
     attrs["htmlUrl"] = feed.site_url
-  if feed.lang != "en":
-    attrs["data-lang"] = feed.lang
+  if feed.translate:
+    attrs["data-translate"] = "1"
   if feed.summarize:
     attrs["data-summarize"] = "1"
   ET.SubElement(parent, "outline", **attrs)
@@ -72,17 +72,20 @@ def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
 _JA_KANA = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")
 
 
-def _detect_lang(name: str, url: str | None = None) -> str:
-  if _JA_KANA.search(name):
-    return "ja"
-  if url:
-    try:
-      host = urlparse(url).hostname or ""
-      if host.endswith(".jp"):
-        return "ja"
-    except Exception:
-      pass
-  return "en"
+def _should_translate(name: str, url: str | None = None, native_lang: str = "ja") -> bool:
+  """Guess if a feed needs translation based on name and URL."""
+  if native_lang == "ja":
+    if _JA_KANA.search(name):
+      return False
+    if url:
+      try:
+        host = urlparse(url).hostname or ""
+        if host.endswith(".jp"):
+          return False
+      except Exception:
+        pass
+    return True
+  return False
 
 
 def parse_opml(xml_content: str) -> tuple[list[ImportFolder], list[ImportFeed]]:
@@ -120,7 +123,8 @@ def _parse_feed_outline(el: ET.Element) -> ImportFeed | None:
 
   name = el.get("text") or el.get("title") or xml_url
   site_url = el.get("htmlUrl") or None
-  lang = el.get("data-lang") or _detect_lang(name, xml_url)
+  translate_str = el.get("data-translate")
+  translate = translate_str == "1" if translate_str else _should_translate(name, xml_url)
   summarize_str = el.get("data-summarize")
   summarize = summarize_str == "1" if summarize_str else False
 
@@ -128,6 +132,6 @@ def _parse_feed_outline(el: ET.Element) -> ImportFeed | None:
     name=name,
     url=xml_url,
     site_url=site_url,
-    lang=lang,
+    translate=translate,
     summarize=summarize,
   )

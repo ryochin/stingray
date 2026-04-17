@@ -67,9 +67,9 @@ def _article_matches_filter(article: ArticleRow, filters: list[FilterRow]) -> bo
   for f in filters:
     is_regex, pat = _parse_filter_pattern(f.pattern)
     if f.target == "title":
-      texts = [article.title, article.title_ja or ""]
+      texts = [article.title, article.title_translated or ""]
     else:
-      texts = [article.title, article.title_ja or "",
+      texts = [article.title, article.title_translated or "",
                article.content_snippet or "", article.summary or ""]
     for text in texts:
       if not text:
@@ -181,7 +181,7 @@ def list_feeds(*, enabled: bool | None = None) -> list[FeedRow]:
         name=r["name"],
         url=r["url"],
         site_url=r["site_url"],
-        lang=r["lang"],
+        translate=bool(r["translate"]),
         max_items=r["max_items"],
         summarize=bool(r["summarize"]),
         enabled=bool(r["enabled"]),
@@ -201,13 +201,13 @@ def add_feed(feed: FeedRow) -> int:
   conn = db.get_conn()
   try:
     cur = conn.execute(
-      """INSERT INTO feeds (name, url, site_url, lang, max_items, summarize, enabled, folder_id, created_at)
+      """INSERT INTO feeds (name, url, site_url, translate, max_items, summarize, enabled, folder_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
       (
         feed.name,
         feed.url,
         feed.site_url,
-        feed.lang,
+        int(feed.translate),
         feed.max_items,
         int(feed.summarize),
         int(feed.enabled),
@@ -278,12 +278,12 @@ def update_feed_site_url(feed_id: int, site_url: str) -> None:
     conn.close()
 
 
-def update_feed_lang(feed_id: int, lang: str) -> None:
+def update_feed_translate(feed_id: int, translate: bool) -> None:
   conn = db.get_conn()
   try:
     conn.execute(
-      "UPDATE feeds SET lang = ? WHERE id = ?",
-      (lang, feed_id),
+      "UPDATE feeds SET translate = ? WHERE id = ?",
+      (int(translate), feed_id),
     )
     conn.commit()
   finally:
@@ -373,26 +373,26 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
     for a in articles:
       cur = conn.execute(
         """INSERT OR IGNORE INTO articles
-           (url, feed_id, title, title_ja, source, published, content_snippet, summary, content_html, lang, fetched_at)
+           (url, feed_id, title, title_translated, source, published, content_snippet, summary, content_html, content_translated, fetched_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
           a.url,
           feed_id_map.get(a.source),
           a.title,
-          a.title_ja or None,
+          a.title_translated or None,
           a.source,
           a.published.isoformat() if a.published else None,
           a.content_snippet or None,
           a.summary or None,
           a.content_html or None,
-          a.lang,
+          a.content_translated or None,
           now,
         ),
       )
       if cur.rowcount > 0:
         new_count += 1
       else:
-        # Update existing articles: content_html always, title_ja/summary only if missing
+        # Update existing articles: content_html always, title_translated/summary only if missing
         updates = []
         params: list[object] = []
         if a.content_html:
@@ -401,12 +401,15 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
         if a.content_snippet:
           updates.append("content_snippet = COALESCE(?, content_snippet)")
           params.append(a.content_snippet)
-        if a.title_ja:
-          updates.append("title_ja = COALESCE(?, title_ja)")
-          params.append(a.title_ja)
+        if a.title_translated:
+          updates.append("title_translated = COALESCE(?, title_translated)")
+          params.append(a.title_translated)
         if a.summary:
           updates.append("summary = COALESCE(?, summary)")
           params.append(a.summary)
+        if a.content_translated:
+          updates.append("content_translated = COALESCE(?, content_translated)")
+          params.append(a.content_translated)
         if updates:
           params.append(a.url)
           conn.execute(
@@ -456,13 +459,13 @@ def _row_to_article(r: object) -> ArticleRow:
     url=r["url"],  # type: ignore[index]
     feed_id=r["feed_id"],  # type: ignore[index]
     title=r["title"],  # type: ignore[index]
-    title_ja=r["title_ja"],  # type: ignore[index]
+    title_translated=r["title_translated"],  # type: ignore[index]
     source=r["source"],  # type: ignore[index]
     published=datetime.fromisoformat(r["published"]) if r["published"] else None,  # type: ignore[index]
     content_snippet=r["content_snippet"],  # type: ignore[index]
     summary=r["summary"],  # type: ignore[index]
     content_html=r["content_html"],  # type: ignore[index]
-    lang=r["lang"],  # type: ignore[index]
+    content_translated=r["content_translated"],  # type: ignore[index]
     fetched_at=datetime.fromisoformat(r["fetched_at"]),  # type: ignore[index]
     read_at=datetime.fromisoformat(r["read_at"]) if r["read_at"] else None,  # type: ignore[index]
   )
@@ -476,7 +479,7 @@ def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:
       """SELECT a.* FROM articles a
          JOIN feeds f ON a.feed_id = f.id
          WHERE f.summarize = 1
-           AND (a.summary IS NULL OR (a.lang != 'ja' AND a.title_ja IS NULL))
+           AND (a.summary IS NULL OR (f.translate = 1 AND a.title_translated IS NULL))
          ORDER BY a.published ASC
          LIMIT ?""",
       (limit,),
@@ -486,12 +489,21 @@ def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:
     conn.close()
 
 
-def update_article_summary(url: str, title_ja: str | None, summary: str | None) -> None:
+def update_article_summary(
+  url: str,
+  title_translated: str | None,
+  summary: str | None,
+  content_translated: str | None = None,
+) -> None:
   conn = db.get_conn()
   try:
     conn.execute(
-      "UPDATE articles SET title_ja = COALESCE(?, title_ja), summary = COALESCE(?, summary) WHERE url = ?",
-      (title_ja, summary, url),
+      """UPDATE articles
+         SET title_translated = COALESCE(?, title_translated),
+             summary = COALESCE(?, summary),
+             content_translated = COALESCE(?, content_translated)
+         WHERE url = ?""",
+      (title_translated, summary, content_translated, url),
     )
     conn.commit()
   finally:

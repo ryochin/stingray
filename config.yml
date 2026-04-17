@@ -1,4 +1,5 @@
 # -- General --
+native_lang: "ja"        # Your native language (feeds in other languages will be translated)
 max_age_hours: 25        # How far back to include articles
 cache_dir: "cache"                 # Cache directory
 article_cache_max_age_days: 30     # Days to keep article cache

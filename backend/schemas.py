@@ -29,7 +29,7 @@ class FeedRow(BaseModel):
   name: str
   url: str | None = None
   site_url: str | None = None
-  lang: str = "en"
+  translate: bool = False
   max_items: int = 20
   summarize: bool = True
   enabled: bool = True
@@ -45,7 +45,6 @@ class FeedRow(BaseModel):
       "id": self.id,
       "name": self.name,
       "url": self.url,
-      "lang": self.lang,
     }
 
 
@@ -53,13 +52,13 @@ class ArticleRow(BaseModel):
   url: str
   feed_id: int | None = None
   title: str
-  title_ja: str | None = None
+  title_translated: str | None = None
   source: str
   published: datetime | None = None
   content_snippet: str | None = None
   summary: str | None = None
   content_html: str | None = None
-  lang: str | None = None
+  content_translated: str | None = None
   fetched_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
   read_at: datetime | None = None
 
@@ -98,4 +97,5 @@ class AppConfig(BaseModel):
   db_path: str = "data/news.db"
   cache_dir: str = "cache"
   article_cache_max_age_days: int = 30
+  native_lang: str = "ja"
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)

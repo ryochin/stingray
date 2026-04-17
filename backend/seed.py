@@ -14,7 +14,7 @@ def enrich_from_legacy_cache(
   articles: list[Article],
   cache_dir: Path,
 ) -> list[Article]:
-  """Restore title_ja/summary from legacy articles.json for matching URLs.
+  """Restore title_translated/summary from legacy articles.json for matching URLs.
 
   After enrichment, renames the file to .migrated so it's only processed once.
   """
@@ -48,8 +48,8 @@ def enrich_from_legacy_cache(
     entry = legacy.get(article.url)
     if entry is None:
       continue
-    if not article.title_ja and entry.get("title_ja"):
-      article.title_ja = entry["title_ja"]
+    if not article.title_translated and entry.get("title_ja"):
+      article.title_translated = entry["title_ja"]
       enriched += 1
     if not article.summary and entry.get("summary"):
       article.summary = entry["summary"]
