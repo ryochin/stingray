@@ -1,9 +1,9 @@
 import asyncio
-import json
 
 import httpx
 
 import log
+from llm import call_ollama
 from models import Article
 
 
@@ -38,40 +38,6 @@ Do NOT translate or rewrite the title. Do NOT include a "title_translated" field
 Return ONLY valid JSON, no markdown fences or extra text."""
 
 
-async def _call_llm(
-  client: httpx.AsyncClient,
-  model: str,
-  system_prompt: str,
-  user_prompt: str,
-) -> dict:
-  resp = await client.post(
-    "/api/chat",
-    json={
-      "model": model,
-      "messages": [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-      ],
-      "stream": False,
-      "format": "json",
-    },
-  )
-  resp.raise_for_status()
-  content = resp.json()["message"]["content"].strip()
-
-  # Strip markdown fences if present
-  if content.startswith("```"):
-    content = content.split("\n", 1)[1] if "\n" in content else content[3:]
-    if content.endswith("```"):
-      content = content[:-3]
-    content = content.strip()
-
-  try:
-    return json.loads(content)
-  except json.JSONDecodeError:
-    raise ValueError(f"LLM returned invalid JSON: {content[:200]}")
-
-
 async def process_article(
   client: httpx.AsyncClient,
   article: Article,
@@ -89,7 +55,7 @@ async def process_article(
 
   if translate and short:
     prompt = _translate_full_prompt(native_lang)
-    data = await _call_llm(client, model, prompt, user_prompt)
+    data = await call_ollama(client, model, prompt, user_prompt)
     title_translated = data.get("title_translated", article.title)
     content_translated = data.get("content_translated", "")
     if not isinstance(title_translated, str):
@@ -100,7 +66,7 @@ async def process_article(
 
   if translate:
     prompt = _translate_and_summarize_prompt(native_lang)
-    data = await _call_llm(client, model, prompt, user_prompt)
+    data = await call_ollama(client, model, prompt, user_prompt)
     title_translated = data.get("title_translated", article.title)
     summary = data.get("summary", "")
     if not isinstance(title_translated, str):
@@ -111,7 +77,7 @@ async def process_article(
 
   # Native language, long content — summarize only
   prompt = _summarize_prompt(native_lang)
-  data = await _call_llm(client, model, prompt, user_prompt)
+  data = await call_ollama(client, model, prompt, user_prompt)
   summary = data.get("summary", "")
   if not isinstance(summary, str):
     summary = ""
