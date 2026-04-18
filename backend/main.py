@@ -29,24 +29,24 @@ async def run(args: argparse.Namespace) -> None:
 
   # Resolve paths relative to config file
   config_base = args.config.resolve().parent
-  db_path = Path(config.db_path)
-  if not db_path.is_absolute():
-    db_path = config_base / db_path
   cache_dir = Path(config.cache_dir)
   if not cache_dir.is_absolute():
     cache_dir = config_base / cache_dir
 
   # Initialize DB and L1 cache
-  db.configure(db_path)
+  db.configure()
   db.init_schema()
   cache_mod.configure(cache_dir)
 
   # Update config with resolved paths
   config.cache_dir = str(cache_dir)
 
-  # Run the unified fetch/summarize/persist pipeline
-  result = await refresh_all(config, source="cron", no_summary=args.no_summary)
-  log.success(f"Done. {result.new_count} new / {result.total_articles} total articles.")
+  try:
+    # Run the unified fetch/summarize/persist pipeline
+    result = await refresh_all(config, source="cron", no_summary=args.no_summary)
+    log.success(f"Done. {result.new_count} new / {result.total_articles} total articles.")
+  finally:
+    db.close()
 
 
 def main() -> None:

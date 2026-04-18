@@ -1,4 +1,23 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: news-reader-postgres
+    environment:
+      TZ: Asia/Tokyo
+      POSTGRES_USER: news
+      POSTGRES_PASSWORD: news
+      POSTGRES_DB: news
+    ports:
+      - "25432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U news -d news"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   web:
     build: .
     image: news-reader:latest
@@ -9,12 +28,15 @@ services:
       TZ: Asia/Tokyo
       PYTHONPATH: /app/backend
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+      DATABASE_URL: postgresql://news:news@postgres:5432/news
     ports:
       - "20080:20080"
     volumes:
       - ./config.yml:/app/config.yml:ro
-      - ./data:/app/data
       - ./cache:/app/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   fetcher:
@@ -26,8 +48,11 @@ services:
       TZ: Asia/Tokyo
       PYTHONPATH: /app/backend
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+      DATABASE_URL: postgresql://news:news@postgres:5432/news
     volumes:
       - ./config.yml:/app/config.yml:ro
-      - ./data:/app/data
       - ./cache:/app/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped

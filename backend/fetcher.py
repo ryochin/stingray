@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
 import httpx
+
 import log
 import repo
-from feeds import fetch_all  # type: ignore[import-untyped]
+from feeds import extract_site_url, fetch_all  # type: ignore[import-untyped]
 from models import Article
 from schemas import AppConfig, FeedRow
 from seed import enrich_from_legacy_cache
@@ -72,7 +74,7 @@ async def refresh_all(
 
     # 2. Fetch articles
     log.step("Fetching feeds...")
-    articles, feed_results, stale_web_feeds = await fetch_all(
+    articles, feed_results = await fetch_all(
       feeds_cfg, max_age_hours=config.max_age_hours, max_items=config.max_items_per_feed,
     )
     for feed_id, success, error_msg in feed_results:
@@ -127,18 +129,18 @@ async def refresh_all(
     feeds_needing_site_url = [f for f in feeds if not f.site_url and f.url]
     if feeds_needing_site_url:
       log.step(f"Backfilling site_url for {len(feeds_needing_site_url)} feeds...")
-      import feedparser as fp
-      for f in feeds_needing_site_url:
-        try:
-          async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+      async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        for f in feeds_needing_site_url:
+          if not f.url:
+            continue
+          try:
             resp = await client.get(f.url)
             resp.raise_for_status()
-          parsed = fp.parse(resp.text)
-          site_url = (parsed.feed or {}).get("link", "")
-          if site_url:
-            repo.update_feed_site_url(f.id, site_url.strip())
-        except Exception:
-          pass
+            site_url = extract_site_url(resp.text)
+            if site_url:
+              repo.update_feed_site_url(f.id, site_url)
+          except Exception:
+            continue
 
     # 6. Persist to DB
     new_count = repo.upsert_articles(articles, feed_id_map)

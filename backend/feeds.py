@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import html
+import json
 import random
 import re
 import time
@@ -13,6 +14,55 @@ import httpx
 import log
 from cache import load_feed_cache, save_feed_cache
 from models import JA_KANA, Article
+from scraper import fetch_web_page
+
+
+# ---------------------------------------------------------------------------
+# Typed wrappers around feedparser for callers that are pyright-strict.
+# ---------------------------------------------------------------------------
+
+
+def probe_feed_body(body: str) -> tuple[str | None, str | None, str | None, bool]:
+  """Parse a feed body and return (title, site_url, detected_lang, has_entries).
+
+  Attempts feed-level language detection using:
+    - Feed `language` attribute
+    - Japanese kana in the first few entry titles
+  Returns detected_lang=None if none of the heuristics succeed.
+  """
+  parsed = feedparser.parse(body)
+  if not parsed.entries:
+    return None, None, None, False
+
+  feed_meta = parsed.feed or {}
+  raw_title = feed_meta.get("title", "") or ""
+  raw_link = feed_meta.get("link", "") or ""
+  title = raw_title.strip() or None
+  site_url = raw_link.strip() or None
+
+  detected_lang: str | None = None
+  feed_lang = feed_meta.get("language", "") or ""
+  if feed_lang:
+    code = feed_lang.split("-")[0].lower()
+    if len(code) == 2:
+      detected_lang = code
+
+  if detected_lang is None:
+    for entry in parsed.entries[:5]:
+      entry_title = entry.get("title", "") or ""
+      if entry_title and JA_KANA.search(entry_title):
+        detected_lang = "ja"
+        break
+
+  return title, site_url, detected_lang, True
+
+
+def extract_site_url(body: str) -> str | None:
+  """Return the <link> of a feed body, or None if parsing fails."""
+  parsed = feedparser.parse(body)
+  site_url = (parsed.feed or {}).get("link", "") or ""
+  stripped = site_url.strip()
+  return stripped or None
 
 
 def _strip_html(text: str) -> str:
@@ -244,11 +294,9 @@ async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
     rules_json = feed.get("extraction_rules")
     is_web = rules_json is not None
     if is_web and rules_json != "{}":
-      import json as _json
-      rules = _json.loads(rules_json) if isinstance(rules_json, str) else rules_json
+      rules = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
       if rules.get("item"):
         start = time.perf_counter()
-        from scraper import fetch_web_page
         articles, was_cached = await fetch_web_page(client, feed)
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         source = "cache" if was_cached else "fresh"
@@ -271,7 +319,7 @@ async def fetch_all(
   feeds_cfg: list[dict],
   max_age_hours: float = 25,
   max_items: int = 20,
-) -> tuple[list[Article], list[tuple[int, bool, str | None]], list[int]]:
+) -> tuple[list[Article], list[tuple[int, bool, str | None]]]:
   sem = asyncio.Semaphore(_CONCURRENCY)
   for feed in feeds_cfg:
     feed.setdefault("max_items", max_items)
@@ -280,19 +328,15 @@ async def fetch_all(
     follow_redirects=True,
     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
   ) as client:
-    tasks = []
-    task_feeds = []
-    for feed in feeds_cfg:
-      delay = random.uniform(0, 2)
-      tasks.append(_delayed_fetch(client, feed, delay, sem))
-      task_feeds.append(feed)
-
+    tasks = [
+      _delayed_fetch(client, feed, random.uniform(0, 2), sem)
+      for feed in feeds_cfg
+    ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
   cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
-  articles = []
+  articles: list[Article] = []
   feed_results: list[tuple[int, bool, str | None]] = []
-  stale_web_feeds: list[int] = []
   seen_urls: set[str] = set()
   cached_feeds = 0
   fetched_feeds = 0
@@ -300,38 +344,36 @@ async def fetch_all(
   skipped_web_feeds = 0
   total_items = 0
   total_fresh_items = 0
-  for i, result in enumerate(results):
-    feed_id = task_feeds[i].get("id")
-    is_web_feed = bool(task_feeds[i].get("extraction_rules"))
+  for feed, result in zip(feeds_cfg, results):
+    feed_id = feed.get("id")
     if isinstance(result, Exception):
       error_feeds += 1
-      log.error(f"  [error] {task_feeds[i].get('name')}: {type(result).__name__}: {result}")
+      log.error(f"  [error] {feed.get('name')}: {type(result).__name__}: {result}")
       if feed_id is not None:
         feed_results.append((feed_id, False, str(result)))
+      continue
+
+    feed_articles, was_cached, kind = result
+    if kind == "web-norules":
+      skipped_web_feeds += 1
+    elif was_cached:
+      cached_feeds += 1
     else:
-      feed_articles, was_cached, _kind = result
-      if _kind == "web-norules":
-        skipped_web_feeds += 1
-      elif was_cached:
-        cached_feeds += 1
-      else:
-        fetched_feeds += 1
-      total_items += len(feed_articles)
-      if feed_id is not None:
-        feed_results.append((feed_id, True, None))
-      if is_web_feed and len(feed_articles) == 0 and feed_id is not None:
-        stale_web_feeds.append(feed_id)
-      for a in feed_articles:
-        if a.url in seen_urls:
-          continue
-        seen_urls.add(a.url)
-        pub = a.published
-        if pub is not None and pub.tzinfo is None:
-          pub = pub.replace(tzinfo=timezone.utc)
-          a.published = pub
-        if pub is None or pub >= cutoff:
-          articles.append(a)
-          total_fresh_items += 1
+      fetched_feeds += 1
+    total_items += len(feed_articles)
+    if feed_id is not None:
+      feed_results.append((feed_id, True, None))
+    for a in feed_articles:
+      if a.url in seen_urls:
+        continue
+      seen_urls.add(a.url)
+      pub = a.published
+      if pub is not None and pub.tzinfo is None:
+        pub = pub.replace(tzinfo=timezone.utc)
+        a.published = pub
+      if pub is None or pub >= cutoff:
+        articles.append(a)
+        total_fresh_items += 1
 
   summary = (
     f"  Feeds: {fetched_feeds} fresh, {cached_feeds} cached"
@@ -340,4 +382,4 @@ async def fetch_all(
     f" | items: {total_fresh_items} within window, {total_items} total."
   )
   log.info(summary)
-  return articles, feed_results, stale_web_feeds
+  return articles, feed_results

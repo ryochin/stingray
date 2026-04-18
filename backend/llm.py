@@ -2,13 +2,14 @@
 
 import json
 import re
+from typing import Any, cast
 
 import httpx
 
 import log
 
 
-def _extract_json(content: str) -> dict:
+def _extract_json(content: str) -> dict[str, Any]:
   """Extract JSON from LLM response, handling markdown fences and embedded JSON."""
   content = content.strip()
 
@@ -19,15 +20,20 @@ def _extract_json(content: str) -> dict:
       content = content[:-3]
     content = content.strip()
 
+  def _first_dict(value: object) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+      return cast(dict[str, Any], value)
+    if isinstance(value, list):
+      for item in cast(list[object], value):
+        if isinstance(item, dict):
+          return cast(dict[str, Any], item)
+    return None
+
   # Direct parse
   try:
-    parsed = json.loads(content)
-    if isinstance(parsed, dict):
-      return parsed
-    if isinstance(parsed, list):
-      for item in parsed:
-        if isinstance(item, dict):
-          return item
+    found = _first_dict(json.loads(content))
+    if found is not None:
+      return found
   except json.JSONDecodeError:
     pass
 
@@ -35,7 +41,9 @@ def _extract_json(content: str) -> dict:
   match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", content)
   if match:
     try:
-      return json.loads(match.group())
+      found = _first_dict(json.loads(match.group()))
+      if found is not None:
+        return found
     except json.JSONDecodeError:
       pass
 
@@ -49,7 +57,7 @@ async def call_ollama(
   user_prompt: str,
   *,
   retries: int = 2,
-) -> dict:
+) -> dict[str, Any]:
   """Send a chat completion request to Ollama and return parsed JSON."""
   last_error = None
   messages = [
@@ -67,7 +75,8 @@ async def call_ollama(
       },
     )
     resp.raise_for_status()
-    content = resp.json()["message"]["content"].strip()
+    body: Any = resp.json()
+    content = str(body["message"]["content"]).strip()
 
     try:
       return _extract_json(content)

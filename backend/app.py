@@ -10,10 +10,9 @@ import xml.etree.ElementTree as _ET
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Coroutine, cast
 from urllib.parse import urlparse
 
-import feedparser
 import httpx
 import yaml
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
@@ -24,25 +23,35 @@ from pydantic import BaseModel
 import db
 import log
 import repo
-from feeds import _fetch_rss
+from feeds import _fetch_rss, probe_feed_body  # type: ignore[import-untyped]
 from fetcher import refresh_all, summarize_pending
-from models import JA_KANA
-from opml import export_opml, parse_opml
-from scraper import fetch_web_page
+from opml import ImportFeed, export_opml, parse_opml
+from scraper import fetch_web_page  # type: ignore[import-untyped]
 from schemas import AppConfig, ArticleRow, FeedRow, FeedStats, FilterRow, FolderRow, StatusResponse
 
 # -- Globals for background refresh --
 _refresh_lock = asyncio.Lock()
 _refresh_task: asyncio.Task[None] | None = None
 _summarize_lock = asyncio.Lock()
+_background_tasks: set[asyncio.Task[object]] = set()
 
 
 def _log_task_exception(task: asyncio.Task[object]) -> None:
+  _background_tasks.discard(task)
   if task.cancelled():
     return
   exc = task.exception()
   if exc is not None:
     log.warn(f"  Background task failed: {exc}")
+
+
+def _spawn_background(coro: Coroutine[object, object, object]) -> asyncio.Task[object]:
+  """Create a fire-and-forget task while holding a strong reference so the GC
+  doesn't collect it before completion."""
+  task = asyncio.create_task(coro)
+  _background_tasks.add(task)
+  task.add_done_callback(_log_task_exception)
+  return task
 
 
 def _load_config() -> AppConfig:
@@ -82,12 +91,17 @@ async def _background_summarizer(config: AppConfig) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
   config = _load_config()
-  db.configure(config.db_path)
+  db.configure()
   db.init_schema()
   app.state.config = config  # type: ignore[attr-defined]
   task = asyncio.create_task(_background_summarizer(config))
-  yield
-  task.cancel()
+  _background_tasks.add(task)
+  task.add_done_callback(_background_tasks.discard)
+  try:
+    yield
+  finally:
+    task.cancel()
+    db.close()
 
 
 app = FastAPI(title="News Reader", lifespan=lifespan)
@@ -147,12 +161,7 @@ def get_folders() -> list[FolderRow]:
 
 @app.post("/api/folders", status_code=201)
 def create_folder(body: FolderCreate) -> FolderRow:
-  folder_id = repo.create_folder(body.name)
-  folders = repo.list_folders()
-  for f in folders:
-    if f.id == folder_id:
-      return f
-  raise HTTPException(404, "Folder not found after creation")
+  return repo.create_folder(body.name)
 
 
 @app.patch("/api/folders/{folder_id}")
@@ -209,27 +218,14 @@ def get_feed_stats() -> dict[int, FeedStats]:
   return repo.get_feed_stats()
 
 
-def _detect_feed_lang(parsed: feedparser.FeedParserDict, url: str | None = None) -> str | None:
-  """Detect language from feed metadata, article titles, and URL domain.
-
-  Returns a 2-letter language code or None if detection fails.
-  """
-  feed_lang = (parsed.feed or {}).get("language", "")
-  if feed_lang:
-    lang = feed_lang.split("-")[0].lower()
-    if len(lang) == 2:
-      return lang
-
-  for entry in parsed.entries[:5]:
-    title = entry.get("title", "")
-    if title and JA_KANA.search(title):
-      return "ja"
-
+def _detect_feed_lang(detected: str | None, url: str | None) -> str | None:
+  """Fall back to .jp domain when feed/title detection fails."""
+  if detected:
+    return detected
   if url:
     host = urlparse(url).hostname or ""
     if host.endswith(".jp"):
       return "ja"
-
   return None
 
 
@@ -292,16 +288,13 @@ async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
       )
 
     # Try RSS/Atom parsing
-    parsed = feedparser.parse(body)
-    if parsed.entries:
-      feed_meta = parsed.feed or {}
-      title = feed_meta.get("title", "")
-      detected_lang = _detect_feed_lang(parsed, url)
-      site_url = feed_meta.get("link", "")
+    title, site_url, feed_lang, has_entries = probe_feed_body(body)
+    if has_entries:
+      detected_lang = _detect_feed_lang(feed_lang, url)
       return ProbeResult(
-        title=title.strip() or None,
+        title=title,
         translate=detected_lang is None or detected_lang != native_lang,
-        site_url=site_url.strip() or None,
+        site_url=site_url,
       )
   except Exception as e:
     log.warn(f"  Probe failed: {e}")
@@ -365,12 +358,9 @@ async def create_feed(body: FeedCreate) -> FeedRow:
     log.info(f"  RSS feed: {probe.title or '(no title)'}")
 
   feed = FeedRow(**body.model_dump(), site_url=probe.site_url, extraction_rules=extraction_rules)
-  feed_id = repo.add_feed(feed)
-  created = repo.get_feed_by_id(feed_id)
-  if created is None:
-    raise HTTPException(404, "Feed not found after creation")
-  log.info(f"  Feed created: id={feed_id}, name={created.name}")
-  asyncio.create_task(_fetch_single_feed(created)).add_done_callback(_log_task_exception)
+  created = repo.add_feed(feed)
+  log.info(f"  Feed created: id={created.id}, name={created.name}")
+  _spawn_background(_fetch_single_feed(created))
   return created
 
 
@@ -384,7 +374,7 @@ async def fetch_feed(feed_id: int) -> dict[str, str]:
   feed = repo.get_feed_by_id(feed_id)
   if feed is None:
     raise HTTPException(404, "Feed not found")
-  asyncio.create_task(_fetch_single_feed(feed)).add_done_callback(_log_task_exception)
+  _spawn_background(_fetch_single_feed(feed))
   return {"message": "Fetch started"}
 
 
@@ -418,11 +408,13 @@ async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
     raise HTTPException(404, "Feed not found")
   if feed.extraction_rules is None:
     raise HTTPException(400, "Not a web page feed")
-  rules = await request.json()
-  if not isinstance(rules, dict):
+  rules_raw: object = await request.json()
+  if not isinstance(rules_raw, dict):
     raise HTTPException(422, "Must be a JSON object")
+  rules = cast(dict[str, object], rules_raw)
   for key in ("item", "title", "link"):
-    if not rules.get(key) or not isinstance(rules[key], str):
+    value = rules.get(key)
+    if not value or not isinstance(value, str):
       raise HTTPException(422, f"Missing or empty required field: {key}")
   repo.update_feed_extraction_rules(feed_id, json.dumps(rules))
   updated = repo.get_feed_by_id(feed_id)
@@ -481,12 +473,7 @@ def get_filters() -> list[FilterRow]:
 
 @app.post("/api/filters", status_code=201)
 def create_filter(body: FilterCreate) -> FilterRow:
-  filter_id = repo.add_filter(body.pattern, body.target)
-  filters = repo.list_filters()
-  for f in filters:
-    if f.id == filter_id:
-      return f
-  raise HTTPException(404, "Filter not found after creation")
+  return repo.add_filter(body.pattern, body.target)
 
 
 @app.delete("/api/filters/{filter_id}", status_code=204)
@@ -509,7 +496,7 @@ def export_filters() -> Response:
 async def import_filters(file: UploadFile) -> dict[str, int]:
   try:
     content = (await file.read()).decode("utf-8")
-    data = json.loads(content)
+    data: object = json.loads(content)
   except (UnicodeDecodeError, json.JSONDecodeError) as exc:
     raise HTTPException(400, f"Invalid JSON: {exc}")
   if not isinstance(data, list):
@@ -517,9 +504,10 @@ async def import_filters(file: UploadFile) -> dict[str, int]:
   existing = {(f.pattern, f.target) for f in repo.list_filters()}
   created = 0
   skipped = 0
-  for item in data:
-    if not isinstance(item, dict) or "pattern" not in item:
+  for raw_item in cast(list[object], data):
+    if not isinstance(raw_item, dict) or "pattern" not in raw_item:
       continue
+    item = cast(dict[str, object], raw_item)
     pattern = str(item["pattern"]).strip()
     target = str(item.get("target", "title")).strip()
     if not pattern or target not in ("title", "both"):
@@ -563,7 +551,7 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
   feeds_created = 0
   feeds_skipped = 0
 
-  def _add_feed(feed_data, folder_id: int | None) -> None:
+  def _add_feed(feed_data: ImportFeed, folder_id: int | None) -> None:
     nonlocal feeds_created, feeds_skipped
     if feed_data.url in existing_urls:
       feeds_skipped += 1
@@ -586,7 +574,8 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
     if imp_folder.name in existing_folders:
       folder_id = existing_folders[imp_folder.name]
     else:
-      folder_id = repo.create_folder(imp_folder.name)
+      folder = repo.create_folder(imp_folder.name)
+      folder_id = folder.id
       existing_folders[imp_folder.name] = folder_id
       folders_created += 1
     for feed_data in imp_folder.feeds:
@@ -603,6 +592,7 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
         config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
         log.info(f"OPML import added {feeds_created} feeds, auto-triggering refresh.")
         _refresh_task = asyncio.create_task(_run_refresh(config, trigger="opml"))
+        _background_tasks.add(_refresh_task)
         _refresh_task.add_done_callback(_log_task_exception)
 
   return {
@@ -643,6 +633,7 @@ async def trigger_refresh(request: Request) -> JSONResponse:
       return JSONResponse({"message": "Refresh already in progress"}, status_code=409)
     config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
     _refresh_task = asyncio.create_task(_run_refresh(config, trigger="web"))
+    _background_tasks.add(_refresh_task)
     _refresh_task.add_done_callback(_log_task_exception)
   return JSONResponse({"message": "Refresh started"}, status_code=202)
 

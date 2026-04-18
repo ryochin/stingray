@@ -30,7 +30,6 @@ class FeedRow(BaseModel):
   url: str | None = None
   site_url: str | None = None
   translate: bool = False
-  max_items: int = 20
   summarize: bool = True
   enabled: bool = True
   folder_id: int | None = None
@@ -81,8 +80,8 @@ class RefreshJob(BaseModel):
 class FeedStats(BaseModel):
   article_count: int
   unread_count: int
-  latest_published: str | None = None
-  oldest_published: str | None = None
+  latest_published: datetime | None = None
+  oldest_published: datetime | None = None
 
 
 class StatusResponse(BaseModel):
@@ -106,7 +105,6 @@ class OllamaConfig(BaseModel):
 class AppConfig(BaseModel):
   max_items_per_feed: int = 20
   max_age_hours: float = 25
-  db_path: str = "data/news.db"
   cache_dir: str = "cache"
   article_cache_max_age_days: int = 30
   native_lang: str = "ja"

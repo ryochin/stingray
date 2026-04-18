@@ -320,3 +320,4 @@ dist
 
 /.serena/
 /cache/
+/data/postgres/

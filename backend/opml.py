@@ -24,7 +24,7 @@ class ImportFeed:
 @dataclass
 class ImportFolder:
   name: str
-  feeds: list[ImportFeed] = field(default_factory=list)
+  feeds: list[ImportFeed] = field(default_factory=list["ImportFeed"])
 
 
 # -- Export --
@@ -76,7 +76,7 @@ def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
     attrs["data-summarize"] = "1"
   if is_web and feed.extraction_rules and feed.extraction_rules != "{}":
     attrs["data-extraction-rules"] = feed.extraction_rules
-  ET.SubElement(parent, "outline", **attrs)
+  ET.SubElement(parent, "outline", attrib=attrs)
 
 
 # -- Import --
@@ -84,18 +84,15 @@ def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
 
 def _should_translate(name: str, url: str | None = None, native_lang: str = "ja") -> bool:
   """Guess if a feed needs translation based on name and URL."""
-  if native_lang == "ja":
-    if JA_KANA.search(name):
+  if native_lang != "ja":
+    return False
+  if JA_KANA.search(name):
+    return False
+  if url:
+    host = urlparse(url).hostname or ""
+    if host.endswith(".jp"):
       return False
-    if url:
-      try:
-        host = urlparse(url).hostname or ""
-        if host.endswith(".jp"):
-          return False
-      except Exception:
-        pass
-    return True
-  return False
+  return True
 
 
 def parse_opml(xml_content: str) -> tuple[list[ImportFolder], list[ImportFeed]]:

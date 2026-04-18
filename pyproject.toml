@@ -13,6 +13,7 @@ dependencies = [
   "pydantic>=2.10",
   "defusedxml>=0.7",
   "beautifulsoup4>=4.12",
+  "psycopg[binary,pool]>=3.2",
 ]
 
 [dependency-groups]
@@ -24,8 +25,13 @@ dev = [
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 pythonPlatform = "All"
+include = ["backend"]
+extraPaths = ["backend"]
 exclude = [
+  "**/.venv",
+  "**/__pycache__",
   "backend/feeds.py",
   "backend/summarizer.py",
   "backend/log.py",
+  "backend/scraper.py",
 ]
