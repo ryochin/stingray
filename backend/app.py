@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import xml.etree.ElementTree as _ET
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -194,6 +195,15 @@ def get_feeds() -> list[FeedRow]:
   return repo.list_feeds()
 
 
+class FeedReorder(BaseModel):
+  feed_ids: list[int]
+
+
+@app.put("/api/feeds/reorder", status_code=204)
+def reorder_feeds(body: FeedReorder) -> None:
+  repo.reorder_feeds(body.feed_ids)
+
+
 @app.get("/api/feeds/stats")
 def get_feed_stats() -> dict[int, FeedStats]:
   return repo.get_feed_stats()
@@ -300,27 +310,38 @@ async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
 
 async def _fetch_single_feed(feed: FeedRow) -> None:
   """Fetch articles from a single feed and persist to DB."""
+  start = time.perf_counter()
   try:
     feed_cfg = feed.to_feed_cfg()
-    log.step(f"Fetching feed: {feed.name}")
+    kind = "web" if feed.extraction_rules else "rss"
+    log.step(f"Fetching feed [{kind}]: {feed.name} ({feed.url})")
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
       if feed.extraction_rules and feed.extraction_rules != "{}":
-        articles, _ = await fetch_web_page(client, feed_cfg)
+        articles, was_cached = await fetch_web_page(client, feed_cfg)
       elif feed.extraction_rules is not None:
-        log.info("  Skipping: extraction rules not configured yet.")
+        log.warn(f"  Skipping '{feed.name}': extraction rules not configured yet.")
+        repo.update_feed_fetch_status(feed.id, success=False, error="extraction rules not configured")
         return
       else:
-        articles, _ = await _fetch_rss(client, feed_cfg)
-    log.info(f"  Got {len(articles)} articles.")
+        articles, was_cached = await _fetch_rss(client, feed_cfg)
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    source = "cache" if was_cached else "fresh"
+    log.info(f"  [{source}] {len(articles)} items fetched in {elapsed_ms}ms.")
     if articles:
-      repo.upsert_articles(articles, {feed.name: feed.id})
+      new_count = repo.upsert_articles(articles, {feed.name: feed.id})
+      log.info(f"  Saved: {new_count} new / {len(articles)} total (existing skipped).")
+    else:
+      log.info("  No articles returned.")
     if not feed.site_url and feed.url:
       probe = await _probe_feed(feed.url)
       if probe.site_url:
         repo.update_feed_site_url(feed.id, probe.site_url)
+        log.info(f"  Updated site_url: {probe.site_url}")
     repo.update_feed_fetch_status(feed.id, success=True)
+    log.success(f"  Done: {feed.name}")
   except Exception as e:
-    log.warn(f"Failed to fetch feed '{feed.name}': {e}")
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    log.error(f"  Failed [{feed.name}] after {elapsed_ms}ms: {type(e).__name__}: {e}")
     repo.update_feed_fetch_status(feed.id, success=False, error=str(e))
 
 
@@ -580,7 +601,9 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
     async with _refresh_lock:
       if _refresh_task is None or _refresh_task.done():
         config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
-        _refresh_task = asyncio.create_task(_run_refresh(config))
+        log.info(f"OPML import added {feeds_created} feeds, auto-triggering refresh.")
+        _refresh_task = asyncio.create_task(_run_refresh(config, trigger="opml"))
+        _refresh_task.add_done_callback(_log_task_exception)
 
   return {
     "folders_created": folders_created,
@@ -592,11 +615,21 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
 # -- Refresh --
 
 
-async def _run_refresh(config: AppConfig) -> None:
+async def _run_refresh(config: AppConfig, *, trigger: str = "web") -> None:
   global _refresh_task
+  start = time.perf_counter()
+  log.step(f"Refresh started (trigger={trigger})")
+  if _summarize_lock.locked():
+    log.info("  Waiting for summarizer lock...")
   try:
     async with _summarize_lock:
-      await refresh_all(config, source="web")
+      await refresh_all(config, source=trigger)
+    elapsed = time.perf_counter() - start
+    log.success(f"Refresh completed in {elapsed:.1f}s (trigger={trigger})")
+  except Exception as e:
+    elapsed = time.perf_counter() - start
+    log.error(f"Refresh failed after {elapsed:.1f}s (trigger={trigger}): {type(e).__name__}: {e}")
+    raise
   finally:
     _refresh_task = None
 
@@ -606,9 +639,11 @@ async def trigger_refresh(request: Request) -> JSONResponse:
   global _refresh_task
   async with _refresh_lock:
     if _refresh_task is not None and not _refresh_task.done():
+      log.info("Refresh requested but one is already in progress.")
       return JSONResponse({"message": "Refresh already in progress"}, status_code=409)
     config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
-    _refresh_task = asyncio.create_task(_run_refresh(config))
+    _refresh_task = asyncio.create_task(_run_refresh(config, trigger="web"))
+    _refresh_task.add_done_callback(_log_task_exception)
   return JSONResponse({"message": "Refresh started"}, status_code=202)
 
 

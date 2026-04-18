@@ -176,6 +176,7 @@ def _row_to_feed(r: object) -> FeedRow:
     summarize=bool(r["summarize"]),  # type: ignore[index]
     enabled=bool(r["enabled"]),  # type: ignore[index]
     folder_id=r["folder_id"],  # type: ignore[index]
+    position=r["position"],  # type: ignore[index]
     last_fetched_at=datetime.fromisoformat(r["last_fetched_at"]) if r["last_fetched_at"] else None,  # type: ignore[index]
     consecutive_failures=r["consecutive_failures"],  # type: ignore[index]
     last_error=r["last_error"],  # type: ignore[index]
@@ -184,14 +185,17 @@ def _row_to_feed(r: object) -> FeedRow:
   )
 
 
+_FEED_ORDER = "ORDER BY position, id"
+
+
 def list_feeds(*, enabled: bool | None = None) -> list[FeedRow]:
   conn = db.get_conn()
   try:
     if enabled is None:
-      rows = conn.execute("SELECT * FROM feeds ORDER BY id DESC").fetchall()
+      rows = conn.execute(f"SELECT * FROM feeds {_FEED_ORDER}").fetchall()
     else:
       rows = conn.execute(
-        "SELECT * FROM feeds WHERE enabled = ? ORDER BY id DESC",
+        f"SELECT * FROM feeds WHERE enabled = ? {_FEED_ORDER}",
         (int(enabled),),
       ).fetchall()
     return [_row_to_feed(r) for r in rows]
@@ -211,9 +215,12 @@ def get_feed_by_id(feed_id: int) -> FeedRow | None:
 def add_feed(feed: FeedRow) -> int:
   conn = db.get_conn()
   try:
+    # New feeds go to the end of the list.
+    row = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM feeds").fetchone()
+    pos = row[0]
     cur = conn.execute(
-      """INSERT INTO feeds (name, url, site_url, translate, max_items, summarize, enabled, folder_id, extraction_rules, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+      """INSERT INTO feeds (name, url, site_url, translate, max_items, summarize, enabled, folder_id, position, extraction_rules, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
       (
         feed.name,
         feed.url,
@@ -223,12 +230,39 @@ def add_feed(feed: FeedRow) -> int:
         int(feed.summarize),
         int(feed.enabled),
         feed.folder_id,
+        pos,
         feed.extraction_rules,
         _now_iso(),
       ),
     )
     conn.commit()
     return cur.lastrowid or 0
+  finally:
+    conn.close()
+
+
+def reorder_feeds(feed_ids: list[int]) -> None:
+  """Assign sequential positions to the given feed IDs in the given order.
+
+  Only the listed feeds are re-positioned; positions are re-assigned starting
+  at the smallest existing position among them so that unrelated feeds keep
+  their relative ordering.
+  """
+  if not feed_ids:
+    return
+  conn = db.get_conn()
+  try:
+    placeholders = ",".join("?" * len(feed_ids))
+    row = conn.execute(
+      f"SELECT MIN(position) FROM feeds WHERE id IN ({placeholders})",
+      feed_ids,
+    ).fetchone()
+    base = row[0] if row and row[0] is not None else 0
+    conn.executemany(
+      "UPDATE feeds SET position = ? WHERE id = ?",
+      [(base + i, fid) for i, fid in enumerate(feed_ids)],
+    )
+    conn.commit()
   finally:
     conn.close()
 

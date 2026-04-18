@@ -3,6 +3,7 @@ import hashlib
 import html
 import random
 import re
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
@@ -39,48 +40,70 @@ async def _fetch_with_cache(
   client: httpx.AsyncClient,
   url: str,
   headers: dict | None = None,
-) -> tuple[str, bool]:
-  """Fetch URL with L1 cache (ETag / content hash). Returns (body, was_cached)."""
+) -> tuple[str, bool, str]:
+  """Fetch URL with L1 cache (ETag / content hash).
+
+  Returns (body, was_cached, source_tag) where source_tag is a short
+  human-readable label of where the body came from:
+    - "fresh"     : 200 OK, body fetched and saved
+    - "unchanged" : body unchanged by content hash (served from cache)
+    - "304"       : server returned 304 Not Modified
+    - "304-empty" : 304 but no cached copy available → body is empty
+    - "net-cache" : network error, cached copy served
+    - "5xx-cache" : HTTP 4xx/5xx, cached copy served
+  """
   cached = load_feed_cache(url)
   if cached and "body" not in cached:
     cached = None
   req_headers = dict(headers or {})
+  conditional = False
   if cached:
     if cached.get("etag"):
       req_headers["If-None-Match"] = cached["etag"]
+      conditional = True
     if cached.get("last_modified"):
       req_headers["If-Modified-Since"] = cached["last_modified"]
+      conditional = True
 
+  start = time.perf_counter()
   try:
     resp = await client.get(url, headers=req_headers)
   except (httpx.TransportError, OSError) as e:
     if cached:
       log.warn(f"    Network error, using cached feed: {url} ({type(e).__name__}: {e or 'no details'})")
-      return cached["body"], True
+      return cached["body"], True, "net-cache"
     raise
+  elapsed_ms = int((time.perf_counter() - start) * 1000)
 
   if resp.status_code == 304:
     if cached:
-      return cached["body"], True
+      log.dim(f"    GET {url} → 304 Not Modified ({elapsed_ms}ms, cache hit)")
+      return cached["body"], True, "304"
     log.warn(f"    304 without cached data, skipping: {url}")
-    return "", True
+    return "", True, "304-empty"
 
   try:
     resp.raise_for_status()
   except httpx.HTTPStatusError as e:
     if e.response.status_code in {403, 429, 500, 502, 503, 504} and cached:
       log.warn(f"    HTTP {e.response.status_code}, using cached feed: {url}")
-      return cached["body"], True
+      return cached["body"], True, "5xx-cache"
     raise
   body = resp.text
+  size_kb = len(body.encode("utf-8")) / 1024
 
   if cached and hashlib.sha256(body.encode()).hexdigest() == cached.get("content_hash"):
-    return body, True
+    log.dim(f"    GET {url} → {resp.status_code} {size_kb:.1f}KB ({elapsed_ms}ms, unchanged)")
+    return body, True, "unchanged"
 
   etag = resp.headers.get("etag")
   last_modified = resp.headers.get("last-modified")
   save_feed_cache(url, etag, last_modified, body)
-  return body, False
+  log.dim(
+    f"    GET {url} → {resp.status_code} {size_kb:.1f}KB ({elapsed_ms}ms"
+    f"{', conditional' if conditional else ''})"
+  )
+  return body, False, "fresh"
 
 
 def _extract_item_images(body: str) -> dict[str, str]:
@@ -198,7 +221,7 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
 
 async def _fetch_rss(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Article], bool]:
   url = feed_cfg["url"]
-  body, was_cached = await _fetch_with_cache(client, url)
+  body, was_cached, _tag = await _fetch_with_cache(client, url)
   # Empty body happens on 304-without-cache (already logged in _fetch_with_cache).
   # Returning [] here lets callers treat it the same as "no new articles".
   if not body:
@@ -209,23 +232,39 @@ async def _fetch_rss(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Ar
 _CONCURRENCY = 5
 
 async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
-  """Fetch a single feed with concurrency limit and random delay."""
+  """Fetch a single feed with concurrency limit and random delay.
+
+  Returns (articles, was_cached, kind) where `kind` is a short label
+  indicating how the feed was fetched — used for per-feed summary logging.
+  """
+  name = feed.get("name") or feed.get("url") or "?"
   async with sem:
     if delay > 0:
       await asyncio.sleep(delay)
     rules_json = feed.get("extraction_rules")
-    if rules_json and rules_json != "{}":
+    is_web = rules_json is not None
+    if is_web and rules_json != "{}":
       import json as _json
       rules = _json.loads(rules_json) if isinstance(rules_json, str) else rules_json
       if rules.get("item"):
+        start = time.perf_counter()
         from scraper import fetch_web_page
-        return await fetch_web_page(client, feed)
-      # Web feed with incomplete rules — skip
-      return [], False
-    if rules_json is not None:
-      # Web feed with no rules yet — skip
-      return [], False
-    return await _fetch_rss(client, feed)
+        articles, was_cached = await fetch_web_page(client, feed)
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        source = "cache" if was_cached else "fresh"
+        log.info(f"  [web/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
+        return articles, was_cached, "web"
+      log.warn(f"  [web/skip] {name}: extraction rules incomplete")
+      return [], False, "web-norules"
+    if is_web:
+      log.warn(f"  [web/skip] {name}: no extraction rules configured")
+      return [], False, "web-norules"
+    start = time.perf_counter()
+    articles, was_cached = await _fetch_rss(client, feed)
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    source = "cache" if was_cached else "fresh"
+    log.info(f"  [rss/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
+    return articles, was_cached, "rss"
 
 
 async def fetch_all(
@@ -257,19 +296,27 @@ async def fetch_all(
   seen_urls: set[str] = set()
   cached_feeds = 0
   fetched_feeds = 0
+  error_feeds = 0
+  skipped_web_feeds = 0
+  total_items = 0
+  total_fresh_items = 0
   for i, result in enumerate(results):
     feed_id = task_feeds[i].get("id")
     is_web_feed = bool(task_feeds[i].get("extraction_rules"))
     if isinstance(result, Exception):
-      log.error(f"  Error: {task_feeds[i].get('name')}: {result}")
+      error_feeds += 1
+      log.error(f"  [error] {task_feeds[i].get('name')}: {type(result).__name__}: {result}")
       if feed_id is not None:
         feed_results.append((feed_id, False, str(result)))
     else:
-      feed_articles, was_cached = result
-      if was_cached:
+      feed_articles, was_cached, _kind = result
+      if _kind == "web-norules":
+        skipped_web_feeds += 1
+      elif was_cached:
         cached_feeds += 1
       else:
         fetched_feeds += 1
+      total_items += len(feed_articles)
       if feed_id is not None:
         feed_results.append((feed_id, True, None))
       if is_web_feed and len(feed_articles) == 0 and feed_id is not None:
@@ -284,6 +331,13 @@ async def fetch_all(
           a.published = pub
         if pub is None or pub >= cutoff:
           articles.append(a)
+          total_fresh_items += 1
 
-  log.info(f"  Feeds: {fetched_feeds} fetched, {cached_feeds} from cache.")
+  summary = (
+    f"  Feeds: {fetched_feeds} fresh, {cached_feeds} cached"
+    f"{f', {error_feeds} errors' if error_feeds else ''}"
+    f"{f', {skipped_web_feeds} skipped (no rules)' if skipped_web_feeds else ''}"
+    f" | items: {total_fresh_items} within window, {total_items} total."
+  )
+  log.info(summary)
   return articles, feed_results, stale_web_feeds

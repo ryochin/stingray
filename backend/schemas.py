@@ -34,6 +34,7 @@ class FeedRow(BaseModel):
   summarize: bool = True
   enabled: bool = True
   folder_id: int | None = None
+  position: int = 0
   last_fetched_at: datetime | None = None
   consecutive_failures: int = 0
   last_error: str | None = None

@@ -15,6 +15,7 @@ export interface Feed {
   summarize: boolean
   enabled: boolean
   folder_id: number | null
+  position: number
   last_fetched_at: string | null
   consecutive_failures: number
   last_error: string | null
@@ -131,6 +132,13 @@ export const api = {
     }),
 
   getFeeds: () => fetchJson<Feed[]>("/feeds"),
+
+  reorderFeeds: (feedIds: number[]) =>
+    fetchJson<void>("/feeds/reorder", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feed_ids: feedIds }),
+    }),
 
   getFeedStats: () => fetchJson<Record<string, FeedStats>>("/feeds/stats"),
 

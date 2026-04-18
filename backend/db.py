@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS feeds (
   summarize             INTEGER NOT NULL DEFAULT 1,
   enabled               INTEGER NOT NULL DEFAULT 1,
   folder_id             INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+  position              INTEGER NOT NULL DEFAULT 0,
   last_fetched_at       TEXT,
   consecutive_failures  INTEGER NOT NULL DEFAULT 0,
   last_error            TEXT,
@@ -238,6 +239,17 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE feeds ADD COLUMN extraction_rules TEXT")
     conn.commit()
     feed_cols.add("extraction_rules")
+
+  if "position" not in feed_cols:
+    conn.execute("ALTER TABLE feeds ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+    # Seed existing rows: preserve prior order by descending id (matches the
+    # old list_feeds ORDER BY). Lower position = earlier in the list.
+    conn.execute("""\
+      UPDATE feeds SET position = (
+        SELECT COUNT(*) FROM feeds f2 WHERE f2.id > feeds.id
+      )""")
+    conn.commit()
+    feed_cols.add("position")
 
 
 def init_schema() -> None:
