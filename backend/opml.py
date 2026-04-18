@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import re
 import xml.etree.ElementTree as ET
 import defusedxml.ElementTree as SafeET
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
+from models import JA_KANA
 from schemas import FeedRow, FolderRow
 
 
@@ -81,13 +81,11 @@ def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
 
 # -- Import --
 
-_JA_KANA = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")
-
 
 def _should_translate(name: str, url: str | None = None, native_lang: str = "ja") -> bool:
   """Guess if a feed needs translation based on name and URL."""
   if native_lang == "ja":
-    if _JA_KANA.search(name):
+    if JA_KANA.search(name):
       return False
     if url:
       try:

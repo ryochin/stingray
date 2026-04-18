@@ -8,7 +8,7 @@ export default function Filters() {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [pattern, setPattern] = useState("")
-  const [target, setTarget] = useState("title")
+  const [target, setTarget] = useState<"title" | "both">("title")
 
   const { data: filters } = useQuery({
     queryKey: ["filters"],
@@ -97,7 +97,7 @@ export default function Filters() {
           />
           <select
             value={target}
-            onChange={(e) => setTarget(e.target.value)}
+            onChange={(e) => setTarget(e.target.value as "title" | "both")}
             className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
           >
             <option value="title">Title</option>

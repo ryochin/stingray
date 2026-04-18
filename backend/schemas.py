@@ -77,6 +77,13 @@ class RefreshJob(BaseModel):
   error: str | None = None
 
 
+class FeedStats(BaseModel):
+  article_count: int
+  unread_count: int
+  latest_published: str | None = None
+  oldest_published: str | None = None
+
+
 class StatusResponse(BaseModel):
   running: bool
   last_started_at: datetime | None = None

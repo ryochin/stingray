@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useMemo, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, FeedCreate, FeedStats } from "../api/client"
@@ -245,16 +245,22 @@ function OpmlButtons({ onError, onImported, feedCount }: { onError: (e: Error) =
   )
 }
 
+function prettifyRules(raw: string | null | undefined): string {
+  try {
+    const parsed = JSON.parse(raw || "{}")
+    return Object.keys(parsed).length > 0 ? JSON.stringify(parsed, null, 2) : ""
+  } catch { return raw || "" }
+}
+
 function ExtractionRulesEditor({ feed, onSaved }: { feed: Feed, onSaved: () => void }) {
-  const pretty = (() => {
-    try {
-      const parsed = JSON.parse(feed.extraction_rules || "{}")
-      return Object.keys(parsed).length > 0 ? JSON.stringify(parsed, null, 2) : ""
-    } catch { return feed.extraction_rules || "" }
-  })()
-  const [json, setJson] = useState(pretty)
+  const [json, setJson] = useState(() => prettifyRules(feed.extraction_rules))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Keep editor in sync when the feed prop changes (e.g. after invalidation)
+  useEffect(() => {
+    setJson(prettifyRules(feed.extraction_rules))
+  }, [feed.extraction_rules])
 
   const validate = (): Record<string, string | null> | null => {
     try {
@@ -385,6 +391,164 @@ function formatRelativeTime(iso: string): string {
   return `${diffDays}d ago`
 }
 
+type FeedItemProps = {
+  feed: Feed
+  stats?: FeedStats
+  folders: Folder[]
+  expanded: boolean
+  editing: boolean
+  editName: string
+  fetching: boolean
+  onToggleExpand: (feedId: number) => void
+  onStartEdit: (feed: Feed) => void
+  onCancelEdit: () => void
+  onChangeEditName: (name: string) => void
+  onCommitEdit: (feed: Feed, name: string) => void
+  onDelete: (feed: Feed) => void
+  onFetch: (feedId: number) => void
+  onToggleEnabled: (feedId: number) => void
+  onToggleSummarize: (feedId: number) => void
+  onMoveToFolder: (feedId: number, folderId: number | null) => void
+  onToggleTranslate: (feedId: number, translate: boolean) => void
+  onRulesUpdated: () => void
+}
+
+function FeedItem({
+  feed, stats, folders, expanded, editing, editName, fetching,
+  onToggleExpand, onStartEdit, onCancelEdit, onChangeEditName, onCommitEdit,
+  onDelete, onFetch, onToggleEnabled, onToggleSummarize, onMoveToFolder,
+  onToggleTranslate, onRulesUpdated,
+}: FeedItemProps) {
+  const isUnhealthy = feed.consecutive_failures >= 3
+  const favicon = faviconUrl(feed)
+  const hasRules = feed.extraction_rules !== "{}"
+  const isWebFeed = feed.extraction_rules != null
+
+  return (
+    <div className="bg-bg-secondary rounded-lg border border-border">
+      <div className="flex items-center justify-between p-3">
+        <div className="flex-1 min-w-0 flex items-start gap-2.5">
+          {favicon && (
+            <img src={favicon} alt="" className="w-4 h-4 shrink-0 mt-1" loading="lazy" />
+          )}
+          <div className="flex-1 min-w-0">
+            {editing ? (
+              <input
+                value={editName}
+                onChange={(e) => onChangeEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && editName.trim()) {
+                    onCommitEdit(feed, editName.trim())
+                  }
+                  if (e.key === "Escape") onCancelEdit()
+                }}
+                onBlur={() => {
+                  if (editName.trim() && editName.trim() !== feed.name) {
+                    onCommitEdit(feed, editName.trim())
+                  } else {
+                    onCancelEdit()
+                  }
+                }}
+                autoFocus
+                className="bg-bg-card text-text border border-border rounded px-2 py-0.5 text-sm font-medium w-full"
+              />
+            ) : (
+              <div
+                className="flex items-center gap-1.5 cursor-pointer"
+                onClick={() => onToggleExpand(feed.id)}
+              >
+                <span className="text-text-dim text-xs shrink-0">{expanded ? "\u25BE" : "\u25B8"}</span>
+                {isWebFeed && (
+                  <span
+                    className={`text-xs px-1 rounded shrink-0 ${
+                      hasRules
+                        ? "text-accent-text bg-accent-bg"
+                        : "text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 border-solid"
+                    }`}
+                    title={hasRules ? "Web page feed" : "Web page feed — rules not configured"}
+                  >
+                    WEB{hasRules ? "" : " ⚠"}
+                  </span>
+                )}
+                {isUnhealthy && (
+                  <span
+                    className="text-yellow-400 text-sm shrink-0"
+                    title={`${feed.consecutive_failures} consecutive failures${feed.last_error ? ": " + feed.last_error : ""}`}
+                  >
+                    !!!
+                  </span>
+                )}
+                <span className={`font-medium ${feed.enabled ? "text-text-heading" : "text-text-dim line-through"}`}>
+                  {feed.name}
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onStartEdit(feed) }}
+                  className="text-text-dim hover:text-text transition-colors text-xs"
+                  title="Rename"
+                >
+                  ✎
+                </button>
+              </div>
+            )}
+            <div className="text-xs text-text-muted mt-0.5">
+              <a href={feed.site_url ?? feed.url ?? ""} target="_blank" rel="noopener noreferrer" className="text-link hover:text-link-hover hover:underline">{feed.site_url ?? feed.url}</a>
+              {feed.site_url && feed.url && (
+                <a href={feed.url} target="_blank" rel="noopener noreferrer" className="text-text-dim hover:text-link-hover ml-1" title={feed.url}>&#8853;</a>
+              )}
+              {feed.last_fetched_at && (
+                <>{" "}&middot;{" "}{formatRelativeTime(feed.last_fetched_at)}</>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 ml-4 shrink-0">
+          <button onClick={() => onToggleSummarize(feed.id)}
+            className={`px-2 py-1 rounded text-xs border transition-colors ${
+              feed.summarize
+                ? "bg-accent-bg text-accent-text border-accent-bg"
+                : "bg-bg-card text-text-muted border-border hover:text-text"
+            }`}
+            title="Summarize articles from this feed"
+          >
+            Summarize
+          </button>
+          <select
+            value={feed.folder_id ?? ""}
+            onChange={(e) => onMoveToFolder(feed.id, e.target.value ? Number(e.target.value) : null)}
+            className="bg-bg-card text-text-muted border border-border rounded px-1.5 py-1 text-xs"
+          >
+            <option value="">--</option>
+            {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+          <button onClick={() => onFetch(feed.id)}
+            disabled={fetching}
+            title="Fetch now"
+            className="px-2 py-1 rounded text-xs bg-bg-card text-text-muted hover:text-text transition-colors disabled:opacity-40">
+            <span className={`inline-block ${fetching ? "animate-spin" : ""}`}>↻</span>
+          </button>
+          <button onClick={() => onToggleEnabled(feed.id)}
+            className={`px-2 py-1 rounded text-xs transition-colors ${
+              feed.enabled
+                ? "bg-green-900 text-green-300"
+                : "bg-bg-card text-text-dim"
+            }`}>
+            {feed.enabled ? "ON" : "OFF"}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <FeedDetails feed={feed} stats={stats}
+          onDelete={() => onDelete(feed)}
+          onToggleTranslate={() => onToggleTranslate(feed.id, !feed.translate)}
+          onRulesUpdated={isWebFeed ? onRulesUpdated : undefined}
+        />
+      )}
+    </div>
+  )
+}
+
+
 export default function Feeds() {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
@@ -405,7 +569,10 @@ export default function Feeds() {
     queryFn: api.getFeedStats,
   })
 
-  const sortedFolders = (folders ?? []).slice().sort((a, b) => a.position - b.position || a.id - b.id)
+  const sortedFolders = useMemo(
+    () => (folders ?? []).slice().sort((a, b) => a.position - b.position || a.id - b.id),
+    [folders],
+  )
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["feeds"] })
     queryClient.invalidateQueries({ queryKey: ["folders"] })
@@ -458,158 +625,69 @@ export default function Feeds() {
   })
 
   // Group feeds by folder
-  const feedsByFolder = new Map<number | null, Feed[]>()
-  for (const feed of feeds ?? []) {
-    const key = feed.folder_id
-    if (!feedsByFolder.has(key)) feedsByFolder.set(key, [])
-    feedsByFolder.get(key)!.push(feed)
-  }
+  const feedsByFolder = useMemo(() => {
+    const map = new Map<number | null, Feed[]>()
+    for (const feed of feeds ?? []) {
+      const key = feed.folder_id
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(feed)
+    }
+    return map
+  }, [feeds])
 
-  const toggleExpand = (feedId: number) => {
+  const toggleExpand = useCallback((feedId: number) => {
     setExpandedFeeds((prev) => {
       const next = new Set(prev)
       if (next.has(feedId)) next.delete(feedId)
       else next.add(feedId)
       return next
     })
-  }
+  }, [])
 
-  const renderFeed = (feed: Feed) => {
-    const isExpanded = expandedFeeds.has(feed.id)
-    const isUnhealthy = feed.consecutive_failures >= 3
+  const handleStartEdit = useCallback((feed: Feed) => {
+    setEditingFeedId(feed.id)
+    setEditFeedName(feed.name)
+  }, [])
+  const handleCancelEdit = useCallback(() => setEditingFeedId(null), [])
+  const handleCommitEdit = useCallback((feed: Feed, name: string) => {
+    renameFeed.mutate({ feedId: feed.id, name })
+    setEditingFeedId(null)
+  }, [renameFeed])
+  const handleDelete = useCallback((feed: Feed) => {
+    if (confirm(`Delete "${feed.name}"?`)) deleteFeed.mutate(feed.id)
+  }, [deleteFeed])
+  const handleFetch = useCallback((feedId: number) => fetchFeed.mutate(feedId), [fetchFeed])
+  const handleToggleEnabled = useCallback((feedId: number) => toggleFeed.mutate(feedId), [toggleFeed])
+  const handleToggleSummarize = useCallback((feedId: number) => toggleSummarize.mutate(feedId), [toggleSummarize])
+  const handleMove = useCallback((feedId: number, folderId: number | null) =>
+    moveFeed.mutate({ feedId, folderId }), [moveFeed])
+  const handleToggleTranslate = useCallback((feedId: number, translate: boolean) =>
+    updateTranslate.mutate({ feedId, translate }), [updateTranslate])
 
-    return (
-      <div key={feed.id} className="bg-bg-secondary rounded-lg border border-border">
-        <div className="flex items-center justify-between p-3">
-          <div className="flex-1 min-w-0 flex items-start gap-2.5">
-            {faviconUrl(feed) && (
-              <img src={faviconUrl(feed)!} alt="" className="w-4 h-4 shrink-0 mt-1" loading="lazy" />
-            )}
-            <div className="flex-1 min-w-0">
-              {editingFeedId === feed.id ? (
-                <input
-                  value={editFeedName}
-                  onChange={(e) => setEditFeedName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && editFeedName.trim()) {
-                      renameFeed.mutate({ feedId: feed.id, name: editFeedName.trim() })
-                      setEditingFeedId(null)
-                    }
-                    if (e.key === "Escape") setEditingFeedId(null)
-                  }}
-                  onBlur={() => {
-                    if (editFeedName.trim() && editFeedName.trim() !== feed.name) {
-                      renameFeed.mutate({ feedId: feed.id, name: editFeedName.trim() })
-                    }
-                    setEditingFeedId(null)
-                  }}
-                  autoFocus
-                  className="bg-bg-card text-text border border-border rounded px-2 py-0.5 text-sm font-medium w-full"
-                />
-              ) : (
-                <div
-                  className="flex items-center gap-1.5 cursor-pointer"
-                  onClick={() => toggleExpand(feed.id)}
-                >
-                  <span className="text-text-dim text-xs shrink-0">{isExpanded ? "\u25BE" : "\u25B8"}</span>
-                  {feed.extraction_rules != null && (() => {
-                    const hasRules = feed.extraction_rules !== "{}"
-                    return (
-                      <span
-                        className={`text-xs px-1 rounded shrink-0 ${
-                          hasRules
-                            ? "text-accent-text bg-accent-bg"
-                            : "text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 border-solid"
-                        }`}
-                        title={hasRules ? "Web page feed" : "Web page feed — rules not configured"}
-                      >
-                        WEB{hasRules ? "" : " ⚠"}
-                      </span>
-                    )
-                  })()}
-                  {isUnhealthy && (
-                    <span
-                      className="text-yellow-400 text-sm shrink-0"
-                      title={`${feed.consecutive_failures} consecutive failures${feed.last_error ? ": " + feed.last_error : ""}`}
-                    >
-                      !!!
-                    </span>
-                  )}
-                  <span className={`font-medium ${feed.enabled ? "text-text-heading" : "text-text-dim line-through"}`}>
-                    {feed.name}
-                  </span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setEditingFeedId(feed.id); setEditFeedName(feed.name) }}
-                    className="text-text-dim hover:text-text transition-colors text-xs"
-                    title="Rename"
-                  >
-                    ✎
-                  </button>
-                </div>
-              )}
-              <div className="text-xs text-text-muted mt-0.5">
-                <a href={feed.site_url ?? feed.url ?? ""} target="_blank" rel="noopener noreferrer" className="text-link hover:text-link-hover hover:underline">{feed.site_url ?? feed.url}</a>
-                {feed.site_url && feed.url && (
-                  <a href={feed.url} target="_blank" rel="noopener noreferrer" className="text-text-dim hover:text-link-hover ml-1" title={feed.url}>&#8853;</a>
-                )}
-                {feed.last_fetched_at && (
-                  <>{" "}&middot;{" "}{formatRelativeTime(feed.last_fetched_at)}</>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 ml-4 shrink-0">
-            <button onClick={() => toggleSummarize.mutate(feed.id)}
-              className={`px-2 py-1 rounded text-xs border transition-colors ${
-                feed.summarize
-                  ? "bg-accent-bg text-accent-text border-accent-bg"
-                  : "bg-bg-card text-text-muted border-border hover:text-text"
-              }`}
-              title="Summarize articles from this feed"
-            >
-              Summarize
-            </button>
-            <select
-              value={feed.folder_id ?? ""}
-              onChange={(e) => moveFeed.mutate({
-                feedId: feed.id,
-                folderId: e.target.value ? Number(e.target.value) : null,
-              })}
-              className="bg-bg-card text-text-muted border border-border rounded px-1.5 py-1 text-xs"
-            >
-              <option value="">--</option>
-              {sortedFolders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select>
-            <button onClick={() => fetchFeed.mutate(feed.id)}
-              disabled={fetchingFeeds.has(feed.id)}
-              title="Fetch now"
-              className="px-2 py-1 rounded text-xs bg-bg-card text-text-muted hover:text-text transition-colors disabled:opacity-40">
-              <span className={`inline-block ${fetchingFeeds.has(feed.id) ? "animate-spin" : ""}`}>↻</span>
-            </button>
-            <button onClick={() => toggleFeed.mutate(feed.id)}
-              className={`px-2 py-1 rounded text-xs transition-colors ${
-                feed.enabled
-                  ? "bg-green-900 text-green-300"
-                  : "bg-bg-card text-text-dim"
-              }`}>
-              {feed.enabled ? "ON" : "OFF"}
-            </button>
-          </div>
-        </div>
-
-        {/* Expandable details */}
-        {isExpanded && (
-          <FeedDetails feed={feed} stats={feedStats?.[feed.id]}
-            onDelete={() => {
-              if (confirm(`Delete "${feed.name}"?`)) deleteFeed.mutate(feed.id)
-            }}
-            onToggleTranslate={() => updateTranslate.mutate({ feedId: feed.id, translate: !feed.translate })}
-            onRulesUpdated={feed.extraction_rules != null ? invalidate : undefined}
-          />
-        )}
-      </div>
-    )
-  }
+  const renderFeed = (feed: Feed) => (
+    <FeedItem
+      key={feed.id}
+      feed={feed}
+      stats={feedStats?.[feed.id]}
+      folders={sortedFolders}
+      expanded={expandedFeeds.has(feed.id)}
+      editing={editingFeedId === feed.id}
+      editName={editFeedName}
+      fetching={fetchingFeeds.has(feed.id)}
+      onToggleExpand={toggleExpand}
+      onStartEdit={handleStartEdit}
+      onCancelEdit={handleCancelEdit}
+      onChangeEditName={setEditFeedName}
+      onCommitEdit={handleCommitEdit}
+      onDelete={handleDelete}
+      onFetch={handleFetch}
+      onToggleEnabled={handleToggleEnabled}
+      onToggleSummarize={handleToggleSummarize}
+      onMoveToFolder={handleMove}
+      onToggleTranslate={handleToggleTranslate}
+      onRulesUpdated={invalidate}
+    />
+  )
 
   const uncategorized = feedsByFolder.get(null) ?? []
 

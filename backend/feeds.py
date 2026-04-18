@@ -11,7 +11,7 @@ import httpx
 
 import log
 from cache import load_feed_cache, save_feed_cache
-from models import Article
+from models import JA_KANA, Article
 
 
 def _strip_html(text: str) -> str:
@@ -23,13 +23,8 @@ def _strip_html(text: str) -> str:
   return text.strip()
 
 
-# Hiragana or katakana in the title is a strong signal that the article is Japanese.
-# Kanji alone is ambiguous (Chinese shares them), so we deliberately exclude the CJK range.
-_JA_KANA = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")
-
-
 def _detect_lang(title: str, default: str) -> str:
-  if title and _JA_KANA.search(title):
+  if title and JA_KANA.search(title):
     return "ja"
   return default
 
@@ -204,6 +199,10 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
 async def _fetch_rss(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Article], bool]:
   url = feed_cfg["url"]
   body, was_cached = await _fetch_with_cache(client, url)
+  # Empty body happens on 304-without-cache (already logged in _fetch_with_cache).
+  # Returning [] here lets callers treat it the same as "no new articles".
+  if not body:
+    return [], was_cached
   return _parse_rss(body, feed_cfg), was_cached
 
 

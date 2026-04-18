@@ -2,16 +2,7 @@ import { useEffect, useRef } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
+import { formatTime } from "../utils/date"
 
 export default function Header() {
   const queryClient = useQueryClient()

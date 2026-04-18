@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import os
+import json
 import re
+import xml.etree.ElementTree as _ET
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
+from urllib.parse import urlparse
 
 import feedparser
 import httpx
@@ -16,13 +18,17 @@ import yaml
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
 import db
+import log
 import repo
 from feeds import _fetch_rss
-from fetcher import refresh_all
-from schemas import AppConfig, ArticleRow, FeedRow, FilterRow, FolderRow, StatusResponse
+from fetcher import refresh_all, summarize_pending
+from models import JA_KANA
+from opml import export_opml, parse_opml
+from scraper import fetch_web_page
+from schemas import AppConfig, ArticleRow, FeedRow, FeedStats, FilterRow, FolderRow, StatusResponse
 
 # -- Globals for background refresh --
 _refresh_lock = asyncio.Lock()
@@ -35,8 +41,7 @@ def _log_task_exception(task: asyncio.Task[object]) -> None:
     return
   exc = task.exception()
   if exc is not None:
-    import log as _log
-    _log.warn(f"  Background task failed: {exc}")
+    log.warn(f"  Background task failed: {exc}")
 
 
 def _load_config() -> AppConfig:
@@ -52,20 +57,24 @@ def _load_config() -> AppConfig:
 
 async def _background_summarizer(config: AppConfig) -> None:
   """Periodically check for unsummarized articles and process them."""
-  from fetcher import summarize_pending
-  import log as _log
   await asyncio.sleep(10)  # initial delay
   while True:
-    if _summarize_lock.locked():
-      _log.info("  Background summarizer skipped (refresh in progress).")
+    # Non-blocking lock acquisition: skip this tick if a refresh (or another
+    # summarizer run) already holds the lock. Avoids the TOCTOU race between
+    # `locked()` and `async with`.
+    try:
+      await asyncio.wait_for(_summarize_lock.acquire(), timeout=0)
+    except asyncio.TimeoutError:
+      log.info("  Background summarizer skipped (refresh in progress).")
     else:
-      async with _summarize_lock:
-        try:
-          count = await summarize_pending(config)
-          if count > 0:
-            _log.info(f"  Background summarizer processed {count} articles.")
-        except Exception as e:
-          _log.warn(f"  Background summarizer error: {e}")
+      try:
+        count = await summarize_pending(config)
+        if count > 0:
+          log.info(f"  Background summarizer processed {count} articles.")
+      except Exception as e:
+        log.warn(f"  Background summarizer error: {e}")
+      finally:
+        _summarize_lock.release()
     await asyncio.sleep(60)
 
 
@@ -186,11 +195,8 @@ def get_feeds() -> list[FeedRow]:
 
 
 @app.get("/api/feeds/stats")
-def get_feed_stats() -> dict[int, dict]:
+def get_feed_stats() -> dict[int, FeedStats]:
   return repo.get_feed_stats()
-
-
-_JA_KANA = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")
 
 
 def _detect_feed_lang(parsed: feedparser.FeedParserDict, url: str | None = None) -> str | None:
@@ -206,11 +212,10 @@ def _detect_feed_lang(parsed: feedparser.FeedParserDict, url: str | None = None)
 
   for entry in parsed.entries[:5]:
     title = entry.get("title", "")
-    if title and _JA_KANA.search(title):
+    if title and JA_KANA.search(title):
       return "ja"
 
   if url:
-    from urllib.parse import urlparse
     host = urlparse(url).hostname or ""
     if host.endswith(".jp"):
       return "ja"
@@ -289,20 +294,17 @@ async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
         site_url=site_url.strip() or None,
       )
   except Exception as e:
-    import log
     log.warn(f"  Probe failed: {e}")
   return ProbeResult()
 
 
 async def _fetch_single_feed(feed: FeedRow) -> None:
   """Fetch articles from a single feed and persist to DB."""
-  import log
   try:
     feed_cfg = feed.to_feed_cfg()
     log.step(f"Fetching feed: {feed.name}")
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
       if feed.extraction_rules and feed.extraction_rules != "{}":
-        from scraper import fetch_web_page
         articles, _ = await fetch_web_page(client, feed_cfg)
       elif feed.extraction_rules is not None:
         log.info("  Skipping: extraction rules not configured yet.")
@@ -324,7 +326,6 @@ async def _fetch_single_feed(feed: FeedRow) -> None:
 
 @app.post("/api/feeds", status_code=201)
 async def create_feed(body: FeedCreate) -> FeedRow:
-  import log
   config = _load_config()
   log.step(f"Probing feed: {body.url}")
   probe = await _probe_feed(body.url, native_lang=config.native_lang)
@@ -344,8 +345,7 @@ async def create_feed(body: FeedCreate) -> FeedRow:
 
   feed = FeedRow(**body.model_dump(), site_url=probe.site_url, extraction_rules=extraction_rules)
   feed_id = repo.add_feed(feed)
-  feeds = repo.list_feeds()
-  created = next((f for f in feeds if f.id == feed_id), None)
+  created = repo.get_feed_by_id(feed_id)
   if created is None:
     raise HTTPException(404, "Feed not found after creation")
   log.info(f"  Feed created: id={feed_id}, name={created.name}")
@@ -360,7 +360,7 @@ def delete_all_data() -> None:
 
 @app.post("/api/feeds/{feed_id}/fetch", status_code=202)
 async def fetch_feed(feed_id: int) -> dict[str, str]:
-  feed = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  feed = repo.get_feed_by_id(feed_id)
   if feed is None:
     raise HTTPException(404, "Feed not found")
   asyncio.create_task(_fetch_single_feed(feed)).add_done_callback(_log_task_exception)
@@ -375,7 +375,7 @@ def delete_feed(feed_id: int) -> None:
 @app.post("/api/feeds/{feed_id}/toggle")
 def toggle_feed(feed_id: int) -> FeedRow:
   repo.toggle_feed(feed_id)
-  updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  updated = repo.get_feed_by_id(feed_id)
   if updated is None:
     raise HTTPException(404, "Feed not found")
   return updated
@@ -384,7 +384,7 @@ def toggle_feed(feed_id: int) -> FeedRow:
 @app.post("/api/feeds/{feed_id}/summarize")
 def toggle_summarize(feed_id: int) -> FeedRow:
   repo.toggle_summarize(feed_id)
-  updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  updated = repo.get_feed_by_id(feed_id)
   if updated is None:
     raise HTTPException(404, "Feed not found")
   return updated
@@ -392,8 +392,7 @@ def toggle_summarize(feed_id: int) -> FeedRow:
 
 @app.patch("/api/feeds/{feed_id}/rules")
 async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
-  import json as _json
-  feed = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  feed = repo.get_feed_by_id(feed_id)
   if feed is None:
     raise HTTPException(404, "Feed not found")
   if feed.extraction_rules is None:
@@ -404,8 +403,8 @@ async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
   for key in ("item", "title", "link"):
     if not rules.get(key) or not isinstance(rules[key], str):
       raise HTTPException(422, f"Missing or empty required field: {key}")
-  repo.update_feed_extraction_rules(feed_id, _json.dumps(rules))
-  updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  repo.update_feed_extraction_rules(feed_id, json.dumps(rules))
+  updated = repo.get_feed_by_id(feed_id)
   if updated is None:
     raise HTTPException(404, "Feed not found")
   return updated
@@ -418,7 +417,7 @@ class FeedTranslateUpdate(BaseModel):
 @app.patch("/api/feeds/{feed_id}/translate")
 def update_feed_translate(feed_id: int, body: FeedTranslateUpdate) -> FeedRow:
   repo.update_feed_translate(feed_id, body.translate)
-  updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  updated = repo.get_feed_by_id(feed_id)
   if updated is None:
     raise HTTPException(404, "Feed not found")
   return updated
@@ -431,7 +430,7 @@ class FeedRename(BaseModel):
 @app.patch("/api/feeds/{feed_id}/name")
 def rename_feed(feed_id: int, body: FeedRename) -> FeedRow:
   repo.rename_feed(feed_id, body.name)
-  updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  updated = repo.get_feed_by_id(feed_id)
   if updated is None:
     raise HTTPException(404, "Feed not found")
   return updated
@@ -440,7 +439,7 @@ def rename_feed(feed_id: int, body: FeedRename) -> FeedRow:
 @app.patch("/api/feeds/{feed_id}/folder")
 def move_feed_to_folder(feed_id: int, body: FeedMove) -> FeedRow:
   repo.move_feed_to_folder(feed_id, body.folder_id)
-  updated = next((f for f in repo.list_feeds() if f.id == feed_id), None)
+  updated = repo.get_feed_by_id(feed_id)
   if updated is None:
     raise HTTPException(404, "Feed not found")
   return updated
@@ -476,7 +475,6 @@ def delete_filter(filter_id: int) -> None:
 
 @app.get("/api/filters/export")
 def export_filters() -> Response:
-  import json
   filters = repo.list_filters()
   data = [{"pattern": f.pattern, "target": f.target} for f in filters]
   return Response(
@@ -488,7 +486,6 @@ def export_filters() -> Response:
 
 @app.post("/api/filters/import")
 async def import_filters(file: UploadFile) -> dict[str, int]:
-  import json
   try:
     content = (await file.read()).decode("utf-8")
     data = json.loads(content)
@@ -520,7 +517,6 @@ async def import_filters(file: UploadFile) -> dict[str, int]:
 
 @app.get("/api/opml/export")
 def opml_export() -> Response:
-  from opml import export_opml
   folders = repo.list_folders()
   feeds = repo.list_feeds()
   xml = export_opml(folders, feeds)
@@ -533,8 +529,6 @@ def opml_export() -> Response:
 
 @app.post("/api/opml/import")
 async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
-  import xml.etree.ElementTree as _ET
-  from opml import parse_opml
   try:
     content = (await file.read()).decode("utf-8")
     imported_folders, uncategorized = parse_opml(content)

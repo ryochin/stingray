@@ -131,33 +131,39 @@ def get_conn() -> sqlite3.Connection:
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
   """Apply pending schema migrations."""
-  cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
-  if "read_at" not in cols:
-    conn.execute(_MIGRATIONS[0])
-    conn.commit()
-
+  art_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
+  feed_cols = {r[1] for r in conn.execute("PRAGMA table_info(feeds)").fetchall()}
   tables = {r[0] for r in conn.execute(
     "SELECT name FROM sqlite_master WHERE type='table'"
   ).fetchall()}
+
+  if "read_at" not in art_cols:
+    conn.execute(_MIGRATIONS[0])
+    conn.commit()
+    art_cols.add("read_at")
+
   if "folders" not in tables:
     for sql in _MIGRATIONS[1:3]:
       conn.execute(sql)
     conn.commit()
     tables.add("folders")
+    feed_cols.add("folder_id")
 
   if "filters" not in tables and "ng_words" not in tables:
     conn.execute(_MIGRATIONS[3])
     conn.commit()
+    tables.add("filters")
   elif "ng_words" in tables and "filters" not in tables:
     conn.execute("ALTER TABLE ng_words RENAME TO filters")
     conn.commit()
+    tables.discard("ng_words")
+    tables.add("filters")
 
-  art_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
   if "content_html" not in art_cols:
     conn.execute(_MIGRATIONS[4])
     conn.commit()
+    art_cols.add("content_html")
 
-  feed_cols = {r[1] for r in conn.execute("PRAGMA table_info(feeds)").fetchall()}
   if "site_url" not in feed_cols:
     conn.execute(_MIGRATIONS[5])
     conn.commit()
@@ -174,15 +180,18 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE feeds ADD COLUMN translate INTEGER NOT NULL DEFAULT 0")
     conn.execute("UPDATE feeds SET translate = 1 WHERE lang != 'ja'")
     conn.commit()
+    feed_cols.add("translate")
 
-  art_cols = {r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
   if "title_translated" not in art_cols:
     conn.execute("ALTER TABLE articles ADD COLUMN title_translated TEXT")
     conn.execute("ALTER TABLE articles ADD COLUMN content_translated TEXT")
     conn.execute("UPDATE articles SET title_translated = title_ja WHERE title_ja IS NOT NULL")
     conn.commit()
+    art_cols.update(("title_translated", "content_translated"))
 
-  # Migrate articles foreign key from SET NULL to CASCADE
+  # Migrate articles foreign key from SET NULL to CASCADE.
+  # Wrapped in a transaction to avoid data loss if any step fails mid-way
+  # (previously a crash after DROP TABLE articles would destroy all rows).
   fk_info = conn.execute("PRAGMA foreign_key_list(articles)").fetchall()
   needs_cascade = True
   for fk in fk_info:
@@ -191,38 +200,44 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
       break
   if needs_cascade and fk_info:
     conn.execute("PRAGMA foreign_keys = OFF")
-    art_cols = [r[1] for r in conn.execute("PRAGMA table_info(articles)").fetchall()]
-    cols = ", ".join(art_cols)
-    conn.execute(f"""\
-      CREATE TABLE articles_new (
-        url             TEXT PRIMARY KEY,
-        feed_id         INTEGER REFERENCES feeds(id) ON DELETE CASCADE,
-        title           TEXT NOT NULL,
-        title_ja        TEXT,
-        title_translated TEXT,
-        source          TEXT NOT NULL,
-        published       TEXT,
-        content_snippet TEXT,
-        summary         TEXT,
-        content_html    TEXT,
-        content_translated TEXT,
-        lang            TEXT,
-        fetched_at      TEXT NOT NULL,
-        read_at         TEXT
-      )""")
-    conn.execute(f"INSERT INTO articles_new ({cols}) SELECT {cols} FROM articles")
-    conn.execute("DROP TABLE articles")
-    conn.execute("ALTER TABLE articles_new RENAME TO articles")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_feed ON articles(feed_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published DESC)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_read_at ON articles(read_at)")
-    conn.commit()
-    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+      conn.execute("BEGIN")
+      cols_list = sorted(art_cols)
+      cols = ", ".join(cols_list)
+      conn.execute("""\
+        CREATE TABLE articles_new (
+          url             TEXT PRIMARY KEY,
+          feed_id         INTEGER REFERENCES feeds(id) ON DELETE CASCADE,
+          title           TEXT NOT NULL,
+          title_ja        TEXT,
+          title_translated TEXT,
+          source          TEXT NOT NULL,
+          published       TEXT,
+          content_snippet TEXT,
+          summary         TEXT,
+          content_html    TEXT,
+          content_translated TEXT,
+          lang            TEXT,
+          fetched_at      TEXT NOT NULL,
+          read_at         TEXT
+        )""")
+      conn.execute(f"INSERT INTO articles_new ({cols}) SELECT {cols} FROM articles")
+      conn.execute("DROP TABLE articles")
+      conn.execute("ALTER TABLE articles_new RENAME TO articles")
+      conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_feed ON articles(feed_id)")
+      conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published DESC)")
+      conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_read_at ON articles(read_at)")
+      conn.commit()
+    except Exception:
+      conn.rollback()
+      raise
+    finally:
+      conn.execute("PRAGMA foreign_keys = ON")
 
-  feed_cols = {r[1] for r in conn.execute("PRAGMA table_info(feeds)").fetchall()}
   if "extraction_rules" not in feed_cols:
     conn.execute("ALTER TABLE feeds ADD COLUMN extraction_rules TEXT")
     conn.commit()
+    feed_cols.add("extraction_rules")
 
 
 def init_schema() -> None:

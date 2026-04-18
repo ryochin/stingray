@@ -1,6 +1,7 @@
 import { forwardRef, useMemo } from "react"
 import DOMPurify from "dompurify"
 import type { Article } from "../api/client"
+import { formatDate } from "../utils/date"
 
 function parseSummary(summary: string): { text: string, imageUrls: string[] } {
   const imageUrls: string[] = []
@@ -9,18 +10,6 @@ function parseSummary(summary: string): { text: string, imageUrls: string[] } {
     return ""
   })
   return { text: text.trim(), imageUrls }
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleString("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }) + " JST"
 }
 
 interface Props {
@@ -158,7 +147,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
 
         {sanitizedHtml && (
           <div
-            className="mt-2 text-base text-text article-html prose prose-invert max-w-none"
+            className="mt-2 text-base text-text article-html max-w-none"
             dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />
         )}

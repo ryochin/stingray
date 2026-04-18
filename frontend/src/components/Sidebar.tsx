@@ -29,7 +29,7 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     return new Set()
   })
 
-  const enabledFeeds = feeds?.filter((f: Feed) => f.enabled) ?? []
+  const enabledFeeds = feeds?.filter((f) => f.enabled) ?? []
   const totalUnread = Array.from(unreadCounts.values()).reduce((a, b) => a + b, 0)
 
   const feedsByFolder = new Map<number | null, Feed[]>()
@@ -39,19 +39,22 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     feedsByFolder.get(key)!.push(feed)
   }
 
-  // Auto-expand folder containing the selected feed
+  // Auto-expand folder containing the selected feed.
+  // The "is it currently collapsed?" check lives inside the setter so we don't
+  // need `collapsed` in the dependency list (which would re-trigger every toggle).
   useEffect(() => {
     if (selection.type !== "feed") return
     const selectedFeed = enabledFeeds.find((feed) => feed.id === selection.id)
-    if (!selectedFeed?.folder_id) return
-    if (!collapsed.has(selectedFeed.folder_id)) return
+    const folderId = selectedFeed?.folder_id
+    if (folderId == null) return
     setCollapsed((prev) => {
+      if (!prev.has(folderId)) return prev
       const next = new Set(prev)
-      next.delete(selectedFeed.folder_id!)
+      next.delete(folderId)
       sessionStorage.setItem("collapsed-folders", JSON.stringify([...next]))
       return next
     })
-  }, [selection, enabledFeeds]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selection, enabledFeeds])
 
   const folderUnread = (folderId: number) => {
     const feeds = feedsByFolder.get(folderId) ?? []
@@ -87,6 +90,7 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
   const renderFeed = (feed: Feed) => {
     const unread = unreadCounts.get(feed.id) ?? 0
     const active = isActive({ type: "feed", id: feed.id })
+    const favicon = faviconUrl(feed)
     return (
       <button
         key={feed.id}
@@ -94,8 +98,8 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
         className={btnClass(active)}
       >
         <span className="flex items-center gap-1.5 truncate mr-2">
-          {faviconUrl(feed) && (
-            <img src={faviconUrl(feed)!} alt="" className="w-4 h-4 shrink-0" loading="lazy" />
+          {favicon && (
+            <img src={favicon} alt="" className="w-4 h-4 shrink-0" loading="lazy" />
           )}
           <span className="truncate">{feed.name}</span>
           {feed.consecutive_failures >= 3 && (

@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 
 from models import Article
-from schemas import ArticleRow, FeedRow, FilterRow, FolderRow, RefreshJob
+from schemas import ArticleRow, FeedRow, FeedStats, FilterRow, FolderRow, RefreshJob
 
 import db
 
@@ -165,6 +165,25 @@ def move_feed_to_folder(feed_id: int, folder_id: int | None) -> None:
     conn.close()
 
 
+def _row_to_feed(r: object) -> FeedRow:
+  return FeedRow(
+    id=r["id"],  # type: ignore[index]
+    name=r["name"],  # type: ignore[index]
+    url=r["url"],  # type: ignore[index]
+    site_url=r["site_url"],  # type: ignore[index]
+    translate=bool(r["translate"]),  # type: ignore[index]
+    max_items=r["max_items"],  # type: ignore[index]
+    summarize=bool(r["summarize"]),  # type: ignore[index]
+    enabled=bool(r["enabled"]),  # type: ignore[index]
+    folder_id=r["folder_id"],  # type: ignore[index]
+    last_fetched_at=datetime.fromisoformat(r["last_fetched_at"]) if r["last_fetched_at"] else None,  # type: ignore[index]
+    consecutive_failures=r["consecutive_failures"],  # type: ignore[index]
+    last_error=r["last_error"],  # type: ignore[index]
+    extraction_rules=r["extraction_rules"],  # type: ignore[index]
+    created_at=datetime.fromisoformat(r["created_at"]),  # type: ignore[index]
+  )
+
+
 def list_feeds(*, enabled: bool | None = None) -> list[FeedRow]:
   conn = db.get_conn()
   try:
@@ -175,25 +194,16 @@ def list_feeds(*, enabled: bool | None = None) -> list[FeedRow]:
         "SELECT * FROM feeds WHERE enabled = ? ORDER BY id DESC",
         (int(enabled),),
       ).fetchall()
-    return [
-      FeedRow(
-        id=r["id"],
-        name=r["name"],
-        url=r["url"],
-        site_url=r["site_url"],
-        translate=bool(r["translate"]),
-        max_items=r["max_items"],
-        summarize=bool(r["summarize"]),
-        enabled=bool(r["enabled"]),
-        folder_id=r["folder_id"],
-        last_fetched_at=datetime.fromisoformat(r["last_fetched_at"]) if r["last_fetched_at"] else None,
-        consecutive_failures=r["consecutive_failures"],
-        last_error=r["last_error"],
-        extraction_rules=r["extraction_rules"],
-        created_at=datetime.fromisoformat(r["created_at"]),
-      )
-      for r in rows
-    ]
+    return [_row_to_feed(r) for r in rows]
+  finally:
+    conn.close()
+
+
+def get_feed_by_id(feed_id: int) -> FeedRow | None:
+  conn = db.get_conn()
+  try:
+    row = conn.execute("SELECT * FROM feeds WHERE id = ?", (feed_id,)).fetchone()
+    return _row_to_feed(row) if row else None
   finally:
     conn.close()
 
@@ -304,7 +314,7 @@ def update_feed_translate(feed_id: int, translate: bool) -> None:
     conn.close()
 
 
-def get_feed_stats() -> dict[int, dict]:
+def get_feed_stats() -> dict[int, FeedStats]:
   """Return per-feed article statistics."""
   conn = db.get_conn()
   try:
@@ -320,12 +330,12 @@ def get_feed_stats() -> dict[int, dict]:
          GROUP BY feed_id""",
     ).fetchall()
     return {
-      r["feed_id"]: {
-        "article_count": r["article_count"],
-        "unread_count": r["unread_count"],
-        "latest_published": r["latest_published"],
-        "oldest_published": r["oldest_published"],
-      }
+      r["feed_id"]: FeedStats(
+        article_count=r["article_count"],
+        unread_count=r["unread_count"],
+        latest_published=r["latest_published"],
+        oldest_published=r["oldest_published"],
+      )
       for r in rows
     }
   finally:
@@ -453,7 +463,10 @@ def list_articles(
       clauses.append("read_at IS NULL")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     filters = list_filters()
-    fetch_limit = limit * 2 if filters else limit
+    # Over-fetch when filters are active so post-SQL filtering still yields
+    # roughly `limit` results. Moving LIKE/REGEXP into SQL would be complex;
+    # `* 3` gives more headroom than the old `* 2` at negligible cost.
+    fetch_limit = limit * 3 if filters else limit
     params.append(fetch_limit)
     rows = conn.execute(
       f"SELECT * FROM articles {where} ORDER BY published ASC LIMIT ?",

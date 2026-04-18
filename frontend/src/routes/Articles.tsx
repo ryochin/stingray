@@ -192,12 +192,19 @@ export default function Articles() {
   })
 
   // Toggle read/unread for a single article
-  const toggleRead = useCallback((url: string, isRead: boolean) => {
-    const fn = isRead ? api.markUnread([url]) : api.markRead([url])
-    fn.then(() => {
+  const toggleReadMutation = useMutation({
+    mutationFn: ({ url, isRead }: { url: string, isRead: boolean }) =>
+      isRead ? api.markUnread([url]) : api.markRead([url]),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
-    })
-  }, [queryClient])
+    },
+    onError: (err) => {
+      console.error("Failed to toggle read status:", err)
+    },
+  })
+  const toggleRead = useCallback((url: string, isRead: boolean) => {
+    toggleReadMutation.mutate({ url, isRead })
+  }, [toggleReadMutation])
 
   const goToNextFeed = useCallback(() => {
     if (selection.type !== "feed" || orderedFeedIds.length === 0) return
@@ -293,6 +300,19 @@ export default function Articles() {
     })
   }, [markFocusedAsRead])
 
+  const selectionHeader = useMemo(() => {
+    if (selection.type === "feed") {
+      const feed = feedMap.get(selection.id)
+      if (!feed) return null
+      return { icon: faviconUrl(feed), label: feed.name }
+    }
+    if (selection.type === "folder") {
+      const label = folders?.find((folder) => folder.id === selection.id)?.name ?? null
+      return label ? { icon: null, label } : null
+    }
+    return null
+  }, [selection, feedMap, folders])
+
   const selectedUnread = useMemo(() => {
     if (selection.type === "feed") return unreadCounts.get(selection.id) ?? 0
     if (selection.type === "folder" && folderFeedIds) {
@@ -314,20 +334,12 @@ export default function Articles() {
         />
         <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 flex flex-col items-center" style={{ scrollBehavior: "smooth" }}>
           <div className="w-[95%] max-w-4xl pl-1">
-          {selection.type !== "all" && (
+          {selectionHeader && (
             <h2 className="text-2xl font-medium text-text-heading mb-3 flex items-center gap-2">
-              {selection.type === "feed" && (() => {
-                const selectedFeed = feedMap.get(selection.id)
-                if (!selectedFeed) return null
-                const icon = faviconUrl(selectedFeed)
-                return (
-                  <>
-                    {icon && <img src={icon} alt="" className="w-5 h-5" loading="lazy" />}
-                    {selectedFeed.name}
-                  </>
-                )
-              })()}
-              {selection.type === "folder" && folders?.find((folder) => folder.id === selection.id)?.name}
+              {selectionHeader.icon && (
+                <img src={selectionHeader.icon} alt="" className="w-5 h-5" loading="lazy" />
+              )}
+              {selectionHeader.label}
             </h2>
           )}
           <div className="flex items-center justify-between mb-4">
