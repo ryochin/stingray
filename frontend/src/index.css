@@ -52,3 +52,12 @@ body {
 .article-html th, .article-html td { border: 1px solid var(--color-border); padding: 0.5em 0.75em; text-align: left; }
 .article-html th { background: var(--color-bg-card); font-weight: 600; color: var(--color-text-heading); }
 .article-html tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
+
+/* Prism syntax highlighting — dark palette matching the app theme */
+.token.punctuation { color: var(--color-text-dim); }
+.token.property { color: var(--color-accent); }
+.token.string { color: #a3d977; }
+.token.number { color: #e8a87c; }
+.token.boolean,
+.token.null { color: #d98ad9; font-style: italic; }
+.token.operator { color: var(--color-text-muted); }

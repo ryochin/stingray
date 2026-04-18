@@ -1,5 +1,10 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import Editor from "react-simple-code-editor"
+import { highlight, languages } from "prismjs/components/prism-core"
+import "prismjs/components/prism-clike"
+import "prismjs/components/prism-javascript"
+import "prismjs/components/prism-json"
 import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, FeedCreate, FeedStats } from "../api/client"
 import Header from "../components/Header"
@@ -255,12 +260,20 @@ function prettifyRules(raw: string | null | undefined): string {
 function ExtractionRulesEditor({ feed, onSaved }: { feed: Feed, onSaved: () => void }) {
   const [json, setJson] = useState(() => prettifyRules(feed.extraction_rules))
   const [saving, setSaving] = useState(false)
+  const [savedAt, setSavedAt] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Keep editor in sync when the feed prop changes (e.g. after invalidation)
   useEffect(() => {
     setJson(prettifyRules(feed.extraction_rules))
   }, [feed.extraction_rules])
+
+  // Auto-hide the "Saved" indicator after a short delay
+  useEffect(() => {
+    if (savedAt == null) return
+    const timer = setTimeout(() => setSavedAt(null), 2000)
+    return () => clearTimeout(timer)
+  }, [savedAt])
 
   const validate = (): Record<string, string | null> | null => {
     try {
@@ -287,6 +300,7 @@ function ExtractionRulesEditor({ feed, onSaved }: { feed: Feed, onSaved: () => v
     setError(null)
     try {
       await api.updateFeedRules(feed.id, parsed)
+      setSavedAt(Date.now())
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save")
@@ -299,16 +313,25 @@ function ExtractionRulesEditor({ feed, onSaved }: { feed: Feed, onSaved: () => v
     <div className="mt-2 p-2 bg-bg-card rounded border border-border">
       <div className="text-xs font-semibold text-text-heading mb-1">CSS Extraction Rules</div>
       <div className="text-xs text-text-dim mb-1.5">{"Keys: item*, title*, link*, link_attr, date, date_attr, thumbnail, thumbnail_attr"}</div>
-      <textarea
-        value={json}
-        onChange={(e) => setJson(e.target.value)}
-        rows={12}
-        spellCheck={false}
-        className="bg-bg-secondary text-text border border-border rounded px-2 py-1.5 text-xs font-mono w-full resize-y"
-        placeholder='{"item": "p", "title": "b a", "link": "b a", "link_attr": "href"}'
-      />
+      <div className="bg-bg-secondary border border-border rounded overflow-auto max-h-96 resize-y">
+        <Editor
+          value={json}
+          onValueChange={setJson}
+          highlight={(code) => highlight(code, languages.json, "json")}
+          padding={8}
+          textareaClassName="outline-none"
+          className="text-xs font-mono text-text min-h-[180px]"
+          placeholder='{"item": "p", "title": "b a", "link": "b a", "link_attr": "href"}'
+          spellCheck={false}
+        />
+      </div>
       {error && <div className="text-xs text-red-400 mt-1">{error}</div>}
-      <div className="flex justify-end mt-1.5">
+      <div className="flex items-center justify-end gap-2 mt-1.5">
+        {savedAt != null && (
+          <span className="text-xs text-green-400 transition-opacity" aria-live="polite">
+            ✓ Saved
+          </span>
+        )}
         <button
           onClick={handleSave}
           disabled={saving || !json.trim()}
@@ -399,6 +422,7 @@ type FeedItemProps = {
   editing: boolean
   editName: string
   fetching: boolean
+  dragOver: boolean
   onToggleExpand: (feedId: number) => void
   onStartEdit: (feed: Feed) => void
   onCancelEdit: () => void
@@ -411,13 +435,19 @@ type FeedItemProps = {
   onMoveToFolder: (feedId: number, folderId: number | null) => void
   onToggleTranslate: (feedId: number, translate: boolean) => void
   onRulesUpdated: () => void
+  onDragStart: (feed: Feed) => void
+  onDragOver: (feed: Feed) => void
+  onDragLeave: (feed: Feed) => void
+  onDragEnd: () => void
+  onDrop: (feed: Feed) => void
 }
 
 function FeedItem({
-  feed, stats, folders, expanded, editing, editName, fetching,
+  feed, stats, folders, expanded, editing, editName, fetching, dragOver,
   onToggleExpand, onStartEdit, onCancelEdit, onChangeEditName, onCommitEdit,
   onDelete, onFetch, onToggleEnabled, onToggleSummarize, onMoveToFolder,
   onToggleTranslate, onRulesUpdated,
+  onDragStart, onDragOver, onDragLeave, onDragEnd, onDrop,
 }: FeedItemProps) {
   const isUnhealthy = feed.consecutive_failures >= 3
   const favicon = faviconUrl(feed)
@@ -425,9 +455,23 @@ function FeedItem({
   const isWebFeed = feed.extraction_rules != null
 
   return (
-    <div className="bg-bg-secondary rounded-lg border border-border">
+    <div
+      draggable={!editing}
+      onDragStart={() => onDragStart(feed)}
+      onDragOver={(e) => { e.preventDefault(); onDragOver(feed) }}
+      onDragLeave={() => onDragLeave(feed)}
+      onDragEnd={onDragEnd}
+      onDrop={(e) => { e.preventDefault(); onDrop(feed) }}
+      className={`bg-bg-secondary rounded-lg border transition-colors ${
+        dragOver ? "border-accent border-solid" : "border-border"
+      }`}
+    >
       <div className="flex items-center justify-between p-3">
         <div className="flex-1 min-w-0 flex items-start gap-2.5">
+          <span
+            className="text-text-dim cursor-grab active:cursor-grabbing select-none mt-0.5 shrink-0"
+            title="Drag to reorder"
+          >⠿</span>
           {favicon && (
             <img src={favicon} alt="" className="w-4 h-4 shrink-0 mt-1" loading="lazy" />
           )}
@@ -623,6 +667,59 @@ export default function Feeds() {
     onSuccess: invalidate,
     onError,
   })
+  const reorderFeedsMutation = useMutation({
+    mutationFn: (ids: number[]) => api.reorderFeeds(ids),
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: ["feeds"] })
+      const prev = queryClient.getQueryData<Feed[]>(["feeds"])
+      if (prev) {
+        // Optimistic: move the affected feeds to the order requested by `ids`,
+        // preserving the relative ordering of unrelated feeds.
+        const idSet = new Set(ids)
+        const byId = new Map(prev.map((f) => [f.id, f]))
+        const reordered: Feed[] = []
+        let cursor = 0
+        for (const f of prev) {
+          if (idSet.has(f.id)) {
+            const next = byId.get(ids[cursor++])
+            if (next) reordered.push(next)
+          } else {
+            reordered.push(f)
+          }
+        }
+        queryClient.setQueryData<Feed[]>(["feeds"], reordered)
+      }
+      return { prev }
+    },
+    onError: (err, _ids, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(["feeds"], ctx.prev)
+      onError(err as Error)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["feeds"] })
+    },
+  })
+
+  // Drag state for feed reordering (same-folder only)
+  const dragSrc = useRef<{ id: number, folderId: number | null } | null>(null)
+  const [dragOverId, setDragOverId] = useState<number | null>(null)
+
+  const handleDragStart = useCallback((feed: Feed) => {
+    dragSrc.current = { id: feed.id, folderId: feed.folder_id }
+  }, [])
+  const handleDragOver = useCallback((feed: Feed) => {
+    const src = dragSrc.current
+    if (!src || src.id === feed.id) return
+    if (src.folderId !== feed.folder_id) return  // cross-folder drop not allowed
+    setDragOverId(feed.id)
+  }, [])
+  const handleDragLeave = useCallback((feed: Feed) => {
+    setDragOverId((prev) => (prev === feed.id ? null : prev))
+  }, [])
+  const handleDragEnd = useCallback(() => {
+    dragSrc.current = null
+    setDragOverId(null)
+  }, [])
 
   // Group feeds by folder
   const feedsByFolder = useMemo(() => {
@@ -664,6 +761,22 @@ export default function Feeds() {
   const handleToggleTranslate = useCallback((feedId: number, translate: boolean) =>
     updateTranslate.mutate({ feedId, translate }), [updateTranslate])
 
+  const handleDrop = useCallback((target: Feed) => {
+    const src = dragSrc.current
+    dragSrc.current = null
+    setDragOverId(null)
+    if (!src || src.id === target.id) return
+    if (src.folderId !== target.folder_id) return
+    const group = (feeds ?? []).filter((f) => f.folder_id === target.folder_id)
+    const ids = group.map((f) => f.id)
+    const fromIdx = ids.indexOf(src.id)
+    const toIdx = ids.indexOf(target.id)
+    if (fromIdx < 0 || toIdx < 0) return
+    ids.splice(fromIdx, 1)
+    ids.splice(toIdx, 0, src.id)
+    reorderFeedsMutation.mutate(ids)
+  }, [feeds, reorderFeedsMutation])
+
   const renderFeed = (feed: Feed) => (
     <FeedItem
       key={feed.id}
@@ -674,6 +787,7 @@ export default function Feeds() {
       editing={editingFeedId === feed.id}
       editName={editFeedName}
       fetching={fetchingFeeds.has(feed.id)}
+      dragOver={dragOverId === feed.id}
       onToggleExpand={toggleExpand}
       onStartEdit={handleStartEdit}
       onCancelEdit={handleCancelEdit}
@@ -686,6 +800,11 @@ export default function Feeds() {
       onMoveToFolder={handleMove}
       onToggleTranslate={handleToggleTranslate}
       onRulesUpdated={invalidate}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDragEnd={handleDragEnd}
+      onDrop={handleDrop}
     />
   )
 
