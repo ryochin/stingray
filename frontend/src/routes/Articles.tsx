@@ -125,25 +125,33 @@ export default function Articles() {
     return map
   }, [enabledArticles, localReadCount])
 
-  const folderFeedIds = useMemo(() => {
+  const folderFeedOrder = useMemo(() => {
     if (selection.type !== "folder" || !feeds) return null
-    return new Set(
-      feeds.filter((f) => f.folder_id === selection.id && f.enabled).map((f) => f.id)
-    )
+    const ordered = feeds
+      .filter((f) => f.folder_id === selection.id && f.enabled)
+      .slice()
+      .sort((a, b) => a.position - b.position || a.id - b.id)
+    return new Map(ordered.map((f, i) => [f.id, i]))
   }, [selection, feeds])
 
   const filtered = useMemo(() => {
     let list = enabledArticles
     if (selection.type === "feed") {
       list = list.filter((a) => a.feed_id === selection.id)
-    } else if (selection.type === "folder" && folderFeedIds) {
-      list = list.filter((a) => a.feed_id != null && folderFeedIds.has(a.feed_id))
+    } else if (selection.type === "folder" && folderFeedOrder) {
+      list = list.filter((a) => a.feed_id != null && folderFeedOrder.has(a.feed_id))
+      // Group by feed (position order); within a feed, preserve published ASC.
+      list = list.slice().sort((a, b) => {
+        const ai = folderFeedOrder.get(a.feed_id as number) ?? 0
+        const bi = folderFeedOrder.get(b.feed_id as number) ?? 0
+        return ai - bi
+      })
     }
     if (showUnreadOnly) {
       list = list.filter((a) => a.read_at == null || sessionReadUrls.current.has(a.url))
     }
     return list
-  }, [enabledArticles, selection, folderFeedIds, showUnreadOnly])
+  }, [enabledArticles, selection, folderFeedOrder, showUnreadOnly])
 
   // Validate restored selection against current data
   useEffect(() => {
@@ -160,10 +168,10 @@ export default function Articles() {
     sessionReadUrls.current.clear()
   }, [selection])
 
-  // Focus first article when feed/filter changes
+  // Clear focus when feed/filter changes; the first j/k press will focus the first article.
   useEffect(() => {
-    setFocusIndex(filtered.length > 0 ? 0 : -1)
-  }, [selection, showUnreadOnly, filtered.length])
+    setFocusIndex(-1)
+  }, [selection, showUnreadOnly])
 
   // Scroll focused article into view
   useEffect(() => {
@@ -209,9 +217,15 @@ export default function Articles() {
   const goToNextFeed = useCallback(() => {
     if (selection.type !== "feed" || orderedFeedIds.length === 0) return
     const idx = orderedFeedIds.indexOf(selection.id)
-    if (idx < 0 || idx >= orderedFeedIds.length - 1) return
-    updateSelection({ type: "feed", id: orderedFeedIds[idx + 1] })
-  }, [selection, orderedFeedIds, updateSelection])
+    if (idx < 0) return
+    for (let i = idx + 1; i < orderedFeedIds.length; i++) {
+      const fid = orderedFeedIds[i]
+      if ((unreadCounts.get(fid) ?? 0) > 0) {
+        updateSelection({ type: "feed", id: fid })
+        return
+      }
+    }
+  }, [selection, orderedFeedIds, unreadCounts, updateSelection])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -230,7 +244,7 @@ export default function Articles() {
 
     const len = filtered.length
 
-    if (e.key === "j" || e.key === " ") {
+    if (e.key === "j") {
       if (len === 0) {
         e.preventDefault()
         goToNextFeed()
@@ -315,13 +329,13 @@ export default function Articles() {
 
   const selectedUnread = useMemo(() => {
     if (selection.type === "feed") return unreadCounts.get(selection.id) ?? 0
-    if (selection.type === "folder" && folderFeedIds) {
+    if (selection.type === "folder" && folderFeedOrder) {
       let sum = 0
-      for (const feedId of folderFeedIds) sum += unreadCounts.get(feedId) ?? 0
+      for (const feedId of folderFeedOrder.keys()) sum += unreadCounts.get(feedId) ?? 0
       return sum
     }
     return Array.from(unreadCounts.values()).reduce((a, b) => a + b, 0)
-  }, [selection, unreadCounts, folderFeedIds])
+  }, [selection, unreadCounts, folderFeedOrder])
 
   return (
     <div className="flex flex-col h-screen">
@@ -419,7 +433,7 @@ export default function Articles() {
             <table className="text-sm w-full">
               <tbody>
                 {[
-                  ["j / Space", "Next article"],
+                  ["j", "Next article"],
                   ["k", "Previous article"],
                   ["v / o / Enter", "Open in new tab"],
                   ["m", "Toggle read/unread"],

@@ -140,7 +140,7 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
             <div className="flex items-center">
               <button
                 onClick={() => toggleCollapse(folder.id)}
-                className="pl-3 pr-1 py-1.5 text-text-dim text-xs"
+                className="pl-3 pr-1.5 py-1.5 text-text-dim text-base leading-none"
               >
                 {isOpen ? "\u25BE" : "\u25B8"}
               </button>

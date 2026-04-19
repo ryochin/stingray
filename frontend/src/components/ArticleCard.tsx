@@ -139,7 +139,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
           </div>
         )}
 
-        {!parsedSummary && !article.content_translated && article.content_snippet && (
+        {!parsedSummary && !article.content_translated && !sanitizedHtml && article.content_snippet && (
           <p className={`mt-2 text-sm ${isRead ? "text-text-dim" : "text-text-muted"}`}>
             {article.content_snippet}
           </p>
