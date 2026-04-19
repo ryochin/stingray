@@ -5,6 +5,12 @@ import type { Feed, Selection } from "../api/client"
 import Header from "../components/Header"
 import Sidebar from "../components/Sidebar"
 import ArticleCard from "../components/ArticleCard"
+import {
+  applyUnreadFilter,
+  computeFolderFeedOrder,
+  nextUnreadFeedId,
+  selectArticles,
+} from "../utils/articleView"
 
 export default function Articles() {
   const queryClient = useQueryClient()
@@ -125,33 +131,16 @@ export default function Articles() {
     return map
   }, [enabledArticles, localReadCount])
 
-  const folderFeedOrder = useMemo(() => {
-    if (selection.type !== "folder" || !feeds) return null
-    const ordered = feeds
-      .filter((f) => f.folder_id === selection.id && f.enabled)
-      .slice()
-      .sort((a, b) => a.position - b.position || a.id - b.id)
-    return new Map(ordered.map((f, i) => [f.id, i]))
-  }, [selection, feeds])
+  const folderFeedOrder = useMemo(
+    () => computeFolderFeedOrder(selection, feeds),
+    [selection, feeds],
+  )
 
   const filtered = useMemo(() => {
-    let list = enabledArticles
-    if (selection.type === "feed") {
-      list = list.filter((a) => a.feed_id === selection.id)
-    } else if (selection.type === "folder" && folderFeedOrder) {
-      list = list.filter((a) => a.feed_id != null && folderFeedOrder.has(a.feed_id))
-      // Group by feed (position order); within a feed, preserve published ASC.
-      list = list.slice().sort((a, b) => {
-        const ai = folderFeedOrder.get(a.feed_id as number) ?? 0
-        const bi = folderFeedOrder.get(b.feed_id as number) ?? 0
-        return ai - bi
-      })
-    }
-    if (showUnreadOnly) {
-      list = list.filter((a) => a.read_at == null || sessionReadUrls.current.has(a.url))
-    }
-    return list
-  }, [enabledArticles, selection, folderFeedOrder, showUnreadOnly])
+    void localReadCount // sessionReadUrls mutations are opaque to React; re-run when they tick.
+    const selected = selectArticles(enabledArticles, selection, folderFeedOrder)
+    return applyUnreadFilter(selected, showUnreadOnly, sessionReadUrls.current)
+  }, [enabledArticles, selection, folderFeedOrder, showUnreadOnly, localReadCount])
 
   // Validate restored selection against current data
   useEffect(() => {
@@ -173,12 +162,27 @@ export default function Articles() {
     setFocusIndex(-1)
   }, [selection, showUnreadOnly])
 
-  // Scroll focused article into view
+  // Scroll focused article into view (custom rAF smooth scroll for tunable duration)
   useEffect(() => {
     if (focusIndex < 0) return
     const el = articleRefs.current.get(focusIndex)
-    el?.scrollIntoView({ block: "start" })
-    // CSS scroll-behavior on main handles smooth + fast animation
+    const main = mainRef.current
+    if (!el || !main) return
+    const target = main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top
+    const start = main.scrollTop
+    const distance = target - start
+    if (Math.abs(distance) < 1) return
+    const duration = 150
+    const t0 = performance.now()
+    let raf = 0
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / duration)
+      const eased = 1 - Math.pow(1 - p, 3) // ease-out cubic
+      main.scrollTop = start + distance * eased
+      if (p < 1) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
   }, [focusIndex])
 
   // Mark article as read when focus leaves it
@@ -215,16 +219,9 @@ export default function Articles() {
   }, [toggleReadMutation])
 
   const goToNextFeed = useCallback(() => {
-    if (selection.type !== "feed" || orderedFeedIds.length === 0) return
-    const idx = orderedFeedIds.indexOf(selection.id)
-    if (idx < 0) return
-    for (let i = idx + 1; i < orderedFeedIds.length; i++) {
-      const fid = orderedFeedIds[i]
-      if ((unreadCounts.get(fid) ?? 0) > 0) {
-        updateSelection({ type: "feed", id: fid })
-        return
-      }
-    }
+    if (selection.type !== "feed") return
+    const next = nextUnreadFeedId(orderedFeedIds, selection.id, unreadCounts)
+    if (next != null) updateSelection({ type: "feed", id: next })
   }, [selection, orderedFeedIds, unreadCounts, updateSelection])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -255,7 +252,7 @@ export default function Articles() {
         markFocusedAsRead(prev)
         if (prev >= len - 1) {
           goToNextFeed()
-          return prev
+          return -1
         }
         return prev + 1
       })
@@ -346,7 +343,7 @@ export default function Articles() {
           onSelect={updateSelection}
           unreadCounts={unreadCounts}
         />
-        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 flex flex-col items-center" style={{ scrollBehavior: "smooth" }}>
+        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 flex flex-col items-center">
           <div className="w-[95%] max-w-4xl pl-1">
           {selectionHeader && (
             <h2 className="text-2xl font-medium text-text-heading mb-3 flex items-center gap-2">

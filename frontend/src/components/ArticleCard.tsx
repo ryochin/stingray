@@ -2,15 +2,7 @@ import { forwardRef, useMemo } from "react"
 import DOMPurify from "dompurify"
 import type { Article } from "../api/client"
 import { formatDate } from "../utils/date"
-
-function parseSummary(summary: string): { text: string, imageUrls: string[] } {
-  const imageUrls: string[] = []
-  const text = summary.replace(/<image>([\s\S]*?)<\/image>/g, (_match, url) => {
-    imageUrls.push(url.trim())
-    return ""
-  })
-  return { text: text.trim(), imageUrls }
-}
+import { parseSummary } from "../utils/articleContent"
 
 interface Props {
   article: Article

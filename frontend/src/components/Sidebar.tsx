@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, Selection } from "../api/client"
+import { folderUnreadCount, groupFeedsByFolder, totalUnread } from "../utils/sidebarView"
 
 interface Props {
   selection: Selection
@@ -30,14 +31,8 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
   })
 
   const enabledFeeds = feeds?.filter((f) => f.enabled) ?? []
-  const totalUnread = Array.from(unreadCounts.values()).reduce((a, b) => a + b, 0)
-
-  const feedsByFolder = new Map<number | null, Feed[]>()
-  for (const feed of enabledFeeds) {
-    const key = feed.folder_id
-    if (!feedsByFolder.has(key)) feedsByFolder.set(key, [])
-    feedsByFolder.get(key)!.push(feed)
-  }
+  const totalUnreadCount = totalUnread(unreadCounts)
+  const feedsByFolder = groupFeedsByFolder(feeds)
 
   // Auto-expand folder containing the selected feed.
   // The "is it currently collapsed?" check lives inside the setter so we don't
@@ -56,10 +51,8 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     })
   }, [selection, enabledFeeds])
 
-  const folderUnread = (folderId: number) => {
-    const feeds = feedsByFolder.get(folderId) ?? []
-    return feeds.reduce((sum, f) => sum + (unreadCounts.get(f.id) ?? 0), 0)
-  }
+  const folderUnread = (folderId: number) =>
+    folderUnreadCount(feedsByFolder, unreadCounts, folderId)
 
   const toggleCollapse = (folderId: number) => {
     setCollapsed((prev) => {
@@ -78,7 +71,7 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
   }
 
   const btnClass = (active: boolean) =>
-    `flex justify-between items-center w-full px-4 py-1.5 text-xs text-left transition-colors cursor-pointer ${
+    `flex justify-between items-center w-full px-4 py-1.5 text-xs text-left transition-colors cursor-pointer focus:outline-none ${
       active ? "text-accent-text" : "text-text-muted hover:text-text"
     }`
 
@@ -122,8 +115,8 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
         className={btnClass(isActive({ type: "all" }))}
       >
         <span>All Feeds</span>
-        {totalUnread > 0 && (
-          <span className={badgeClass(isActive({ type: "all" }))}>{totalUnread}</span>
+        {totalUnreadCount > 0 && (
+          <span className={badgeClass(isActive({ type: "all" }))}>{totalUnreadCount}</span>
         )}
       </button>
       <div className="border-b border-border mx-3 my-1" />
@@ -140,13 +133,13 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
             <div className="flex items-center">
               <button
                 onClick={() => toggleCollapse(folder.id)}
-                className="pl-3 pr-1.5 py-1.5 text-text-dim text-base leading-none"
+                className="pl-3 pr-1.5 py-1.5 text-text-dim text-base leading-none focus:outline-none"
               >
                 {isOpen ? "\u25BE" : "\u25B8"}
               </button>
               <button
                 onClick={() => onSelect({ type: "folder", id: folder.id })}
-                className={`flex-1 flex justify-between items-center pr-4 py-1.5 text-xs text-left transition-colors cursor-pointer ${
+                className={`flex-1 flex justify-between items-center pr-4 py-1.5 text-xs text-left transition-colors cursor-pointer focus:outline-none ${
                   folderActive ? "text-accent-text font-medium" : "text-text-muted hover:text-text"
                 }`}
               >
