@@ -1,9 +1,5 @@
-import re
 from dataclasses import dataclass
 from datetime import datetime
-
-# Matches any hiragana or katakana character. Shared by feed/lang detection.
-JA_KANA = re.compile(r"[\u3040-\u309F\u30A0-\u30FF]")
 
 
 @dataclass

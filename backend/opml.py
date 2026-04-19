@@ -5,9 +5,8 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 import defusedxml.ElementTree as SafeET
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
 
-from models import JA_KANA
+import lang
 from schemas import FeedRow, FolderRow
 
 
@@ -82,20 +81,16 @@ def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
 # -- Import --
 
 
-def _should_translate(name: str, url: str | None = None, native_lang: str = "ja") -> bool:
+def _should_translate(name: str, url: str | None, native_lang: str) -> bool:
   """Guess if a feed needs translation based on name and URL."""
-  if native_lang != "ja":
-    return False
-  if JA_KANA.search(name):
-    return False
-  if url:
-    host = urlparse(url).hostname or ""
-    if host.endswith(".jp"):
-      return False
-  return True
+  source_lang = lang.detect_lang_by_script(name) or lang.detect_lang_by_tld(url)
+  return lang.should_translate(source_lang, native_lang)
 
 
-def parse_opml(xml_content: str) -> tuple[list[ImportFolder], list[ImportFeed]]:
+def parse_opml(
+  xml_content: str,
+  native_lang: str = "ja",
+) -> tuple[list[ImportFolder], list[ImportFeed]]:
   """Parse OPML XML. Returns (folders_with_feeds, uncategorized_feeds)."""
   root = SafeET.fromstring(xml_content)
   body = root.find("body")
@@ -108,13 +103,13 @@ def parse_opml(xml_content: str) -> tuple[list[ImportFolder], list[ImportFeed]]:
   for outline in body:
     xml_url = outline.get("xmlUrl")
     if xml_url:
-      feed = _parse_feed_outline(outline)
+      feed = _parse_feed_outline(outline, native_lang)
       if feed:
         uncategorized.append(feed)
     else:
       folder = ImportFolder(name=outline.get("text") or outline.get("title") or "Unnamed")
       for child in outline:
-        feed = _parse_feed_outline(child)
+        feed = _parse_feed_outline(child, native_lang)
         if feed:
           folder.feeds.append(feed)
       if folder.feeds:
@@ -123,7 +118,7 @@ def parse_opml(xml_content: str) -> tuple[list[ImportFolder], list[ImportFeed]]:
   return folders, uncategorized
 
 
-def _parse_feed_outline(el: ET.Element) -> ImportFeed | None:
+def _parse_feed_outline(el: ET.Element, native_lang: str) -> ImportFeed | None:
   feed_type = el.get("type", "rss")
   is_web = feed_type == "web"
   xml_url = el.get("xmlUrl")
@@ -136,7 +131,7 @@ def _parse_feed_outline(el: ET.Element) -> ImportFeed | None:
   name = el.get("text") or el.get("title") or url
   site_url = html_url if not is_web else None
   translate_str = el.get("data-translate")
-  translate = translate_str == "1" if translate_str else _should_translate(name, url)
+  translate = translate_str == "1" if translate_str else _should_translate(name, url, native_lang)
   summarize_str = el.get("data-summarize")
   summarize = summarize_str == "1" if summarize_str else False
   extraction_rules = el.get("data-extraction-rules") if is_web else None

@@ -19,7 +19,9 @@ services:
     restart: unless-stopped
 
   web:
-    build: .
+    build:
+      context: .
+      pull: false
     image: news-reader:latest
     container_name: news-reader-web
     command: ["/app/.venv/bin/uvicorn", "app:app", "--host", "0.0.0.0", "--port", "20080"]
@@ -37,10 +39,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:20080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   fetcher:
-    build: .
+    build:
+      context: .
+      pull: false
     image: news-reader:latest
     container_name: news-reader-fetcher
     command: ["/usr/local/bin/supercronic", "-passthrough-logs", "/app/crontab"]
@@ -55,4 +65,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "/app/backend/healthcheck.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20m
     restart: unless-stopped

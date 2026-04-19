@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator, Coroutine, cast
-from urllib.parse import urlparse
 
 import httpx
 import yaml
@@ -21,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import db
+import lang
 import log
 import repo
 from feeds import _fetch_rss, probe_feed_body  # type: ignore[import-untyped]
@@ -69,22 +69,16 @@ async def _background_summarizer(config: AppConfig) -> None:
   """Periodically check for unsummarized articles and process them."""
   await asyncio.sleep(10)  # initial delay
   while True:
-    # Non-blocking lock acquisition: skip this tick if a refresh (or another
-    # summarizer run) already holds the lock. Avoids the TOCTOU race between
-    # `locked()` and `async with`.
-    try:
-      await asyncio.wait_for(_summarize_lock.acquire(), timeout=0)
-    except asyncio.TimeoutError:
-      log.info("  Background summarizer skipped (refresh in progress).")
+    if _summarize_lock.locked():
+      log.info("  Background summarizer skipped (another summarize in progress).")
     else:
-      try:
-        count = await summarize_pending(config)
-        if count > 0:
-          log.info(f"  Background summarizer processed {count} articles.")
-      except Exception as e:
-        log.warn(f"  Background summarizer error: {e}")
-      finally:
-        _summarize_lock.release()
+      async with _summarize_lock:
+        try:
+          count = await summarize_pending(config)
+          if count > 0:
+            log.info(f"  Background summarizer processed {count} articles.")
+        except Exception as e:
+          log.warn(f"  Background summarizer error: {e}")
     await asyncio.sleep(60)
 
 
@@ -218,17 +212,6 @@ def get_feed_stats() -> dict[int, FeedStats]:
   return repo.get_feed_stats()
 
 
-def _detect_feed_lang(detected: str | None, url: str | None) -> str | None:
-  """Fall back to .jp domain when feed/title detection fails."""
-  if detected:
-    return detected
-  if url:
-    host = urlparse(url).hostname or ""
-    if host.endswith(".jp"):
-      return "ja"
-  return None
-
-
 @dataclass
 class ProbeResult:
   title: str | None = None
@@ -290,10 +273,10 @@ async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
     # Try RSS/Atom parsing
     title, site_url, feed_lang, has_entries = probe_feed_body(body)
     if has_entries:
-      detected_lang = _detect_feed_lang(feed_lang, url)
+      detected_lang = feed_lang or lang.detect_lang_by_tld(site_url or url)
       return ProbeResult(
         title=title,
-        translate=detected_lang is None or detected_lang != native_lang,
+        translate=lang.should_translate(detected_lang, native_lang),
         site_url=site_url,
       )
   except Exception as e:
@@ -540,7 +523,8 @@ def opml_export() -> Response:
 async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
   try:
     content = (await file.read()).decode("utf-8")
-    imported_folders, uncategorized = parse_opml(content)
+    config = _load_config()
+    imported_folders, uncategorized = parse_opml(content, native_lang=config.native_lang)
   except UnicodeDecodeError as e:
     raise HTTPException(400, f"Invalid file encoding: {e}")
   except _ET.ParseError as e:
@@ -655,6 +639,11 @@ def get_status() -> StatusResponse:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
+  try:
+    with db.connection() as conn:
+      conn.execute("SELECT 1").fetchone()
+  except Exception as e:
+    raise HTTPException(status_code=503, detail=f"db: {type(e).__name__}: {e}")
   return {"status": "ok"}
 
 

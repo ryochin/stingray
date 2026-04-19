@@ -11,9 +11,10 @@ from datetime import datetime, timedelta, timezone
 import feedparser
 import httpx
 
+import lang
 import log
 from cache import load_feed_cache, save_feed_cache
-from models import JA_KANA, Article
+from models import Article
 from scraper import fetch_web_page
 
 
@@ -40,18 +41,14 @@ def probe_feed_body(body: str) -> tuple[str | None, str | None, str | None, bool
   title = raw_title.strip() or None
   site_url = raw_link.strip() or None
 
-  detected_lang: str | None = None
   feed_lang = feed_meta.get("language", "") or ""
-  if feed_lang:
-    code = feed_lang.split("-")[0].lower()
-    if len(code) == 2:
-      detected_lang = code
+  detected_lang = lang.normalize_lang_code(feed_lang)
 
   if detected_lang is None:
     for entry in parsed.entries[:5]:
       entry_title = entry.get("title", "") or ""
-      if entry_title and JA_KANA.search(entry_title):
-        detected_lang = "ja"
+      detected_lang = lang.detect_lang_by_script(entry_title)
+      if detected_lang is not None:
         break
 
   return title, site_url, detected_lang, True
@@ -72,12 +69,6 @@ def _strip_html(text: str) -> str:
   text = re.sub(r"Points: \d+\n?", "", text)
   text = re.sub(r"# Comments: \d+\n?", "", text)
   return text.strip()
-
-
-def _detect_lang(title: str, default: str) -> str:
-  if title and JA_KANA.search(title):
-    return "ja"
-  return default
 
 
 def _truncate(text: str, max_len: int = 500) -> str:

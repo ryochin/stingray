@@ -11,13 +11,13 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 ARG SUPERCRONIC_VERSION=v0.2.33
 ARG TARGETARCH
 
-# Install supercronic (cron designed for containers) + tzdata for JST
+# Install supercronic (cron designed for containers) + tzdata for JST.
+# curl is kept at runtime — used by container healthchecks.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl tzdata \
   && curl -fsSL "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH}" \
        -o /usr/local/bin/supercronic \
   && chmod +x /usr/local/bin/supercronic \
-  && apt-get purge -y --auto-remove curl \
   && rm -rf /var/lib/apt/lists/*
 
 ENV TZ=Asia/Tokyo \

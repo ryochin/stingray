@@ -2,36 +2,40 @@ import asyncio
 
 import httpx
 
+import lang
 import log
 from llm import call_ollama
 from models import Article
 
 
 def _translate_and_summarize_prompt(native_lang: str) -> str:
+  name = lang.display_name(native_lang)
   return f"""\
 You are a concise news summarizer.
 Given an article in a foreign language, return a JSON object with two fields:
-- "title_translated": The article title translated into {native_lang}.
-- "summary": A 2-3 sentence summary of the article in {native_lang}, focusing on key facts and significance.
+- "title_translated": The article title translated into {name}.
+- "summary": A 2-3 sentence summary of the article in {name}, focusing on key facts and significance.
 
 Return ONLY valid JSON, no markdown fences or extra text."""
 
 
 def _translate_full_prompt(native_lang: str) -> str:
+  name = lang.display_name(native_lang)
   return f"""\
 You are a professional translator.
 Given a short article in a foreign language, return a JSON object with two fields:
-- "title_translated": The article title translated into {native_lang}.
-- "content_translated": The full article content translated into {native_lang}. Preserve the original structure and meaning.
+- "title_translated": The article title translated into {name}.
+- "content_translated": The full article content translated into {name}. Preserve the original structure and meaning.
 
 Return ONLY valid JSON, no markdown fences or extra text."""
 
 
 def _summarize_prompt(native_lang: str) -> str:
+  name = lang.display_name(native_lang)
   return f"""\
 You are a concise news summarizer.
 Given an article, return a JSON object with one field:
-- "summary": A 2-3 sentence summary of the article in {native_lang}, focusing on key facts and significance.
+- "summary": A 2-3 sentence summary of the article in {name}, focusing on key facts and significance.
 
 Do NOT translate or rewrite the title. Do NOT include a "title_translated" field.
 

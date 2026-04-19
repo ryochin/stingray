@@ -363,13 +363,27 @@ def list_articles(
 
 
 def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:
-  """Find articles needing summarization (feed.summarize=true, missing summary)."""
+  """Find articles needing summarization.
+
+  Condition must match `fetcher._needs_llm`:
+    - translate=TRUE: title_translated missing, or both summary and content_translated missing.
+    - translate=FALSE: summary missing AND content is long enough to summarize (>= 300 chars).
+  """
   with db.connection() as conn:
     rows = conn.execute(
       """SELECT a.* FROM articles a
          JOIN feeds f ON a.feed_id = f.id
          WHERE f.summarize = TRUE
-           AND (a.summary IS NULL OR (f.translate = TRUE AND a.title_translated IS NULL))
+           AND (
+             (f.translate AND (
+               a.title_translated IS NULL
+               OR (a.summary IS NULL AND a.content_translated IS NULL)
+             ))
+             OR
+             (NOT f.translate
+               AND a.summary IS NULL
+               AND LENGTH(COALESCE(a.content_snippet, '')) >= 300)
+           )
          ORDER BY a.published ASC
          LIMIT %s""",
       (limit,),
