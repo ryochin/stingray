@@ -19,7 +19,13 @@ dependencies = [
 [dependency-groups]
 dev = [
   "pyright>=1.1",
+  "pytest>=8.3",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+addopts = "-q"
 
 [tool.pyright]
 pythonVersion = "3.12"
@@ -34,4 +40,5 @@ exclude = [
   "backend/summarizer.py",
   "backend/log.py",
   "backend/scraper.py",
+  "backend/tests",
 ]
