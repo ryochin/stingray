@@ -851,7 +851,7 @@ export default function Feeds() {
               if (folderFeeds.length === 0) return null
               return (
                 <div key={folder.id}>
-                  <h3 className="text-sm font-medium text-text-muted mb-2">{folder.name}</h3>
+                  <h3 className="text-base font-semibold text-text-heading mb-2">{folder.name}</h3>
                   <div className="space-y-2 ml-2">
                     {folderFeeds.map(renderFeed)}
                   </div>
@@ -861,7 +861,7 @@ export default function Feeds() {
             {uncategorized.length > 0 && (
               <div>
                 {sortedFolders.length > 0 && (
-                  <h3 className="text-sm font-medium text-text-muted mb-2">Uncategorized</h3>
+                  <h3 className="text-base font-semibold text-text-heading mb-2">Uncategorized</h3>
                 )}
                 <div className={`space-y-2 ${sortedFolders.length > 0 ? "ml-2" : ""}`}>
                   {uncategorized.map(renderFeed)}

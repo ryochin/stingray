@@ -10,7 +10,8 @@ export default function Header() {
     queryKey: ["status"],
     queryFn: api.getStatus,
     refetchInterval: (query) =>
-      query.state.data?.running ? 2000 : false,
+      query.state.data?.running ? 2000 : 30_000,
+    refetchOnWindowFocus: true,
   })
 
   const prevRunning = useRef(false)

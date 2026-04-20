@@ -139,8 +139,8 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
               </button>
               <button
                 onClick={() => onSelect({ type: "folder", id: folder.id })}
-                className={`flex-1 flex justify-between items-center pr-4 py-1.5 text-xs text-left transition-colors cursor-pointer focus:outline-none ${
-                  folderActive ? "text-accent-text font-medium" : "text-text-muted hover:text-text"
+                className={`flex-1 flex justify-between items-center pr-4 py-1.5 text-sm text-left transition-colors cursor-pointer focus:outline-none ${
+                  folderActive ? "text-accent-text font-medium" : "text-text hover:text-text-heading"
                 }`}
               >
                 <span className="truncate mr-2">{folder.name}</span>

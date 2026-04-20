@@ -44,6 +44,17 @@ body {
 
 .article-html blockquote { border-left: 3px solid var(--color-accent-bg); padding-left: 1em; margin: 1em 0; color: var(--color-text-muted); }
 
+.article-html .tweet-card { border: 1px solid var(--color-border); border-radius: 10px; padding: 0.75em 1em; margin: 1em 0; background: var(--color-bg-card); max-width: 560px; }
+.article-html .tweet-card-header { display: flex; align-items: center; gap: 0.5em; font-size: 0.9em; }
+.article-html .tweet-card-icon { font-weight: 700; color: var(--color-text-heading); }
+.article-html .tweet-card-author { font-weight: 600; color: var(--color-text-heading); }
+.article-html .tweet-card-handle { color: var(--color-text-dim); text-decoration: none; }
+.article-html .tweet-card-handle:hover { color: var(--color-link-hover); text-decoration: underline; }
+.article-html .tweet-card-body { margin: 0.5em 0; color: var(--color-text); line-height: 1.55; white-space: normal; word-break: break-word; }
+.article-html .tweet-card-body a { word-break: break-all; }
+.article-html .tweet-card-date { display: inline-block; margin-top: 0.25em; font-size: 0.85em; color: var(--color-text-muted); text-decoration: none; }
+.article-html .tweet-card-date:hover { color: var(--color-link-hover); text-decoration: underline; }
+
 .article-html pre, .article-html code { background: var(--color-bg-card); padding: 0.15em 0.3em; border-radius: 3px; font-size: 0.9em; }
 .article-html pre { padding: 0.75em 1em; overflow-x: auto; margin: 1em 0; border: 1px solid var(--color-border); }
 .article-html pre code { padding: 0; background: none; }

@@ -158,8 +158,11 @@ export default function Articles() {
   }, [selection])
 
   // Clear focus when feed/filter changes; the first j/k press will focus the first article.
+  // Also reset scroll to the top so switching feeds (e.g. via j on the last card) always
+  // lands the reader at the header, not wherever the previous feed was scrolled to.
   useEffect(() => {
     setFocusIndex(-1)
+    mainRef.current?.scrollTo({ top: 0 })
   }, [selection, showUnreadOnly])
 
   // Scroll focused article into view (custom rAF smooth scroll for tunable duration)
@@ -343,7 +346,7 @@ export default function Articles() {
           onSelect={updateSelection}
           unreadCounts={unreadCounts}
         />
-        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-5 flex flex-col items-center">
+        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-2 flex flex-col items-center">
           <div className="w-[95%] max-w-4xl pl-1">
           {selectionHeader && (
             <h2 className="text-2xl font-medium text-text-heading mb-3 flex items-center gap-2">

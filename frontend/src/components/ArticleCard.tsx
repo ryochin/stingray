@@ -1,8 +1,10 @@
 import { forwardRef, useMemo } from "react"
 import DOMPurify from "dompurify"
 import type { Article } from "../api/client"
-import { formatDate } from "../utils/date"
+import { formatDate, formatRelative } from "../utils/date"
 import { parseSummary } from "../utils/articleContent"
+import { transformTwitterBlockquotes } from "../utils/twitterCard"
+import { useNow } from "../hooks/useNow"
 
 interface Props {
   article: Article
@@ -15,6 +17,7 @@ interface Props {
 
 const ArticleCard = forwardRef<HTMLDivElement, Props>(
   ({ article, focused, pendingSummary, feedName, feedFaviconUrl, onClick }, ref) => {
+    const now = useNow()
     const isRead = article.read_at != null
     const hasTranslation = article.title_translated && article.title_translated !== article.title
     const titleColor = focused ? "text-accent-text" : isRead ? "text-text-muted" : "text-text-heading"
@@ -26,6 +29,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       if (!article.content_html) return null
       const clean = DOMPurify.sanitize(article.content_html)
       const doc = new DOMParser().parseFromString(clean, "text/html")
+      transformTwitterBlockquotes(doc)
       const seen = new Set<string>()
       for (const img of doc.querySelectorAll("img")) {
         const src = img.getAttribute("src")
@@ -88,7 +92,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
         )}
 
         {(article.published || feedName) && (
-          <div className="text-sm text-text-muted mt-0.5 flex items-center gap-2">
+          <div className="text-sm text-text-muted mt-2 flex items-center gap-2">
             {feedName && (
               <span className="flex items-center gap-1">
                 {feedFaviconUrl && (
@@ -98,7 +102,9 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
               </span>
             )}
             {feedName && article.published && <span className="text-text-dim">·</span>}
-            {article.published && <span>{formatDate(article.published)}</span>}
+            {article.published && (
+              <span title={formatDate(article.published)}>{formatRelative(article.published, now)}</span>
+            )}
           </div>
         )}
 

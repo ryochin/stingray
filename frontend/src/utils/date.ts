@@ -22,3 +22,31 @@ export function formatDate(iso: string): string {
     minute: "2-digit",
   }) + " JST"
 }
+
+// Relative time in a long-ish English form: "just now", "32 min", "5 hr",
+// "1 day 3 hr", "6 days", "3 weeks", "5 months". "min" and "hr" are
+// abbreviations and do not pluralize; day/week/month do.
+// Anything older than ~6 months falls back to the absolute date.
+export function formatRelative(iso: string, now: Date = new Date()): string {
+  const diffSec = Math.floor((now.getTime() - new Date(iso).getTime()) / 1000)
+  if (diffSec < 45) return "just now"
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min`
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} hr`
+  if (diffSec < 86400 * 3) {
+    const d = Math.floor(diffSec / 86400)
+    const h = Math.floor((diffSec % 86400) / 3600)
+    return `${d} ${d === 1 ? "day" : "days"} ${h} hr`
+  }
+  if (diffSec < 86400 * 7) return `${Math.floor(diffSec / 86400)} days`
+  if (diffSec < 86400 * 28) {
+    const w = Math.floor(diffSec / (86400 * 7))
+    return `${w} ${w === 1 ? "week" : "weeks"}`
+  }
+  if (diffSec < 86400 * 182) {
+    // The weeks branch ends at 28d; a "month" is ~30d, so clamp to 1 in the
+    // 28..30d gap so we never render "0 months".
+    const mo = Math.max(1, Math.floor(diffSec / (86400 * 30)))
+    return `${mo} ${mo === 1 ? "month" : "months"}`
+  }
+  return formatDate(iso)
+}
