@@ -104,8 +104,8 @@ class OllamaConfig(BaseModel):
 
 class AppConfig(BaseModel):
   max_items_per_feed: int = 20
-  max_age_hours: float = 25
+  max_age_hours: float = 48
   cache_dir: str = "cache"
-  article_cache_max_age_days: int = 30
+  article_cache_max_age_days: int = 0
   native_lang: str = "ja"
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)

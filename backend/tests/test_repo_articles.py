@@ -161,6 +161,17 @@ class TestPruneArticles:
     assert n == 1
     assert {r.url for r in repo.list_articles()} == {"fresh"}
 
+  def test_zero_disables_pruning(self):
+    fid = _make_feed()
+    with db.connection() as conn:
+      conn.execute(
+        """INSERT INTO articles (url, feed_id, title, source, fetched_at)
+           VALUES (%s, %s, %s, %s, %s)""",
+        ("ancient", fid, "T", "F", datetime.now(tz=timezone.utc) - timedelta(days=3650)),
+      )
+    assert repo.prune_articles(max_age_days=0) == 0
+    assert {r.url for r in repo.list_articles()} == {"ancient"}
+
 
 class TestRefreshJobs:
   def test_get_latest_is_none_when_empty(self):

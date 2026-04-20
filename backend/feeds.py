@@ -308,7 +308,7 @@ async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
 
 async def fetch_all(
   feeds_cfg: list[dict],
-  max_age_hours: float = 25,
+  max_age_hours: float = 48,
   max_items: int = 20,
 ) -> tuple[list[Article], list[tuple[int, bool, str | None]]]:
   sem = asyncio.Semaphore(_CONCURRENCY)

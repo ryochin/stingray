@@ -438,6 +438,9 @@ def mark_all_read(feed_id: int | None = None) -> int:
 
 
 def prune_articles(max_age_days: int) -> int:
+  # 0 (or negative) disables pruning — articles are retained indefinitely.
+  if max_age_days <= 0:
+    return 0
   cutoff = datetime.now(tz=timezone.utc) - timedelta(days=max_age_days)
   with db.connection() as conn:
     cur = conn.execute("DELETE FROM articles WHERE fetched_at < %s", (cutoff,))
