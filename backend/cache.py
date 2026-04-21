@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -62,3 +63,17 @@ def save_feed_cache(url: str, etag: str | None, last_modified: str | None, body:
     "body": body,
   }, ensure_ascii=False)
   _atomic_write(path, data)
+
+
+def purge_feed_cache() -> int:
+  """Remove every cached feed body. Returns the number of files deleted."""
+  if not _feed_cache_dir.exists():
+    return 0
+  count = 0
+  for child in _feed_cache_dir.iterdir():
+    if child.is_file():
+      child.unlink(missing_ok=True)
+      count += 1
+    elif child.is_dir():
+      shutil.rmtree(child, ignore_errors=True)
+  return count

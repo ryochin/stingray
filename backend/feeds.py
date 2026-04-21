@@ -7,15 +7,59 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from typing import Awaitable, Callable
+from urllib.parse import urljoin
 
 import feedparser
 import httpx
+from bs4 import BeautifulSoup
 
 import lang
 import log
 from cache import load_feed_cache, save_feed_cache
 from models import Article
 from scraper import fetch_web_page
+
+
+# Link types on <link rel="alternate"> that identify a feed. Order matters:
+# preferred types come first so a page advertising both RSS and Atom surfaces
+# its RSS link at the top of the list.
+_FEED_LINK_TYPES = (
+  "application/rss+xml",
+  "application/atom+xml",
+  "application/rdf+xml",
+  "application/feed+json",
+  "application/json",
+)
+
+
+def extract_feed_candidates(body: str, base_url: str) -> list[dict[str, str]]:
+  """Extract feed candidates from an HTML page via <link rel="alternate">.
+
+  Returns a list of {href, title, type} dicts with duplicates removed.
+  The href is resolved against base_url so callers receive absolute URLs.
+  """
+  soup = BeautifulSoup(body, "html.parser")
+  seen: set[str] = set()
+  candidates: list[dict[str, str]] = []
+  for type_hint in _FEED_LINK_TYPES:
+    for link in soup.find_all("link", rel=lambda v: v and "alternate" in v):
+      link_type = (link.get("type") or "").strip().lower()
+      if link_type != type_hint:
+        continue
+      href = (link.get("href") or "").strip()
+      if not href:
+        continue
+      absolute = urljoin(base_url, href)
+      if absolute in seen:
+        continue
+      seen.add(absolute)
+      candidates.append({
+        "href": absolute,
+        "title": (link.get("title") or "").strip(),
+        "type": link_type,
+      })
+  return candidates
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +254,7 @@ def _extract_item_images(body: str) -> dict[str, str]:
 
 
 def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
-  max_items = feed_cfg.get("max_items", 20)
+  max_items = feed_cfg.get("max_items", 200)
   source = feed_cfg["name"]
   parsed = feedparser.parse(body)
   item_images = _extract_item_images(body)
@@ -306,26 +350,74 @@ async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
     return articles, was_cached, "rss"
 
 
+def _filter_by_cutoff(feed_articles: list[Article], cutoff: datetime) -> list[Article]:
+  """Normalize published tz and drop items older than cutoff.
+
+  Mutates `a.published` in place to ensure tz-awareness so downstream code
+  (DB layer, post-gather aggregation) sees consistent values.
+  """
+  fresh: list[Article] = []
+  for a in feed_articles:
+    pub = a.published
+    if pub is not None and pub.tzinfo is None:
+      pub = pub.replace(tzinfo=timezone.utc)
+      a.published = pub
+    if pub is None or pub >= cutoff:
+      fresh.append(a)
+  return fresh
+
+
 async def fetch_all(
   feeds_cfg: list[dict],
   max_age_hours: float = 48,
-  max_items: int = 20,
+  max_items: int = 200,
+  on_feed_done: Callable[[dict, list[Article]], Awaitable[None]] | None = None,
 ) -> tuple[list[Article], list[tuple[int, bool, str | None]]]:
+  """Fetch every feed in parallel.
+
+  If `on_feed_done` is given, it is invoked as soon as each individual feed
+  finishes (with that feed's articles already filtered by the age cutoff).
+  Callers use this to persist incrementally so downstream consumers — e.g. the
+  web UI reading `articles` — see rows appear feed-by-feed instead of waiting
+  for every fetch plus LLM processing to complete.
+  """
   sem = asyncio.Semaphore(_CONCURRENCY)
   for feed in feeds_cfg:
     feed.setdefault("max_items", max_items)
+  cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
+
+  async def _run_one(client: httpx.AsyncClient, feed: dict):
+    result = await _delayed_fetch(client, feed, random.uniform(0, 2), sem)
+    if on_feed_done is not None:
+      feed_articles, _was_cached, _kind = result
+      fresh = _filter_by_cutoff(feed_articles, cutoff)
+      if fresh:
+        try:
+          await on_feed_done(feed, fresh)
+        except Exception as e:
+          log.error(f"  [persist-error] {feed.get('name')}: {type(e).__name__}: {e}")
+    return result
+
   async with httpx.AsyncClient(
     timeout=httpx.Timeout(60, connect=30),
     follow_redirects=True,
     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
   ) as client:
-    tasks = [
-      _delayed_fetch(client, feed, random.uniform(0, 2), sem)
-      for feed in feeds_cfg
-    ]
+    tasks = [_run_one(client, feed) for feed in feeds_cfg]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-  cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
+  return _aggregate_feed_results(feeds_cfg, results, cutoff)
+
+
+def _aggregate_feed_results(
+  feeds_cfg: list[dict],
+  results: list[tuple[list[Article], bool, str] | BaseException],
+  cutoff: datetime,
+) -> tuple[list[Article], list[tuple[int, bool, str | None]]]:
+  """Merge per-feed fetch outcomes into a deduped, cutoff-filtered article list
+  plus a per-feed (feed_id, success, error) tuple list for fetch_status updates,
+  and log a one-line summary.
+  """
   articles: list[Article] = []
   feed_results: list[tuple[int, bool, str | None]] = []
   seen_urls: set[str] = set()
@@ -337,7 +429,7 @@ async def fetch_all(
   total_fresh_items = 0
   for feed, result in zip(feeds_cfg, results):
     feed_id = feed.get("id")
-    if isinstance(result, Exception):
+    if isinstance(result, BaseException):
       error_feeds += 1
       log.error(f"  [error] {feed.get('name')}: {type(result).__name__}: {result}")
       if feed_id is not None:
@@ -354,23 +446,17 @@ async def fetch_all(
     total_items += len(feed_articles)
     if feed_id is not None:
       feed_results.append((feed_id, True, None))
-    for a in feed_articles:
+    for a in _filter_by_cutoff(feed_articles, cutoff):
       if a.url in seen_urls:
         continue
       seen_urls.add(a.url)
-      pub = a.published
-      if pub is not None and pub.tzinfo is None:
-        pub = pub.replace(tzinfo=timezone.utc)
-        a.published = pub
-      if pub is None or pub >= cutoff:
-        articles.append(a)
-        total_fresh_items += 1
+      articles.append(a)
+      total_fresh_items += 1
 
-  summary = (
+  log.info(
     f"  Feeds: {fetched_feeds} fresh, {cached_feeds} cached"
     f"{f', {error_feeds} errors' if error_feeds else ''}"
     f"{f', {skipped_web_feeds} skipped (no rules)' if skipped_web_feeds else ''}"
     f" | items: {total_fresh_items} within window, {total_items} total."
   )
-  log.info(summary)
   return articles, feed_results

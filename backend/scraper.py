@@ -67,7 +67,7 @@ def parse_web_page(html: str, rules: dict, feed_cfg: dict) -> list[Article]:
   soup = BeautifulSoup(html, "html.parser")
   source = feed_cfg["name"]
   page_url = feed_cfg["url"]
-  max_items = feed_cfg.get("max_items", 20)
+  max_items = feed_cfg.get("max_items", 200)
 
   items = soup.select(rules["item"])
   item_ids = {id(el) for el in items}

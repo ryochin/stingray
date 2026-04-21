@@ -34,6 +34,12 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       for (const img of doc.querySelectorAll("img")) {
         const src = img.getAttribute("src")
         if (!src) continue
+        // Strip dimension overrides so the CSS `max-width: 100%` clamp can win.
+        // Inline `style="width: ..."` otherwise beats class-selector rules and
+        // lets large feed images burst out of the card.
+        img.removeAttribute("width")
+        img.removeAttribute("height")
+        img.removeAttribute("style")
         if (seen.has(src)) {
           img.closest("a")?.remove() ?? img.remove()
         } else {

@@ -9,7 +9,7 @@ These touch feedparser — the key invariants are:
 
 from __future__ import annotations
 
-from feeds import extract_site_url, probe_feed_body
+from feeds import extract_feed_candidates, extract_site_url, probe_feed_body
 
 
 RSS_JA = """<?xml version="1.0" encoding="UTF-8"?>
@@ -118,3 +118,43 @@ class TestExtractSiteUrl:
 
   def test_garbage_returns_none(self):
     assert extract_site_url("garbage") is None
+
+
+class TestExtractFeedCandidates:
+  def test_rss_link_is_discovered(self):
+    html = """<html><head>
+      <link rel="alternate" type="application/rss+xml" href="/feed.xml" title="Main">
+    </head></html>"""
+    out = extract_feed_candidates(html, "https://example.com/blog")
+    assert out == [{"href": "https://example.com/feed.xml", "title": "Main", "type": "application/rss+xml"}]
+
+  def test_absolute_href_passes_through(self):
+    html = """<link rel="alternate" type="application/atom+xml" href="https://cdn.example.com/atom">"""
+    out = extract_feed_candidates(html, "https://example.com/")
+    assert out[0]["href"] == "https://cdn.example.com/atom"
+
+  def test_rss_preferred_over_atom_when_both_present(self):
+    # _FEED_LINK_TYPES orders RSS before Atom; the output must reflect that.
+    html = """<html><head>
+      <link rel="alternate" type="application/atom+xml" href="/atom.xml">
+      <link rel="alternate" type="application/rss+xml" href="/rss.xml">
+    </head></html>"""
+    out = extract_feed_candidates(html, "https://example.com/")
+    assert [c["type"] for c in out] == ["application/rss+xml", "application/atom+xml"]
+
+  def test_duplicates_removed(self):
+    html = """<html><head>
+      <link rel="alternate" type="application/rss+xml" href="/feed">
+      <link rel="alternate" type="application/rss+xml" href="/feed">
+    </head></html>"""
+    assert len(extract_feed_candidates(html, "https://example.com/")) == 1
+
+  def test_non_feed_links_ignored(self):
+    html = """<html><head>
+      <link rel="stylesheet" href="/s.css">
+      <link rel="alternate" type="text/html" href="/en">
+    </head></html>"""
+    assert extract_feed_candidates(html, "https://example.com/") == []
+
+  def test_no_links_returns_empty(self):
+    assert extract_feed_candidates("<html><body>hi</body></html>", "https://example.com/") == []

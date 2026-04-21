@@ -91,19 +91,23 @@ class StatusResponse(BaseModel):
   last_status: str | None = None
   last_new_count: int | None = None
   last_error: str | None = None
+  llm_enabled: bool = True
+  llm_available: bool = True
+  llm_error: str | None = None
 
 
 # -- Config models --
 
 
 class OllamaConfig(BaseModel):
+  enabled: bool = True
   model: str = "gemma3"
   base_url: str = "http://localhost:11434"
   timeout: int = 120
 
 
 class AppConfig(BaseModel):
-  max_items_per_feed: int = 20
+  max_items_per_feed: int = 200
   max_age_hours: float = 48
   cache_dir: str = "cache"
   article_cache_max_age_days: int = 0

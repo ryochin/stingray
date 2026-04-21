@@ -1,4 +1,4 @@
-FROM node:22-slim AS frontend-build
+FROM node:22.22-bookworm-slim AS frontend-build
 
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
@@ -6,7 +6,8 @@ RUN npm install
 COPY frontend/ ./
 RUN npm run build
 
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+#FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM ghcr.io/astral-sh/uv:0.11.7-python3.12-trixie-slim@sha256:760df02ce4a80b395949f5ac7bf9741c5123fb829d9b62092363bfdca0088059
 
 ARG SUPERCRONIC_VERSION=v0.2.33
 ARG TARGETARCH

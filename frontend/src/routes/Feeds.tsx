@@ -6,10 +6,22 @@ import "prismjs/components/prism-clike"
 import "prismjs/components/prism-javascript"
 import "prismjs/components/prism-json"
 import { api, faviconUrl } from "../api/client"
-import type { Feed, Folder, FeedCreate, FeedStats } from "../api/client"
+import type { Feed, Folder, FeedCreate, FeedStats, FeedCandidate } from "../api/client"
 import Header from "../components/Header"
+import { useFeedMutations } from "../hooks/useFeedMutations"
+import { useFeedDnD } from "../hooks/useFeedDnD"
 
-function AddFeedForm({ onAdd, isAdding, folders }: { onAdd: (f: FeedCreate) => void, isAdding: boolean, folders: Folder[] }) {
+interface AddFeedFormProps {
+  onAdd: (f: FeedCreate) => void
+  isAdding: boolean
+  folders: Folder[]
+  candidates: FeedCandidate[] | null
+  candidatesFor: string | null
+  onPickCandidate: (href: string) => void
+  onDismissCandidates: () => void
+}
+
+function AddFeedForm({ onAdd, isAdding, folders, candidates, candidatesFor, onPickCandidate, onDismissCandidates }: AddFeedFormProps) {
   const [name, setName] = useState("")
   const [url, setUrl] = useState("")
   const [folderId, setFolderId] = useState<number | undefined>(undefined)
@@ -25,35 +37,72 @@ function AddFeedForm({ onAdd, isAdding, folders }: { onAdd: (f: FeedCreate) => v
     setName("")
     setUrl("")
     setFolderId(undefined)
+    onDismissCandidates()
+  }
+
+  const pick = (href: string) => {
+    setUrl(href)
+    onPickCandidate(href)
   }
 
   return (
-    <form onSubmit={submit} onReset={reset} className="flex flex-wrap gap-3 items-end p-4 bg-bg-secondary rounded-lg border border-border mb-6">
-      <div className="flex flex-col gap-1 flex-1 min-w-48">
-        <label className="text-xs text-text-muted">URL</label>
-        <input value={url} onChange={(e) => setUrl(e.target.value)} required
-          className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
-          placeholder="https://example.com/feed" />
-      </div>
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-text-muted">Name</label>
-        <input value={name} onChange={(e) => setName(e.target.value)}
-          className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm w-40"
-          placeholder="Auto-detect" />
-      </div>
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-text-muted">Folder</label>
-        <select value={folderId ?? ""} onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : undefined)}
-          className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm">
-          <option value="">--</option>
-          {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-        </select>
-      </div>
-      <button type="submit" disabled={isAdding}
-        className="px-4 py-1.5 rounded bg-accent text-white text-sm hover:opacity-90 transition-opacity disabled:opacity-40">
-        {isAdding ? "Adding..." : "Add"}
-      </button>
-    </form>
+    <div className="mb-6">
+      <form onSubmit={submit} onReset={reset} className="flex flex-wrap gap-3 items-end p-4 bg-bg-secondary rounded-lg border border-border">
+        <div className="flex flex-col gap-1 flex-1 min-w-48">
+          <label className="text-xs text-text-muted">URL</label>
+          <input value={url} onChange={(e) => setUrl(e.target.value)} required
+            className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
+            placeholder="https://example.com/feed" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-text-muted">Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)}
+            className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm w-40"
+            placeholder="Auto-detect" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-text-muted">Folder</label>
+          <select value={folderId ?? ""} onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : undefined)}
+            className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm">
+            <option value="">--</option>
+            {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </div>
+        <button type="submit" disabled={isAdding}
+          className="px-4 py-1.5 rounded bg-accent text-white text-sm hover:opacity-90 transition-opacity disabled:opacity-40">
+          {isAdding ? "Adding..." : "Add"}
+        </button>
+      </form>
+      {candidates && candidates.length > 0 && (
+        <div className="mt-2 p-3 bg-bg-card border border-border rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-text-muted">
+              {candidatesFor
+                ? `"${candidatesFor}" is an HTML page. Pick a feed:`
+                : "That URL is an HTML page. Pick a feed:"}
+            </span>
+            <button type="button" onClick={onDismissCandidates}
+              className="text-xs text-text-dim hover:text-text">Dismiss</button>
+          </div>
+          <ul className="space-y-1">
+            {candidates.map((c) => (
+              <li key={c.href} className="flex items-center gap-2">
+                <button type="button" onClick={() => pick(c.href)}
+                  className="text-xs px-2 py-1 rounded bg-accent text-white hover:opacity-90">
+                  Use
+                </button>
+                <div className="flex flex-col text-sm min-w-0">
+                  {c.title && <span className="text-text-heading truncate">{c.title}</span>}
+                  <span className="text-text-dim text-xs truncate">
+                    {c.type ? `[${c.type.replace("application/", "")}] ` : ""}{c.href}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -599,138 +648,74 @@ export default function Feeds() {
   const [editingFeedId, setEditingFeedId] = useState<number | null>(null)
   const [editFeedName, setEditFeedName] = useState("")
   const [expandedFeeds, setExpandedFeeds] = useState<Set<number>>(new Set())
-  const [fetchingFeeds, setFetchingFeeds] = useState<Set<number>>(new Set())
+  const [filter, setFilter] = useState("")
+
+  // While a refresh is running, poll faster so per-feed stats (Unread,
+  // Articles count, Latest published) reflect as each feed finishes — both
+  // for OPML-triggered auto-refresh and manual refresh.
+  const { data: status } = useQuery({
+    queryKey: ["status"],
+    queryFn: api.getStatus,
+    refetchInterval: (query) => (query.state.data?.running ? 2_000 : 30_000),
+  })
+  const activeInterval = status?.running ? 3_000 : 15_000
+
   const { data: feeds, isLoading, isError } = useQuery({
     queryKey: ["feeds"],
     queryFn: api.getFeeds,
+    refetchInterval: activeInterval,
   })
   const { data: folders } = useQuery({
     queryKey: ["folders"],
     queryFn: api.getFolders,
+    refetchInterval: activeInterval,
   })
   const { data: feedStats } = useQuery({
     queryKey: ["feed-stats"],
     queryFn: api.getFeedStats,
+    refetchInterval: activeInterval,
   })
 
   const sortedFolders = useMemo(
     () => (folders ?? []).slice().sort((a, b) => a.position - b.position || a.id - b.id),
     [folders],
   )
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["feeds"] })
-    queryClient.invalidateQueries({ queryKey: ["folders"] })
-    queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
-  }
-  const onError = (e: Error) => setError(e.message)
 
-  const addFeed = useMutation({
-    mutationFn: api.createFeed,
-    onSuccess: () => { invalidate(); setError(null) },
-    onError,
-  })
-  const toggleFeed = useMutation({ mutationFn: api.toggleFeed, onSuccess: invalidate, onError })
-  const toggleSummarize = useMutation({ mutationFn: api.toggleSummarize, onSuccess: invalidate, onError })
-  const deleteFeed = useMutation({ mutationFn: api.deleteFeed, onSuccess: invalidate, onError })
-  const fetchFeed = useMutation({
-    mutationFn: api.fetchFeed,
-    onMutate: (feedId: number) => {
-      setFetchingFeeds((prev) => new Set(prev).add(feedId))
-    },
-    onSettled: (_data, _error, feedId) => {
-      setTimeout(() => {
-        setFetchingFeeds((prev) => {
-          const next = new Set(prev)
-          next.delete(feedId)
-          return next
-        })
-        invalidate()
-      }, 5000)
-    },
-    onError,
-  })
-  const renameFeed = useMutation({
-    mutationFn: ({ feedId, name }: { feedId: number, name: string }) =>
-      api.renameFeed(feedId, name),
-    onSuccess: invalidate,
-    onError,
-  })
-  const updateTranslate = useMutation({
-    mutationFn: ({ feedId, translate }: { feedId: number, translate: boolean }) =>
-      api.updateFeedTranslate(feedId, translate),
-    onSuccess: invalidate,
-    onError,
-  })
-  const moveFeed = useMutation({
-    mutationFn: ({ feedId, folderId }: { feedId: number, folderId: number | null }) =>
-      api.moveFeedToFolder(feedId, folderId),
-    onSuccess: invalidate,
-    onError,
-  })
-  const reorderFeedsMutation = useMutation({
-    mutationFn: (ids: number[]) => api.reorderFeeds(ids),
-    onMutate: async (ids) => {
-      await queryClient.cancelQueries({ queryKey: ["feeds"] })
-      const prev = queryClient.getQueryData<Feed[]>(["feeds"])
-      if (prev) {
-        // Optimistic: move the affected feeds to the order requested by `ids`,
-        // preserving the relative ordering of unrelated feeds.
-        const idSet = new Set(ids)
-        const byId = new Map(prev.map((f) => [f.id, f]))
-        const reordered: Feed[] = []
-        let cursor = 0
-        for (const f of prev) {
-          if (idSet.has(f.id)) {
-            const next = byId.get(ids[cursor++])
-            if (next) reordered.push(next)
-          } else {
-            reordered.push(f)
-          }
-        }
-        queryClient.setQueryData<Feed[]>(["feeds"], reordered)
-      }
-      return { prev }
-    },
-    onError: (err, _ids, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(["feeds"], ctx.prev)
-      onError(err as Error)
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["feeds"] })
-    },
+  const reportError = useCallback((e: Error) => setError(e.message), [])
+  const mutations = useFeedMutations({ onError: setError })
+  const {
+    invalidate, fetchingFeeds,
+    feedCandidates, candidatesFor, dismissCandidates,
+    addFeed, toggleFeed, toggleSummarize, deleteFeed, fetchFeed,
+    renameFeed, updateTranslate, moveFeed, reorderFeeds,
+  } = mutations
+
+  const { dragOverId, handlers: dndHandlers } = useFeedDnD({
+    feeds,
+    onReorder: (ids) => reorderFeeds.mutate(ids),
   })
 
-  // Drag state for feed reordering (same-folder only)
-  const dragSrc = useRef<{ id: number, folderId: number | null } | null>(null)
-  const [dragOverId, setDragOverId] = useState<number | null>(null)
-
-  const handleDragStart = useCallback((feed: Feed) => {
-    dragSrc.current = { id: feed.id, folderId: feed.folder_id }
-  }, [])
-  const handleDragOver = useCallback((feed: Feed) => {
-    const src = dragSrc.current
-    if (!src || src.id === feed.id) return
-    if (src.folderId !== feed.folder_id) return  // cross-folder drop not allowed
-    setDragOverId(feed.id)
-  }, [])
-  const handleDragLeave = useCallback((feed: Feed) => {
-    setDragOverId((prev) => (prev === feed.id ? null : prev))
-  }, [])
-  const handleDragEnd = useCallback(() => {
-    dragSrc.current = null
-    setDragOverId(null)
-  }, [])
+  // Filter by name or URL (case-insensitive substring). Empty query is a no-op.
+  // The drag reorder hook still sees the unfiltered list, so dragging preserves
+  // global ordering even when the user has narrowed the view.
+  const visibleFeeds = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return feeds ?? []
+    return (feeds ?? []).filter((f) =>
+      f.name.toLowerCase().includes(q) || (f.url?.toLowerCase().includes(q) ?? false)
+    )
+  }, [feeds, filter])
 
   // Group feeds by folder
   const feedsByFolder = useMemo(() => {
     const map = new Map<number | null, Feed[]>()
-    for (const feed of feeds ?? []) {
+    for (const feed of visibleFeeds) {
       const key = feed.folder_id
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(feed)
     }
     return map
-  }, [feeds])
+  }, [visibleFeeds])
 
   const toggleExpand = useCallback((feedId: number) => {
     setExpandedFeeds((prev) => {
@@ -761,22 +746,6 @@ export default function Feeds() {
   const handleToggleTranslate = useCallback((feedId: number, translate: boolean) =>
     updateTranslate.mutate({ feedId, translate }), [updateTranslate])
 
-  const handleDrop = useCallback((target: Feed) => {
-    const src = dragSrc.current
-    dragSrc.current = null
-    setDragOverId(null)
-    if (!src || src.id === target.id) return
-    if (src.folderId !== target.folder_id) return
-    const group = (feeds ?? []).filter((f) => f.folder_id === target.folder_id)
-    const ids = group.map((f) => f.id)
-    const fromIdx = ids.indexOf(src.id)
-    const toIdx = ids.indexOf(target.id)
-    if (fromIdx < 0 || toIdx < 0) return
-    ids.splice(fromIdx, 1)
-    ids.splice(toIdx, 0, src.id)
-    reorderFeedsMutation.mutate(ids)
-  }, [feeds, reorderFeedsMutation])
-
   const renderFeed = (feed: Feed) => (
     <FeedItem
       key={feed.id}
@@ -800,11 +769,7 @@ export default function Feeds() {
       onMoveToFolder={handleMove}
       onToggleTranslate={handleToggleTranslate}
       onRulesUpdated={invalidate}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDragEnd={handleDragEnd}
-      onDrop={handleDrop}
+      {...dndHandlers}
     />
   )
 
@@ -817,11 +782,21 @@ export default function Feeds() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-text-heading">Feeds</h2>
           <div className="flex items-center gap-2">
-            <OpmlButtons onError={onError} onImported={invalidate} feedCount={feeds?.length ?? 0} />
+            <OpmlButtons
+              onError={reportError}
+              onImported={() => {
+                invalidate()
+                // OPML import auto-triggers a refresh on the backend. Nudge the
+                // status query so the Header shows "Fetching..." immediately
+                // instead of waiting up to 30s for its idle-mode poll.
+                queryClient.invalidateQueries({ queryKey: ["status"] })
+              }}
+              feedCount={feeds?.length ?? 0}
+            />
             <button
               onClick={() => {
                 if (confirm("Delete ALL feeds, folders, and articles? This cannot be undone.")) {
-                  api.deleteAllFeeds().then(invalidate).catch(onError)
+                  api.deleteAllFeeds().then(invalidate).catch(reportError)
                 }
               }}
               disabled={!feeds || feeds.length === 0}
@@ -832,9 +807,34 @@ export default function Feeds() {
           </div>
         </div>
 
-        <FolderManager folders={sortedFolders} onError={onError} />
+        <FolderManager folders={sortedFolders} onError={reportError} />
 
-        <AddFeedForm onAdd={(f) => addFeed.mutate(f)} isAdding={addFeed.isPending} folders={sortedFolders} />
+        <AddFeedForm
+          onAdd={(f) => addFeed.mutate(f)}
+          isAdding={addFeed.isPending}
+          folders={sortedFolders}
+          candidates={feedCandidates}
+          candidatesFor={candidatesFor}
+          onPickCandidate={(href) => addFeed.mutate({ url: href, name: "" })}
+          onDismissCandidates={dismissCandidates}
+        />
+
+        {(feeds?.length ?? 0) > 0 && (
+          <div className="mb-4 flex items-center gap-2">
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter by name or URL..."
+              className="flex-1 bg-bg-card text-text border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-accent"
+            />
+            {filter && (
+              <span className="text-xs text-text-muted">
+                {visibleFeeds.length}/{feeds?.length ?? 0}
+              </span>
+            )}
+          </div>
+        )}
 
         {error && (
           <div className="text-red-400 text-sm mb-4">{error}</div>

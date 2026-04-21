@@ -83,3 +83,20 @@ class TestAtomicWrite:
     cache.save_feed_cache("https://example.com/", None, None, "body")
     tmp_files = list(cache._feed_cache_dir.glob("*.tmp"))
     assert tmp_files == []
+
+
+class TestPurgeFeedCache:
+  def test_returns_zero_when_cache_empty(self, cache_dir: Path):
+    assert cache.purge_feed_cache() == 0
+
+  def test_removes_every_cached_body(self, cache_dir: Path):
+    cache.save_feed_cache("https://a/", None, None, "A")
+    cache.save_feed_cache("https://b/", None, None, "B")
+    assert cache.purge_feed_cache() == 2
+    assert cache.load_feed_cache("https://a/") is None
+    assert cache.load_feed_cache("https://b/") is None
+
+  def test_purge_is_idempotent(self, cache_dir: Path):
+    cache.save_feed_cache("https://a/", None, None, "A")
+    cache.purge_feed_cache()
+    assert cache.purge_feed_cache() == 0

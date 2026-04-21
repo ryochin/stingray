@@ -29,7 +29,7 @@ services:
     environment:
       TZ: Asia/Tokyo
       PYTHONPATH: /app/backend
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: http://192.168.0.11:11434
       DATABASE_URL: postgresql://news:news@postgres:5432/news
     ports:
       - "20080:20080"
@@ -57,7 +57,7 @@ services:
     environment:
       TZ: Asia/Tokyo
       PYTHONPATH: /app/backend
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: http://192.168.0.11:11434
       DATABASE_URL: postgresql://news:news@postgres:5432/news
     volumes:
       - ./config.yml:/app/config.yml:ro

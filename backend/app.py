@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import time
 import xml.etree.ElementTree as _ET
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator, Coroutine, cast
 
@@ -19,13 +20,14 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import cache
 import db
 import lang
 import log
 import repo
-from feeds import _fetch_rss, probe_feed_body  # type: ignore[import-untyped]
+from feeds import _fetch_rss, extract_feed_candidates, probe_feed_body  # type: ignore[import-untyped]
 from fetcher import refresh_all, summarize_pending
-from opml import ImportFeed, export_opml, parse_opml
+from opml import ImportFeed, ImportFolder, export_opml, parse_opml
 from scraper import fetch_web_page  # type: ignore[import-untyped]
 from schemas import AppConfig, ArticleRow, FeedRow, FeedStats, FilterRow, FolderRow, StatusResponse
 
@@ -63,6 +65,43 @@ def _load_config() -> AppConfig:
   if isinstance(raw, dict):
     return AppConfig.model_validate(raw)
   return AppConfig()
+
+
+# LLM reachability probe. Cached because /api/status is polled as often as every 2s
+# while a fetch is running — we don't need (or want) to hammer Ollama that hard.
+# Timeout is deliberately generous and we retry once on failure: Docker Desktop's
+# vmnet routing to host.docker.internal on macOS is flaky (cold-route ~1-2s,
+# occasional transient timeouts even on warm routes). Without the retry a single
+# vmnet hiccup would falsely mark Ollama offline for 20s.
+_LLM_PROBE_TTL = 20.0
+_LLM_PROBE_TIMEOUT = 5.0
+_LLM_PROBE_ATTEMPTS = 3
+_llm_probe_cache: dict[str, tuple[float, bool, str | None]] = {}
+
+
+def _probe_llm_once(base_url: str) -> tuple[bool, str | None]:
+  try:
+    with httpx.Client(timeout=_LLM_PROBE_TIMEOUT) as client:
+      resp = client.get(f"{base_url.rstrip('/')}/api/tags")
+      resp.raise_for_status()
+    return True, None
+  except Exception as e:
+    return False, f"{type(e).__name__}: {e}".strip()
+
+
+def _probe_llm(base_url: str) -> tuple[bool, str | None]:
+  """Return (available, error_message) for the given Ollama endpoint."""
+  now = time.monotonic()
+  cached = _llm_probe_cache.get(base_url)
+  if cached is not None and now < cached[0]:
+    return cached[1], cached[2]
+  ok, err = False, None
+  for _ in range(_LLM_PROBE_ATTEMPTS):
+    ok, err = _probe_llm_once(base_url)
+    if ok:
+      break
+  _llm_probe_cache[base_url] = (now + _LLM_PROBE_TTL, ok, err)
+  return ok, err
 
 
 async def _background_summarizer(config: AppConfig) -> None:
@@ -108,7 +147,7 @@ app = FastAPI(title="News Reader", lifespan=lifespan)
 def get_articles(
   feed_id: int | None = Query(None),
   unread: bool = Query(False),
-  limit: int = Query(500, ge=1, le=5000),
+  limit: int = Query(1000, ge=1, le=5000),
 ) -> list[ArticleRow]:
   return repo.list_articles(feed_id=feed_id, unread=unread, limit=limit)
 
@@ -128,8 +167,11 @@ def mark_articles_unread(body: ArticleUrls) -> None:
 
 
 @app.post("/api/articles/read-all")
-def mark_all_articles_read(feed_id: int | None = Query(None)) -> dict[str, int]:
-  count = repo.mark_all_read(feed_id)
+def mark_all_articles_read(
+  feed_id: int | None = Query(None),
+  older_than_hours: int | None = Query(None, ge=1),
+) -> dict[str, int]:
+  count = repo.mark_all_read(feed_id, older_than_hours)
   return {"marked": count}
 
 
@@ -219,6 +261,7 @@ class ProbeResult:
   site_url: str | None = None
   is_web_page: bool = False
   html: str = ""
+  feed_candidates: list[dict[str, str]] = field(default_factory=list)
 
 
 def _is_html(content_type: str, body: str) -> bool:
@@ -262,12 +305,16 @@ async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
     if _is_html(content_type, body):
       title_match = re.search(r"<title[^>]*>(.*?)</title>", body, re.IGNORECASE | re.DOTALL)
       title = title_match.group(1).strip() if title_match else None
+      # Resolve candidates against the response URL so redirects don't confuse relative hrefs.
+      final_url = str(resp.url) or url
+      candidates = extract_feed_candidates(body, final_url)
       return ProbeResult(
         title=title,
         translate=False,
         site_url=url,
         is_web_page=True,
         html=body,
+        feed_candidates=candidates,
       )
 
     # Try RSS/Atom parsing
@@ -333,8 +380,21 @@ async def create_feed(body: FeedCreate) -> FeedRow:
 
   extraction_rules = None
   if probe.is_web_page:
+    # If the page advertises feeds via <link rel="alternate">, hand them back
+    # to the client instead of silently creating a web-scrape placeholder —
+    # the user almost certainly wants to subscribe to the real feed.
+    if probe.feed_candidates:
+      log.info(f"  HTML page with {len(probe.feed_candidates)} feed candidate(s). Returning for user selection.")
+      raise HTTPException(
+        422,
+        detail={
+          "message": "This URL is an HTML page. Pick a feed below.",
+          "candidates": probe.feed_candidates,
+          "page_title": probe.title,
+        },
+      )
     extraction_rules = "{}"
-    log.info("  Web page detected. Extraction rules can be set in feed settings.")
+    log.info("  Web page detected with no feed candidates. Extraction rules can be set in feed settings.")
   else:
     if not probe.title and not probe.site_url:
       raise HTTPException(422, "Could not parse this URL. Check the URL and server logs for details.")
@@ -348,8 +408,25 @@ async def create_feed(body: FeedCreate) -> FeedRow:
 
 
 @app.delete("/api/feeds", status_code=204)
-def delete_all_data() -> None:
+async def delete_all_data() -> None:
+  # Cancel any in-flight refresh first. Otherwise it would keep processing
+  # the pre-delete feed list (wasted work, potential FK errors on upsert),
+  # and its refresh_jobs row could stay 'running' if it crashes before
+  # finish_refresh_job — leaving the UI stuck at "Fetching...".
+  global _refresh_task
+  async with _refresh_lock:
+    task = _refresh_task
+    if task is not None and not task.done():
+      task.cancel()
+      try:
+        await task
+      except (asyncio.CancelledError, Exception):
+        pass
+    _refresh_task = None
   repo.delete_all_data()
+  purged = cache.purge_feed_cache()
+  if purged:
+    log.step(f"Purged {purged} cached feed bodies.")
 
 
 @app.post("/api/feeds/{feed_id}/fetch", status_code=202)
@@ -519,18 +596,17 @@ def opml_export() -> Response:
   )
 
 
-@app.post("/api/opml/import")
-async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
-  try:
-    content = (await file.read()).decode("utf-8")
-    config = _load_config()
-    imported_folders, uncategorized = parse_opml(content, native_lang=config.native_lang)
-  except UnicodeDecodeError as e:
-    raise HTTPException(400, f"Invalid file encoding: {e}")
-  except _ET.ParseError as e:
-    raise HTTPException(400, f"Invalid OPML XML: {e}")
+def _persist_opml_feeds(
+  imported_folders: list[ImportFolder],
+  uncategorized: list[ImportFeed],
+) -> tuple[int, int, int]:
+  """Create any missing folders/feeds from parsed OPML.
 
+  Returns (folders_created, feeds_created, feeds_skipped). Feeds whose URL
+  already exists in the DB are skipped rather than re-added.
+  """
   existing_urls = {f.url for f in repo.list_feeds() if f.url}
+  existing_folders = {f.name: f.id for f in repo.list_folders()}
   folders_created = 0
   feeds_created = 0
   feeds_skipped = 0
@@ -540,7 +616,7 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
     if feed_data.url in existing_urls:
       feeds_skipped += 1
       return
-    row = FeedRow(
+    repo.add_feed(FeedRow(
       name=feed_data.name,
       url=feed_data.url,
       site_url=feed_data.site_url,
@@ -548,12 +624,10 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
       summarize=feed_data.summarize,
       folder_id=folder_id,
       extraction_rules=feed_data.extraction_rules,
-    )
-    repo.add_feed(row)
+    ))
     existing_urls.add(feed_data.url)
     feeds_created += 1
 
-  existing_folders = {f.name: f.id for f in repo.list_folders()}
   for imp_folder in imported_folders:
     if imp_folder.name in existing_folders:
       folder_id = existing_folders[imp_folder.name]
@@ -568,17 +642,45 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
   for feed_data in uncategorized:
     _add_feed(feed_data, None)
 
-  # Auto-refresh if new feeds were added
-  if feeds_created > 0:
-    global _refresh_task
-    async with _refresh_lock:
-      if _refresh_task is None or _refresh_task.done():
-        config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
-        log.info(f"OPML import added {feeds_created} feeds, auto-triggering refresh.")
-        _refresh_task = asyncio.create_task(_run_refresh(config, trigger="opml"))
-        _background_tasks.add(_refresh_task)
-        _refresh_task.add_done_callback(_log_task_exception)
+  return folders_created, feeds_created, feeds_skipped
 
+
+async def _maybe_trigger_opml_refresh(request: Request, feeds_created: int) -> None:
+  """Kick off a refresh if OPML import added new feeds, without blocking the
+  response. The refresh_jobs row is created synchronously so /api/status
+  reports running=true as soon as this response reaches the client.
+  """
+  if feeds_created <= 0:
+    return
+  global _refresh_task
+  async with _refresh_lock:
+    if _refresh_task is not None and not _refresh_task.done():
+      return
+    config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
+    log.info(f"OPML import added {feeds_created} feeds, auto-triggering refresh.")
+    job_id = repo.create_refresh_job("opml")
+    _refresh_task = asyncio.create_task(
+      _run_refresh(config, trigger="opml", job_id=job_id)
+    )
+    _background_tasks.add(_refresh_task)
+    _refresh_task.add_done_callback(_log_task_exception)
+
+
+@app.post("/api/opml/import")
+async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
+  try:
+    content = (await file.read()).decode("utf-8")
+    config = _load_config()
+    imported_folders, uncategorized = parse_opml(content, native_lang=config.native_lang)
+  except UnicodeDecodeError as e:
+    raise HTTPException(400, f"Invalid file encoding: {e}")
+  except _ET.ParseError as e:
+    raise HTTPException(400, f"Invalid OPML XML: {e}")
+
+  folders_created, feeds_created, feeds_skipped = _persist_opml_feeds(
+    imported_folders, uncategorized,
+  )
+  await _maybe_trigger_opml_refresh(request, feeds_created)
   return {
     "folders_created": folders_created,
     "feeds_created": feeds_created,
@@ -589,7 +691,12 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
 # -- Refresh --
 
 
-async def _run_refresh(config: AppConfig, *, trigger: str = "web") -> None:
+async def _run_refresh(
+  config: AppConfig,
+  *,
+  trigger: str = "web",
+  job_id: int | None = None,
+) -> None:
   global _refresh_task
   start = time.perf_counter()
   log.step(f"Refresh started (trigger={trigger})")
@@ -597,7 +704,7 @@ async def _run_refresh(config: AppConfig, *, trigger: str = "web") -> None:
     log.info("  Waiting for summarizer lock...")
   try:
     async with _summarize_lock:
-      await refresh_all(config, source=trigger)
+      await refresh_all(config, source=trigger, job_id=job_id)
     elapsed = time.perf_counter() - start
     log.success(f"Refresh completed in {elapsed:.1f}s (trigger={trigger})")
   except Exception as e:
@@ -616,7 +723,12 @@ async def trigger_refresh(request: Request) -> JSONResponse:
       log.info("Refresh requested but one is already in progress.")
       return JSONResponse({"message": "Refresh already in progress"}, status_code=409)
     config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
-    _refresh_task = asyncio.create_task(_run_refresh(config, trigger="web"))
+    # Create the refresh_jobs row synchronously so /api/status reports
+    # running=true by the time this response reaches the client.
+    job_id = repo.create_refresh_job("web")
+    _refresh_task = asyncio.create_task(
+      _run_refresh(config, trigger="web", job_id=job_id)
+    )
     _background_tasks.add(_refresh_task)
     _refresh_task.add_done_callback(_log_task_exception)
   return JSONResponse({"message": "Refresh started"}, status_code=202)
@@ -624,9 +736,19 @@ async def trigger_refresh(request: Request) -> JSONResponse:
 
 @app.get("/api/status")
 def get_status() -> StatusResponse:
+  config = _load_config()
+  if config.ollama.enabled:
+    # Env var wins so containers can override the config.yml default (which
+    # usually points at localhost — not reachable from inside Docker).
+    ollama_url = os.environ.get("OLLAMA_BASE_URL") or config.ollama.base_url
+    llm_ok, llm_err = _probe_llm(ollama_url)
+  else:
+    # Disabled by config: no probe, no noisy offline badge on the frontend.
+    llm_ok, llm_err = False, None
+  llm_enabled = config.ollama.enabled
   job = repo.get_latest_refresh_job()
   if job is None:
-    return StatusResponse(running=False)
+    return StatusResponse(running=False, llm_enabled=llm_enabled, llm_available=llm_ok, llm_error=llm_err)
   return StatusResponse(
     running=job.status == "running",
     last_started_at=job.started_at,
@@ -634,6 +756,9 @@ def get_status() -> StatusResponse:
     last_status=job.status,
     last_new_count=job.new_count,
     last_error=job.error,
+    llm_enabled=llm_enabled,
+    llm_available=llm_ok,
+    llm_error=llm_err,
   )
 
 

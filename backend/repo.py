@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from psycopg import sql
 
@@ -198,9 +199,9 @@ def delete_feed(feed_id: int) -> None:
 
 
 def delete_all_data() -> None:
-  """Delete all feeds, articles, and folders."""
+  """Delete all feeds, articles, folders, and refresh job history."""
   with db.connection() as conn:
-    conn.execute("TRUNCATE articles, feeds, folders RESTART IDENTITY CASCADE")
+    conn.execute("TRUNCATE articles, feeds, folders, refresh_jobs RESTART IDENTITY CASCADE")
 
 
 def toggle_feed(feed_id: int) -> None:
@@ -336,7 +337,7 @@ def list_articles(
   *,
   feed_id: int | None = None,
   unread: bool = False,
-  limit: int = 500,
+  limit: int = 1000,
 ) -> list[ArticleRow]:
   with db.connection() as conn:
     clauses: list[sql.Composable] = []
@@ -425,15 +426,23 @@ def mark_unread(urls: list[str]) -> None:
     conn.execute("UPDATE articles SET read_at = NULL WHERE url = ANY(%s)", (urls,))
 
 
-def mark_all_read(feed_id: int | None = None) -> int:
+def mark_all_read(feed_id: int | None = None, older_than_hours: int | None = None) -> int:
+  # Age is measured against COALESCE(published, fetched_at) so feeds without a
+  # `published` value still age out based on when we first saw them.
+  clauses: list[sql.Composable] = [sql.SQL("read_at IS NULL")]
+  params: list[Any] = []
+  if feed_id is not None:
+    clauses.append(sql.SQL("feed_id = %s"))
+    params.append(feed_id)
+  if older_than_hours is not None and older_than_hours > 0:
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=older_than_hours)
+    clauses.append(sql.SQL("COALESCE(published, fetched_at) < %s"))
+    params.append(cutoff)
+  query = sql.SQL("UPDATE articles SET read_at = NOW() WHERE {}").format(
+    sql.SQL(" AND ").join(clauses),
+  )
   with db.connection() as conn:
-    if feed_id is not None:
-      cur = conn.execute(
-        "UPDATE articles SET read_at = NOW() WHERE feed_id = %s AND read_at IS NULL",
-        (feed_id,),
-      )
-    else:
-      cur = conn.execute("UPDATE articles SET read_at = NOW() WHERE read_at IS NULL")
+    cur = conn.execute(query, params)
     return cur.rowcount
 
 

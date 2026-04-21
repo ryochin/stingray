@@ -17,7 +17,13 @@ export default function Header() {
   const prevRunning = useRef(false)
   useEffect(() => {
     if (prevRunning.current && !status?.running) {
+      // Refresh just finished — nudge every data view so the user sees the
+      // final state without waiting for the next scheduled poll tick, no
+      // matter which page they're on.
       queryClient.invalidateQueries({ queryKey: ["articles"] })
+      queryClient.invalidateQueries({ queryKey: ["feeds"] })
+      queryClient.invalidateQueries({ queryKey: ["folders"] })
+      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
     }
     prevRunning.current = status?.running ?? false
   }, [status?.running, queryClient])
@@ -42,6 +48,25 @@ export default function Header() {
         </nav>
       </div>
       <div className="flex items-center gap-3 text-sm">
+        {status && (
+          status.llm_enabled === false ? (
+            <span className="text-text-dim" title="LLM is disabled in config.yml (ollama.enabled = false)">
+              – LLM off
+            </span>
+          ) : status.llm_available ? (
+            <span className="flex items-center gap-1 text-text-dim" title="LLM online">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500" aria-hidden />
+              LLM
+            </span>
+          ) : (
+            <span
+              className="text-amber-400"
+              title={status.llm_error ? `LLM unavailable: ${status.llm_error}` : "LLM unavailable"}
+            >
+              ⚠ LLM offline
+            </span>
+          )
+        )}
         {status?.running && (
           <span className="text-accent animate-pulse">Fetching...</span>
         )}

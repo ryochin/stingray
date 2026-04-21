@@ -51,6 +51,9 @@ export interface RefreshStatus {
   last_status: string | null
   last_new_count: number | null
   last_error: string | null
+  llm_enabled: boolean
+  llm_available: boolean
+  llm_error: string | null
 }
 
 export interface FeedCreate {
@@ -83,22 +86,43 @@ export type Selection =
   | { type: "folder", id: number }
   | { type: "feed", id: number }
 
+// Structured error raised by fetchJson — preserves status and the parsed JSON
+// body so callers can act on FastAPI's `detail` payload (e.g. feed candidates).
+export class ApiError extends Error {
+  status: number
+  body: unknown
+  constructor(message: string, status: number, body: unknown) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+    this.body = body
+  }
+}
+
+export interface FeedCandidate {
+  href: string
+  title: string
+  type: string
+}
+
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init)
   if (!res.ok) {
-    let detail = ""
-    try {
-      const body = await res.json()
-      detail = body.detail ?? ""
-    } catch {}
-    throw new Error(detail || `API error: ${res.status} ${res.statusText}`)
+    let parsed: unknown = null
+    try { parsed = await res.json() } catch {}
+    const detail = (parsed as { detail?: unknown } | null)?.detail
+    const message =
+      typeof detail === "string" ? detail :
+      (detail as { message?: string } | undefined)?.message ??
+      `API error: ${res.status} ${res.statusText}`
+    throw new ApiError(message, res.status, parsed)
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
 
 export const api = {
-  getArticles: (feedId?: number, limit = 500) => {
+  getArticles: (feedId?: number, limit = 1000) => {
     const params = new URLSearchParams()
     if (feedId != null) params.set("feed_id", String(feedId))
     params.set("limit", String(limit))
@@ -204,9 +228,10 @@ export const api = {
       body: JSON.stringify({ urls }),
     }),
 
-  markAllRead: (feedId?: number) => {
+  markAllRead: (feedId?: number, olderThanHours?: number) => {
     const params = new URLSearchParams()
     if (feedId != null) params.set("feed_id", String(feedId))
+    if (olderThanHours != null) params.set("older_than_hours", String(olderThanHours))
     return fetchJson<{ marked: number }>(`/articles/read-all?${params}`, { method: "POST" })
   },
 

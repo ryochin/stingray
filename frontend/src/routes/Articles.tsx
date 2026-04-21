@@ -5,6 +5,9 @@ import type { Feed, Selection } from "../api/client"
 import Header from "../components/Header"
 import Sidebar from "../components/Sidebar"
 import ArticleCard from "../components/ArticleCard"
+import MarkAllReadMenu from "../components/MarkAllReadMenu"
+import ShortcutsHelp from "../components/ShortcutsHelp"
+import { useArticleKeyboard } from "../hooks/useArticleKeyboard"
 import {
   applyUnreadFilter,
   computeFolderFeedOrder,
@@ -62,17 +65,42 @@ export default function Articles() {
     flushReads()
   }, [flushReads])
 
+  // Subscribe to status so refetchInterval reacts immediately when a refresh
+  // starts/ends, instead of waiting for the next scheduled tick. Header also
+  // owns a status observer — both share the same cache key.
+  const { data: status } = useQuery({
+    queryKey: ["status"],
+    queryFn: api.getStatus,
+    refetchInterval: (query) => (query.state.data?.running ? 2_000 : 30_000),
+  })
+  const running = status?.running ?? false
+
+  // While a refresh is running, poll faster so per-feed unread counts reflect
+  // as each feed finishes (OPML import, manual refresh).
+  const activeInterval = running ? 3_000 : 15_000
+
   const { data: allArticles, isLoading, isError } = useQuery({
     queryKey: ["articles"],
     queryFn: () => api.getArticles(),
-    refetchInterval: 15_000,
+    refetchInterval: activeInterval,
   })
 
   const { data: feeds } = useQuery({
     queryKey: ["feeds"],
     queryFn: api.getFeeds,
-    refetchInterval: 15_000,
+    refetchInterval: activeInterval,
   })
+
+  // When a refresh begins, force an immediate refetch so the sidebar reflects
+  // the first finished feed without waiting for the next poll tick.
+  const prevRunning = useRef(false)
+  useEffect(() => {
+    if (running && !prevRunning.current) {
+      queryClient.invalidateQueries({ queryKey: ["articles"] })
+      queryClient.invalidateQueries({ queryKey: ["feeds"] })
+    }
+    prevRunning.current = running
+  }, [running, queryClient])
 
   const { data: folders } = useQuery({
     queryKey: ["folders"],
@@ -200,7 +228,8 @@ export default function Articles() {
   // Mark all as read mutation
   const markAllReadFeedId = selection.type === "feed" ? selection.id : undefined
   const markAllRead = useMutation({
-    mutationFn: () => api.markAllRead(markAllReadFeedId),
+    mutationFn: (olderThanHours: number | null) =>
+      api.markAllRead(markAllReadFeedId, olderThanHours ?? undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
     },
@@ -227,77 +256,16 @@ export default function Articles() {
     if (next != null) updateSelection({ type: "feed", id: next })
   }, [selection, orderedFeedIds, unreadCounts, updateSelection])
 
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return
-    const tag = (e.target as HTMLElement).tagName
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
-
-    if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
-      e.preventDefault()
-      setShowHelp((v) => !v)
-      return
-    }
-    if (e.key === "Escape") {
-      setShowHelp(false)
-      return
-    }
-
-    const len = filtered.length
-
-    if (e.key === "j") {
-      if (len === 0) {
-        e.preventDefault()
-        goToNextFeed()
-        return
-      }
-      e.preventDefault()
-      setFocusIndex((prev) => {
-        markFocusedAsRead(prev)
-        if (prev >= len - 1) {
-          goToNextFeed()
-          return -1
-        }
-        return prev + 1
-      })
-    } else if (len === 0) {
-      return
-    } else if (e.key === "k") {
-      e.preventDefault()
-      setFocusIndex((prev) => {
-        markFocusedAsRead(prev)
-        return Math.max(prev - 1, 0)
-      })
-    } else if (e.key === "v" || e.key === "o" || e.key === "Enter") {
-      e.preventDefault()
-      setFocusIndex((i) => {
-        if (i >= 0 && i < len) {
-          const article = filtered[i]
-          window.open(article.url, "_blank", "noopener")
-          if (article.read_at == null) {
-            scheduleRead(article.url)
-          }
-        }
-        return i
-      })
-    } else if (e.key === "m") {
-      e.preventDefault()
-      setFocusIndex((i) => {
-        if (i >= 0 && i < len) {
-          const article = filtered[i]
-          toggleRead(article.url, article.read_at != null)
-        }
-        return i
-      })
-    } else if (e.key === "A" && e.shiftKey) {
-      e.preventDefault()
-      markAllRead.mutate()
-    }
-  }, [filtered, markFocusedAsRead, scheduleRead, toggleRead, markAllRead, goToNextFeed])
-
-  useEffect(() => {
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleKeyDown])
+  useArticleKeyboard({
+    filtered,
+    setFocusIndex,
+    markFocusedAsRead,
+    scheduleRead,
+    toggleRead,
+    markAllRead: () => markAllRead.mutate(null),
+    goToNextFeed,
+    setShowHelp,
+  })
 
   const setRef = useCallback((index: number, el: HTMLDivElement | null) => {
     if (el) {
@@ -380,13 +348,10 @@ export default function Articles() {
               </button>
             </div>
             {filtered.length > 0 && (
-              <button
-                onClick={() => markAllRead.mutate()}
+              <MarkAllReadMenu
                 disabled={markAllRead.isPending}
-                className="text-sm px-3 py-1 rounded bg-bg-card text-text-muted hover:text-text transition-colors disabled:opacity-40"
-              >
-                Mark all as read
-              </button>
+                onChoose={(hours) => markAllRead.mutate(hours)}
+              />
             )}
           </div>
 
@@ -426,32 +391,7 @@ export default function Articles() {
         </main>
       </div>
 
-      {showHelp && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowHelp(false)}>
-          <div className="bg-bg-secondary border border-border rounded-lg p-6 max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-text-heading font-semibold mb-4">Keyboard Shortcuts</h3>
-            <table className="text-sm w-full">
-              <tbody>
-                {[
-                  ["j", "Next article"],
-                  ["k", "Previous article"],
-                  ["v / o / Enter", "Open in new tab"],
-                  ["m", "Toggle read/unread"],
-                  ["Shift+A", "Mark all as read"],
-                  ["?", "Show/hide this help"],
-                  ["a", "Go to Articles"],
-                  ["f", "Go to Feeds"],
-                ].map(([key, desc]) => (
-                  <tr key={key}>
-                    <td className="pr-4 py-1"><kbd className="px-1.5 py-0.5 rounded bg-bg-card text-accent-text text-xs font-mono">{key}</kbd></td>
-                    <td className="py-1 text-text-muted">{desc}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
     </div>
   )
 }
