@@ -72,3 +72,12 @@ body {
 .token.boolean,
 .token.null { color: #d98ad9; font-style: italic; }
 .token.operator { color: var(--color-text-muted); }
+
+/* Brief emphasis pulse for the "All caught up" indicator when the user tries
+   to advance past the last unread article. */
+@keyframes caught-up-pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.20); }
+  100% { transform: scale(1); }
+}
+.animate-caught-up-pulse { animation: caught-up-pulse 250ms ease-out; }

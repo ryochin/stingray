@@ -35,6 +35,10 @@ export default function Articles() {
   const [localReadCount, setLocalReadCount] = useState(0)
   const articleRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const mainRef = useRef<HTMLElement>(null)
+  const stickyHeaderRef = useRef<HTMLDivElement>(null)
+  const stickySentinelRef = useRef<HTMLDivElement>(null)
+  const [isHeaderStuck, setIsHeaderStuck] = useState(false)
+  const [caughtUpPulseKey, setCaughtUpPulseKey] = useState(0)
 
   // Debounced batch read marking
   const pendingReadUrls = useRef<Set<string>>(new Set())
@@ -193,13 +197,40 @@ export default function Articles() {
     mainRef.current?.scrollTo({ top: 0 })
   }, [selection, showUnreadOnly])
 
+  // Detect when the header block becomes "stuck" to the top so we can shrink
+  // the title. A zero-height sentinel placed just above the sticky wrapper
+  // stops intersecting the scroll root the moment the header sticks.
+  useEffect(() => {
+    const sentinel = stickySentinelRef.current
+    const main = mainRef.current
+    if (!sentinel || !main) return
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsHeaderStuck(!entry.isIntersecting),
+      { root: main, threshold: 0 },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [])
+
   // Scroll focused article into view (custom rAF smooth scroll for tunable duration)
   useEffect(() => {
     if (focusIndex < 0) return
     const el = articleRefs.current.get(focusIndex)
     const main = mainRef.current
     if (!el || !main) return
-    const target = main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top
+    // For the first article, scroll all the way to the top so the sticky
+    // header releases and returns to its initial (full-size) state.
+    // Otherwise, align the article's top with the sticky header's bottom
+    // edge so the article is never occluded by the header.
+    let target: number
+    if (focusIndex === 0) {
+      target = 0
+    } else {
+      const headerBottom = stickyHeaderRef.current
+        ? stickyHeaderRef.current.getBoundingClientRect().bottom
+        : main.getBoundingClientRect().top
+      target = main.scrollTop + el.getBoundingClientRect().top - headerBottom
+    }
     const start = main.scrollTop
     const distance = target - start
     if (Math.abs(distance) < 1) return
@@ -256,6 +287,12 @@ export default function Articles() {
     if (next != null) updateSelection({ type: "feed", id: next })
   }, [selection, orderedFeedIds, unreadCounts, updateSelection])
 
+  const onJAtEnd = useCallback(() => {
+    setCaughtUpPulseKey((k) => k + 1)
+    const main = mainRef.current
+    if (main) main.scrollTo({ top: main.scrollHeight, behavior: "smooth" })
+  }, [])
+
   useArticleKeyboard({
     filtered,
     setFocusIndex,
@@ -264,6 +301,7 @@ export default function Articles() {
     toggleRead,
     markAllRead: () => markAllRead.mutate(null),
     goToNextFeed,
+    onJAtEnd,
     setShowHelp,
   })
 
@@ -314,45 +352,62 @@ export default function Articles() {
           onSelect={updateSelection}
           unreadCounts={unreadCounts}
         />
-        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 py-2 flex flex-col items-center">
+        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 pb-2 flex flex-col items-center">
           <div className="w-[95%] max-w-4xl pl-1">
-          {selectionHeader && (
-            <h2 className="text-2xl font-medium text-text-heading mb-3 flex items-center gap-2">
-              {selectionHeader.icon && (
-                <img src={selectionHeader.icon} alt="" className="w-5 h-5" loading="lazy" />
-              )}
-              {selectionHeader.label}
-            </h2>
-          )}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex gap-1 text-sm">
-              <button
-                onClick={() => setShowUnreadOnly(true)}
-                className={`px-3 py-1 rounded transition-colors ${
-                  showUnreadOnly
-                    ? "bg-accent-bg text-accent-text"
-                    : "bg-bg-card text-text-muted hover:text-text"
+          <div ref={stickySentinelRef} aria-hidden className="h-0" />
+          <div
+            ref={stickyHeaderRef}
+            className="sticky top-0 z-10 bg-bg pt-4 mb-4"
+          >
+            {selectionHeader && (
+              <h2
+                className={`font-medium text-text-heading flex items-center gap-2 transition-[font-size,padding] duration-200 ease-out ${
+                  isHeaderStuck ? "text-lg py-1" : "text-2xl py-2"
                 }`}
               >
-                Unread{selectedUnread > 0 ? ` (${selectedUnread})` : ""}
-              </button>
-              <button
-                onClick={() => setShowUnreadOnly(false)}
-                className={`px-3 py-1 rounded transition-colors ${
-                  !showUnreadOnly
-                    ? "bg-accent-bg text-accent-text"
-                    : "bg-bg-card text-text-muted hover:text-text"
-                }`}
-              >
-                All
-              </button>
-            </div>
-            {filtered.length > 0 && (
-              <MarkAllReadMenu
-                disabled={markAllRead.isPending}
-                onChoose={(hours) => markAllRead.mutate(hours)}
-              />
+                {selectionHeader.icon && (
+                  <img
+                    src={selectionHeader.icon}
+                    alt=""
+                    className={`transition-[width,height] duration-200 ease-out ${
+                      isHeaderStuck ? "w-4 h-4" : "w-5 h-5"
+                    }`}
+                    loading="lazy"
+                  />
+                )}
+                {selectionHeader.label}
+              </h2>
             )}
+            <div className="flex items-center justify-between pb-2">
+              <div className="flex gap-1 text-sm">
+                <button
+                  onClick={() => setShowUnreadOnly(true)}
+                  className={`px-3 py-1 rounded transition-colors ${
+                    showUnreadOnly
+                      ? "bg-accent-bg text-accent-text"
+                      : "bg-bg-card text-text-muted hover:text-text"
+                  }`}
+                >
+                  Unread{selectedUnread > 0 ? ` (${selectedUnread})` : ""}
+                </button>
+                <button
+                  onClick={() => setShowUnreadOnly(false)}
+                  className={`px-3 py-1 rounded transition-colors ${
+                    !showUnreadOnly
+                      ? "bg-accent-bg text-accent-text"
+                      : "bg-bg-card text-text-muted hover:text-text"
+                  }`}
+                >
+                  All
+                </button>
+              </div>
+              {filtered.length > 0 && (
+                <MarkAllReadMenu
+                  disabled={markAllRead.isPending}
+                  onChoose={(hours) => markAllRead.mutate(hours)}
+                />
+              )}
+            </div>
           </div>
 
           {isError ? (
@@ -380,10 +435,29 @@ export default function Articles() {
                   />
                 )
               })}
-              <div className="flex items-center gap-3 py-6 text-text-dim text-sm">
-                <div className="flex-1 border-t border-border" />
-                <span>All caught up</span>
-                <div className="flex-1 border-t border-border" />
+              <div
+                key={caughtUpPulseKey}
+                className={`flex flex-col items-center gap-2 py-10 text-text-dim origin-center ${
+                  caughtUpPulseKey > 0 ? "animate-caught-up-pulse" : ""
+                }`}
+              >
+                <svg
+                  className="w-7 h-7 text-accent-text/70"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                  <path d="M5 3v4" />
+                  <path d="M19 17v4" />
+                  <path d="M3 5h4" />
+                  <path d="M17 19h4" />
+                </svg>
+                <span className="text-sm">All caught up</span>
               </div>
             </>
           )}

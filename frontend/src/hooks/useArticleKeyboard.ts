@@ -9,12 +9,14 @@ interface Options {
   toggleRead: (url: string, isRead: boolean) => void
   markAllRead: () => void
   goToNextFeed: () => void
+  onJAtEnd: () => void
   setShowHelp: Dispatch<SetStateAction<boolean>>
 }
 
 /**
  * Global keyboard shortcuts for the Articles view:
  *   j/k   — next/prev article (marks the previous one as read)
+ *   Space — jump to next feed that still has unread articles
  *   v/o/Enter — open focused article in a new tab
  *   m     — toggle read/unread on focused article
  *   Shift+A — mark all as read
@@ -28,7 +30,7 @@ interface Options {
  */
 export function useArticleKeyboard({
   filtered, setFocusIndex, markFocusedAsRead, scheduleRead, toggleRead,
-  markAllRead, goToNextFeed, setShowHelp,
+  markAllRead, goToNextFeed, onJAtEnd, setShowHelp,
 }: Options) {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -45,20 +47,26 @@ export function useArticleKeyboard({
       return
     }
 
-    const len = filtered.length
-
-    if (e.key === "j") {
-      if (len === 0) {
-        e.preventDefault()
-        goToNextFeed()
-        return
-      }
+    if (e.key === " ") {
       e.preventDefault()
       setFocusIndex((prev) => {
         markFocusedAsRead(prev)
-        if (prev >= len - 1) {
-          goToNextFeed()
-          return -1
+        goToNextFeed()
+        return -1
+      })
+      return
+    }
+
+    const len = filtered.length
+
+    if (e.key === "j") {
+      if (len === 0) return
+      e.preventDefault()
+      setFocusIndex((prev) => {
+        markFocusedAsRead(prev)
+        if (prev === len - 1) {
+          onJAtEnd()
+          return prev
         }
         return prev + 1
       })
@@ -95,7 +103,7 @@ export function useArticleKeyboard({
     }
   }, [
     filtered, setFocusIndex, markFocusedAsRead, scheduleRead, toggleRead,
-    markAllRead, goToNextFeed, setShowHelp,
+    markAllRead, goToNextFeed, onJAtEnd, setShowHelp,
   ])
 
   useEffect(() => {

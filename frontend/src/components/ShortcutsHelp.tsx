@@ -5,6 +5,7 @@ interface Props {
 const SHORTCUTS: readonly (readonly [string, string])[] = [
   ["j", "Next article"],
   ["k", "Previous article"],
+  ["Space", "Jump to next unread feed"],
   ["v / o / Enter", "Open in new tab"],
   ["m", "Toggle read/unread"],
   ["Shift+A", "Mark all as read"],
