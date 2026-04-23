@@ -13,6 +13,8 @@
   --color-accent: #5a9cf5;
   --color-accent-bg: #3a5a8a;
   --color-accent-text: #9cc0f0;
+  --color-warn-bg: #8a5a3a;
+  --color-warn-text: #f0c09c;
   --color-link: #8899aa;
   --color-link-hover: #aabbcc;
 }

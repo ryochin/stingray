@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5",
+    "@tanstack/react-virtual": "^3.13.24",
     "dompurify": "^3.4.0",
     "prismjs": "^1.30.0",
     "react": "^19",

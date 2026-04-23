@@ -291,7 +291,7 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
     if thumb_url and thumb_url not in raw_html:
       raw_html = f'<img src="{html.escape(thumb_url)}" alt="" />\n{raw_html}'
 
-    title = entry.get("title", "(no title)")
+    title = html.unescape(entry.get("title", "(no title)"))
     articles.append(Article(
       title=title,
       url=link,

@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react"
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { api, faviconUrl } from "../api/client"
 import type { Feed, Selection } from "../api/client"
 import Header from "../components/Header"
@@ -39,6 +40,11 @@ export default function Articles() {
   const stickySentinelRef = useRef<HTMLDivElement>(null)
   const [isHeaderStuck, setIsHeaderStuck] = useState(false)
   const [caughtUpPulseKey, setCaughtUpPulseKey] = useState(0)
+  // Tracks the rAF driving the focus-scroll animation so competing scroll
+  // sources (e.g. onJAtEnd's scrollTo bottom) can cancel it before issuing
+  // their own scroll — otherwise the rAF keeps writing main.scrollTop each
+  // frame and overrides the new scroll intent.
+  const focusScrollRafRef = useRef<number | null>(null)
 
   // Debounced batch read marking
   const pendingReadUrls = useRef<Set<string>>(new Set())
@@ -222,12 +228,151 @@ export default function Articles() {
     return () => observer.disconnect()
   }, [])
 
+  // Track sticky header height so the virtualizer can offset its scroll
+  // origin by exactly that amount (scrollMargin). Re-measured via
+  // ResizeObserver to cover stuck transitions, wrap changes, font load, etc.
+  const [headerHeight, setHeaderHeight] = useState(0)
+  useEffect(() => {
+    const el = stickyHeaderRef.current
+    if (!el) return
+    const update = () => setHeaderHeight(el.getBoundingClientRect().height)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // Virtualize the article card list. All rendering modes (all / folder /
+  // feed) share the same list so virtualization is unconditional.
+  // Gap between cards is realised as padding-bottom on the virtualizer
+  // wrapper div so measureElement's bounding rect includes it naturally
+  // without overriding measurement.
+  const CARD_GAP = 16
+  // Include the "All caught up" sentinel as the last virtual item so its
+  // position is coordinated with the virtualizer's scrollAdjustments /
+  // smooth-scroll state. Otherwise it sits in normal flow after the
+  // container and jitters as items below the viewport get measured for
+  // the first time (the classic dynamic-size virtualizer tail wobble).
+  const ALL_CAUGHT_UP_INDEX = filtered.length
+  const virtualizer = useVirtualizer({
+    count: filtered.length + 1,
+    getScrollElement: () => mainRef.current,
+    // Most cards land around 180-220px tall; a closer estimate reduces
+    // the delta applied when an overscan item is first measured, which
+    // in turn dampens the jitter of totalSize-driven layout shifts.
+    // The sentinel row is shorter (~100px icon+text+padding).
+    estimateSize: (i) => i === ALL_CAUGHT_UP_INDEX ? 100 : 200 + CARD_GAP,
+    // Wider overscan keeps more items measured before they reach the
+    // viewport edge, further reducing first-measure churn.
+    overscan: 12,
+    scrollMargin: headerHeight,
+    // Batch ResizeObserver callbacks into RAF to coalesce bursts of
+    // measurements (e.g. images loading across several visible cards).
+    useAnimationFrameWithResizeObserver: true,
+    getItemKey: (index) =>
+      index === ALL_CAUGHT_UP_INDEX ? "__all_caught_up__" : (filtered[index]?.url ?? index),
+  })
+
+  // Preserve focus identity and visual position when `filtered` shifts
+  // (e.g. background refetch prepends new articles). Without this, the
+  // focused card slides out from under the user and the viewport appears
+  // to jump since scrollTop is preserved but cards are pushed down.
+  //
+  // Scope: only `filtered` changes caused by background data updates.
+  // `selection` / `showUnreadOnly` toggles trigger their own reset effect
+  // (focus → -1, scrollTo top); running compensation there would leak
+  // `skipFocusScroll` into an unrelated scroll pass.
+  const prevFocusSnapshot = useRef<{
+    filtered: typeof filtered
+    index: number
+    url: string
+    offset: number
+  } | null>(null)
+  const prevSelectionRef = useRef(selection)
+  const prevShowUnreadOnlyRef = useRef(showUnreadOnly)
+  // Set right before a programmatic focusIndex change whose scroll the
+  // subsequent focus-scroll effect must NOT override (the compensation
+  // below already places the card visually).
+  const skipFocusScroll = useRef(false)
+  useLayoutEffect(() => {
+    const main = mainRef.current
+    const prev = prevFocusSnapshot.current
+    const selectionChanged = prevSelectionRef.current !== selection
+    const filterToggled = prevShowUnreadOnlyRef.current !== showUnreadOnly
+    prevSelectionRef.current = selection
+    prevShowUnreadOnlyRef.current = showUnreadOnly
+
+    // User-initiated list reset is handled elsewhere; drop the snapshot so
+    // the next refetch-driven change re-captures from the post-reset state.
+    if (selectionChanged || filterToggled) {
+      prevFocusSnapshot.current = null
+      return
+    }
+
+    // Compensation only applies when the user's focus stayed put but the
+    // list shifted beneath it. If focusIndex changed from the snapshot,
+    // the focus move itself was user- or program-initiated (j/k, click,
+    // auto-focus) and no rebinding is needed — reverting to prev.url
+    // would cancel that move (e.g. j-advance whose scheduleRead forces
+    // `filtered` to re-memo into a new reference).
+    if (
+      main
+      && prev
+      && prev.filtered !== filtered
+      && focusIndex === prev.index
+      && focusIndex >= 0
+      && filtered[focusIndex]?.url !== prev.url
+    ) {
+      const newIndex = filtered.findIndex((a) => a.url === prev.url)
+      if (newIndex < 0) {
+        // Focused article vanished (server-side delete, read state changed
+        // outside this session, etc). Avoid silently inheriting whichever
+        // article slid into the old index slot; clear the snapshot and let
+        // the normal render continue with focusIndex at its numeric slot.
+        prevFocusSnapshot.current = null
+        return
+      }
+      const newOffset = virtualizer.getOffsetForIndex(newIndex, "start")?.[0]
+      if (newOffset != null) {
+        main.scrollTop += newOffset - prev.offset
+      }
+      skipFocusScroll.current = true
+      setFocusIndex(newIndex)
+      prevFocusSnapshot.current = {
+        filtered,
+        index: newIndex,
+        url: prev.url,
+        offset: newOffset ?? prev.offset,
+      }
+      return
+    }
+
+    const currentUrl = focusIndex >= 0 ? filtered[focusIndex]?.url ?? null : null
+    const currentOffset = focusIndex >= 0
+      ? virtualizer.getOffsetForIndex(focusIndex, "start")?.[0] ?? null
+      : null
+    prevFocusSnapshot.current = currentUrl != null && currentOffset != null
+      ? { filtered, index: focusIndex, url: currentUrl, offset: currentOffset }
+      : null
+  }, [filtered, focusIndex, virtualizer, selection, showUnreadOnly])
+
   // Scroll focused article into view (custom rAF smooth scroll for tunable duration)
   useEffect(() => {
     if (focusIndex < 0) return
-    const el = articleRefs.current.get(focusIndex)
+    if (skipFocusScroll.current) {
+      skipFocusScroll.current = false
+      return
+    }
     const main = mainRef.current
-    if (!el || !main) return
+    if (!main) return
+    const el = articleRefs.current.get(focusIndex)
+    // Out-of-range (virtualized away): jump with virtualizer and let the
+    // next render place the card; the rAF smooth path below handles the
+    // in-range case.
+    if (!el) {
+      virtualizer.scrollToIndex(focusIndex, { align: "start" })
+      return
+    }
     // For the first article, scroll all the way to the top so the sticky
     // header releases and returns to its initial (full-size) state.
     // Otherwise, align the article's top with the sticky header's bottom
@@ -246,16 +391,24 @@ export default function Articles() {
     if (Math.abs(distance) < 1) return
     const duration = 150
     const t0 = performance.now()
-    let raf = 0
     const step = (now: number) => {
       const p = Math.min(1, (now - t0) / duration)
       const eased = 1 - Math.pow(1 - p, 3) // ease-out cubic
       main.scrollTop = start + distance * eased
-      if (p < 1) raf = requestAnimationFrame(step)
+      if (p < 1) {
+        focusScrollRafRef.current = requestAnimationFrame(step)
+      } else {
+        focusScrollRafRef.current = null
+      }
     }
-    raf = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(raf)
-  }, [focusIndex])
+    focusScrollRafRef.current = requestAnimationFrame(step)
+    return () => {
+      if (focusScrollRafRef.current != null) {
+        cancelAnimationFrame(focusScrollRafRef.current)
+        focusScrollRafRef.current = null
+      }
+    }
+  }, [focusIndex, virtualizer])
 
   // Mark article as read when focus leaves it
   const markFocusedAsRead = useCallback((index: number) => {
@@ -291,17 +444,42 @@ export default function Articles() {
     toggleReadMutation.mutate({ url, isRead })
   }, [toggleReadMutation])
 
-  const goToNextFeed = useCallback(() => {
-    if (selection.type !== "feed") return
-    const next = nextUnreadFeedId(orderedFeedIds, selection.id, unreadCounts)
-    if (next != null) updateSelection({ type: "feed", id: next })
-  }, [selection, orderedFeedIds, unreadCounts, updateSelection])
+  const goToNextFeed = useCallback((): boolean => {
+    // Reference feed: in feed selection it is obviously the selected feed;
+    // in all/folder selection we use the feed_id of the currently focused
+    // article so "jump to next unread feed" remains meaningful.
+    let refFeedId: number | null = null
+    if (selection.type === "feed") {
+      refFeedId = selection.id
+    } else if (focusIndex >= 0 && focusIndex < filtered.length) {
+      refFeedId = filtered[focusIndex].feed_id
+    }
+    if (refFeedId == null) return false
+    const next = nextUnreadFeedId(orderedFeedIds, refFeedId, unreadCounts)
+    if (next == null) return false
+    updateSelection({ type: "feed", id: next })
+    return true
+  }, [selection, orderedFeedIds, unreadCounts, updateSelection, focusIndex, filtered])
 
   const onJAtEnd = useCallback(() => {
+    // Cancel any in-flight focus-scroll rAF. Without this, the still-running
+    // rAF keeps writing main.scrollTop each frame and silently overrides the
+    // smooth scroll-to-bottom we issue below.
+    if (focusScrollRafRef.current != null) {
+      cancelAnimationFrame(focusScrollRafRef.current)
+      focusScrollRafRef.current = null
+    }
     setCaughtUpPulseKey((k) => k + 1)
     const main = mainRef.current
-    if (main) main.scrollTo({ top: main.scrollHeight, behavior: "smooth" })
-  }, [])
+    if (!main) return
+    // Go through virtualizer.scrollToOffset (not main.scrollTo) so that
+    // `scrollState.behavior === "smooth"` is set on the virtualizer.
+    // While smooth scrolling, the virtualizer suppresses its scrollAdjust-
+    // ment writes on item-size changes; bypassing the virtualizer causes
+    // those writes to jump main.scrollTop mid-animation, producing a
+    // visible up/down jitter instead of a clean scroll to the bottom.
+    virtualizer.scrollToOffset(main.scrollHeight, { behavior: "smooth" })
+  }, [virtualizer])
 
   // When k is pressed while the focused card's top has scrolled above the
   // sticky header (e.g. after j-at-end scrolled to the bottom), re-align the
@@ -310,7 +488,12 @@ export default function Articles() {
     const main = mainRef.current
     if (!main || focusIndex < 0) return false
     const el = articleRefs.current.get(focusIndex)
-    if (!el) return false
+    // Virtualized away: the card isn't in the DOM, so it's definitely not
+    // aligned. Jump to it with the virtualizer and stay on this index.
+    if (!el) {
+      virtualizer.scrollToIndex(focusIndex, { align: "start" })
+      return true
+    }
     const headerBottom = stickyHeaderRef.current
       ? stickyHeaderRef.current.getBoundingClientRect().bottom
       : main.getBoundingClientRect().top
@@ -332,7 +515,7 @@ export default function Articles() {
     }
     requestAnimationFrame(step)
     return true
-  }, [focusIndex])
+  }, [focusIndex, virtualizer])
 
   useArticleKeyboard({
     filtered,
@@ -436,7 +619,7 @@ export default function Articles() {
                   onClick={() => setShowUnreadOnly(false)}
                   className={`px-3 py-1 rounded transition-colors ${
                     !showUnreadOnly
-                      ? "bg-accent-bg text-accent-text"
+                      ? "bg-warn-bg text-warn-text"
                       : "bg-bg-card text-text-muted hover:text-text"
                   }`}
                 >
@@ -462,44 +645,90 @@ export default function Articles() {
             </div>
           ) : (
             <>
-              {filtered.map((article, index) => {
-                const feed = article.feed_id != null ? feedMap.get(article.feed_id) : undefined
-                return (
-                  <ArticleCard
-                    key={article.url}
-                    article={article}
-                    focused={index === focusIndex}
-                    pendingSummary={!article.summary && !article.content_translated && article.feed_id != null && summarizeFeedIds.has(article.feed_id)}
-                    feedName={feed?.name}
-                    feedFaviconUrl={feed ? faviconUrl(feed) : null}
-                    ref={(el) => setRef(index, el)}
-                    onClick={() => handleCardClick(index)}
-                  />
-                )
-              })}
               <div
-                key={caughtUpPulseKey}
-                className={`flex flex-col items-center gap-2 py-10 text-text-dim origin-center ${
-                  caughtUpPulseKey > 0 ? "animate-caught-up-pulse" : ""
-                }`}
+                style={{
+                  // `getTotalSize()` already nets out `scrollMargin`
+                  // (see virtual-core: `end - scrollMargin + paddingEnd`)
+                  // so this is exactly `sum(measured)` — the right value
+                  // for a container whose first card sits at y=0.
+                  height: virtualizer.getTotalSize(),
+                  position: "relative",
+                  width: "100%",
+                }}
               >
-                <svg
-                  className="w-7 h-7 text-accent-text/70"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.75"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                  <path d="M5 3v4" />
-                  <path d="M19 17v4" />
-                  <path d="M3 5h4" />
-                  <path d="M17 19h4" />
-                </svg>
-                <span className="text-sm">All caught up</span>
+                {virtualizer.getVirtualItems().map((vi) => {
+                  if (vi.index === ALL_CAUGHT_UP_INDEX) {
+                    return (
+                      <div
+                        key={vi.key}
+                        ref={virtualizer.measureElement}
+                        data-index={vi.index}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
+                        }}
+                      >
+                        <div
+                          key={caughtUpPulseKey}
+                          className={`flex flex-col items-center gap-2 py-10 origin-center ${
+                            caughtUpPulseKey > 0
+                              ? "text-text animate-caught-up-pulse"
+                              : "text-text-dim/60"
+                          }`}
+                        >
+                          <svg
+                            className="w-7 h-7 text-accent-text/70"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.75"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                            <path d="M5 3v4" />
+                            <path d="M19 17v4" />
+                            <path d="M3 5h4" />
+                            <path d="M17 19h4" />
+                          </svg>
+                          <span className="text-sm">All caught up</span>
+                        </div>
+                      </div>
+                    )
+                  }
+                  const article = filtered[vi.index]
+                  if (!article) return null
+                  const feed = article.feed_id != null ? feedMap.get(article.feed_id) : undefined
+                  return (
+                    <div
+                      key={vi.key}
+                      ref={virtualizer.measureElement}
+                      data-index={vi.index}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        paddingBottom: CARD_GAP,
+                        transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
+                      }}
+                    >
+                      <ArticleCard
+                        article={article}
+                        focused={vi.index === focusIndex}
+                        pendingSummary={!article.summary && !article.content_translated && article.feed_id != null && summarizeFeedIds.has(article.feed_id)}
+                        feedName={feed?.name}
+                        feedFaviconUrl={feed ? faviconUrl(feed) : null}
+                        ref={(el) => setRef(vi.index, el)}
+                        onClick={() => handleCardClick(vi.index)}
+                      />
+                    </div>
+                  )
+                })}
               </div>
             </>
           )}

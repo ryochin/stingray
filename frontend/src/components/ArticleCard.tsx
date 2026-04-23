@@ -53,7 +53,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       <div
         ref={ref}
         onClick={onClick}
-        className={`py-5 px-6 rounded-lg mb-4 border cursor-pointer transition-all duration-500 ${
+        className={`py-5 px-6 rounded-lg border cursor-pointer transition-all duration-500 ${
           focused
             ? "bg-bg-hover border-accent-bg"
             : isRead

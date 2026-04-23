@@ -8,7 +8,7 @@ interface Options {
   scheduleRead: (url: string) => void
   toggleRead: (url: string, isRead: boolean) => void
   markAllRead: () => void
-  goToNextFeed: () => void
+  goToNextFeed: () => boolean
   onJAtEnd: () => void
   onKBeforeMove: () => boolean
   setShowHelp: Dispatch<SetStateAction<boolean>>
@@ -50,10 +50,15 @@ export function useArticleKeyboard({
 
     if (e.key === " ") {
       e.preventDefault()
+      // Call goToNextFeed OUTSIDE the setFocusIndex updater so its side
+      // effect (setSelection) fires exactly once even under Strict Mode,
+      // and so React can batch it atomically with the focus change below.
+      const moved = goToNextFeed()
       setFocusIndex((prev) => {
         markFocusedAsRead(prev)
-        goToNextFeed()
-        return -1
+        // Only clear focus if the jump succeeded; otherwise stay put so
+        // the auto-focus effect doesn't yank the user back to index 0.
+        return moved ? -1 : prev
       })
       return
     }
