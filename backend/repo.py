@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import math
+import random
 import re
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Iterator, Literal
 
 from psycopg import sql
 
@@ -12,6 +15,158 @@ from models import Article
 from schemas import ArticleRow, FeedRow, FeedStats, FilterRow, FolderRow, RefreshJob
 
 import db
+
+
+# -- Adaptive fetch scheduling --
+
+MIN_INTERVAL_MIN = 15
+MAX_INTERVAL_MIN = 360  # 6 hours
+BUCKETS = (15, 30, 60, 120, 240, 360)
+JITTER_RATIO = 0.10
+CRON_TICK_MIN = 15
+REFRESH_LOCK_KEY = 0xFEEDCAFE  # bigint key for pg_try_advisory_lock
+
+Outcome = Literal["fresh", "miss", "degraded", "failure"]
+
+
+def step_bucket(cur_min: int, direction: int) -> int:
+  """Move one step along BUCKETS; clamp at the endpoints.
+
+  direction > 0 enlarges the interval (miss), direction < 0 shrinks (fresh).
+  """
+  try:
+    idx = BUCKETS.index(cur_min)
+  except ValueError:
+    # If cur_min isn't a bucket (shouldn't happen due to CHECK), pick the
+    # nearest bucket without underflowing.
+    idx = min(range(len(BUCKETS)), key=lambda i: abs(BUCKETS[i] - cur_min))
+  new_idx = max(0, min(len(BUCKETS) - 1, idx + (1 if direction > 0 else -1)))
+  return BUCKETS[new_idx]
+
+
+def schedule_next_at(now: datetime, interval_min: int) -> datetime:
+  """Apply ±JITTER_RATIO jitter, then ceil to the next CRON_TICK_MIN boundary.
+
+  Tick alignment ensures that schedules land on the cron cadence rather than
+  between ticks (where they would effectively wait until the next tick).
+  """
+  factor = 1 + random.uniform(-JITTER_RATIO, JITTER_RATIO)
+  raw = now + timedelta(minutes=interval_min * factor)
+  tick_s = CRON_TICK_MIN * 60
+  snapped = math.ceil(raw.timestamp() / tick_s) * tick_s
+  return datetime.fromtimestamp(snapped, tz=timezone.utc)
+
+
+def record_feed_attempt(
+  feed_id: int,
+  outcome: Outcome,
+  *,
+  error: str | None = None,
+) -> None:
+  """Update a feed's schedule and health columns based on a fetch outcome.
+
+  Centralizes every write to fetch_interval_min / next_fetch_at /
+  consecutive_failures / last_error / last_fetched_at so concurrent paths
+  cannot step on each other. Selects FOR UPDATE to serialize with toggle
+  and other feed-row writes.
+  """
+  with db.connection() as conn, conn.transaction():
+    row = conn.execute(
+      "SELECT fetch_interval_min, consecutive_failures, next_fetch_at "
+      "FROM feeds WHERE id = %s FOR UPDATE",
+      (feed_id,),
+    ).fetchone()
+    if row is None:
+      return
+    cur_min = row["fetch_interval_min"]
+    fails = row["consecutive_failures"]
+    cur_next = row["next_fetch_at"]
+    now = datetime.now(tz=timezone.utc)
+
+    if outcome == "failure":
+      n = fails + 1
+      # Exponential backoff capped at MAX_INTERVAL_MIN: 15, 30, 60, 120, 240, 360.
+      backoff = min(MAX_INTERVAL_MIN, 15 * 2 ** max(n - 1, 0))
+      # Never pull the next attempt earlier than the current cadence or a
+      # previously-scheduled future time.
+      raw_next = schedule_next_at(now, max(backoff, cur_min))
+      if cur_next is not None and cur_next > raw_next:
+        raw_next = cur_next
+      conn.execute(
+        "UPDATE feeds SET next_fetch_at = %s, consecutive_failures = %s, "
+        "last_error = %s WHERE id = %s",
+        (raw_next, n, error, feed_id),
+      )
+      return
+
+    if outcome == "degraded":
+      # Neutral: keep bucket and fail counter, advance schedule at current
+      # cadence. last_error only written when the caller supplies one (e.g.
+      # web-norules) so transient cache fallbacks don't wipe diagnostic info.
+      next_at = schedule_next_at(now, cur_min)
+      if error is not None:
+        conn.execute(
+          "UPDATE feeds SET next_fetch_at = %s, last_fetched_at = %s, "
+          "last_error = %s WHERE id = %s",
+          (next_at, now, error, feed_id),
+        )
+      else:
+        conn.execute(
+          "UPDATE feeds SET next_fetch_at = %s, last_fetched_at = %s "
+          "WHERE id = %s",
+          (next_at, now, feed_id),
+        )
+      return
+
+    # fresh / miss: move the bucket and clear failure state.
+    next_min = step_bucket(cur_min, direction=+1 if outcome == "miss" else -1)
+    next_at = schedule_next_at(now, next_min)
+    conn.execute(
+      "UPDATE feeds SET fetch_interval_min = %s, next_fetch_at = %s, "
+      "consecutive_failures = 0, last_fetched_at = %s, last_error = NULL "
+      "WHERE id = %s",
+      (next_min, next_at, now, feed_id),
+    )
+
+
+def list_due_feeds(force: bool = False) -> list[FeedRow]:
+  """Return enabled feeds that are currently due for fetch.
+
+  force=True returns every enabled feed (used by manual Refresh button).
+  force=False returns only feeds whose next_fetch_at is NULL or past.
+  """
+  with db.connection() as conn:
+    if force:
+      rows = conn.execute(
+        f"SELECT * FROM feeds WHERE enabled {_FEED_ORDER}"
+      ).fetchall()
+    else:
+      rows = conn.execute(
+        f"SELECT * FROM feeds "
+        f"WHERE enabled AND (next_fetch_at IS NULL OR next_fetch_at <= NOW()) "
+        f"{_FEED_ORDER}"
+      ).fetchall()
+    return [_row_to_feed(r) for r in rows]
+
+
+@contextmanager
+def advisory_lock(key: int = REFRESH_LOCK_KEY) -> Iterator[bool]:
+  """Context manager that acquires a session-scoped Postgres advisory lock
+  and releases it on exit. Yields True if the lock was acquired, False if
+  already held by another session.
+
+  The same pooled connection is held for the duration of the `with` block so
+  both acquire and release happen on the same session — session-scoped
+  advisory locks would otherwise leak across pool connection reuse.
+  """
+  with db.connection() as conn:
+    row = conn.execute("SELECT pg_try_advisory_lock(%s) AS got", (key,)).fetchone()
+    got = bool(row and row["got"])
+    try:
+      yield got
+    finally:
+      if got:
+        conn.execute("SELECT pg_advisory_unlock(%s)", (key,))
 
 
 # -- Filters --
@@ -205,8 +360,19 @@ def delete_all_data() -> None:
 
 
 def toggle_feed(feed_id: int) -> None:
+  """Flip `enabled`. On the true→false transition, also clear next_fetch_at
+  so a later re-enable is treated as immediately due (NULL means "due now").
+  The CASE uses the pre-update value of `enabled`, which is the transition
+  direction.
+  """
   with db.connection() as conn:
-    conn.execute("UPDATE feeds SET enabled = NOT enabled WHERE id = %s", (feed_id,))
+    conn.execute(
+      "UPDATE feeds "
+      "SET enabled = NOT enabled, "
+      "    next_fetch_at = CASE WHEN enabled THEN NULL ELSE next_fetch_at END "
+      "WHERE id = %s",
+      (feed_id,),
+    )
 
 
 def rename_feed(feed_id: int, name: str) -> None:
@@ -266,15 +432,23 @@ def update_feed_fetch_status(
   success: bool,
   error: str | None = None,
 ) -> None:
+  """Record the outcome of a *manual* single-feed fetch.
+
+  Intentionally touches only `last_fetched_at` and `last_error` — the adaptive
+  schedule owns `consecutive_failures` / `fetch_interval_min` / `next_fetch_at`
+  via record_feed_attempt, and manual trigger failures must not pollute that
+  learning signal (it would inflate backoff on the next scheduled run).
+  """
   with db.connection() as conn:
     if success:
       conn.execute(
-        "UPDATE feeds SET last_fetched_at = NOW(), consecutive_failures = 0, last_error = NULL WHERE id = %s",
+        "UPDATE feeds SET last_fetched_at = NOW(), last_error = NULL "
+        "WHERE id = %s",
         (feed_id,),
       )
     else:
       conn.execute(
-        "UPDATE feeds SET consecutive_failures = consecutive_failures + 1, last_error = %s WHERE id = %s",
+        "UPDATE feeds SET last_error = %s WHERE id = %s",
         (error, feed_id),
       )
 

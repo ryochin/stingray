@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS feeds (
   consecutive_failures  INTEGER NOT NULL DEFAULT 0,
   last_error            TEXT,
   extraction_rules      TEXT,
+  fetch_interval_min    INTEGER NOT NULL DEFAULT 15
+                        CHECK (fetch_interval_min IN (15, 30, 60, 120, 240, 360)),
+  next_fetch_at         TIMESTAMPTZ,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -76,6 +79,20 @@ CREATE INDEX IF NOT EXISTS idx_articles_read_at   ON articles(read_at);
 CREATE INDEX IF NOT EXISTS idx_feeds_folder_id    ON feeds(folder_id);
 """
 
+# Idempotent migrations for existing databases that pre-date newer columns /
+# constraints. Each statement is safe to run on an already-migrated schema.
+_MIGRATIONS = """\
+ALTER TABLE feeds
+  ADD COLUMN IF NOT EXISTS fetch_interval_min INTEGER NOT NULL DEFAULT 15;
+ALTER TABLE feeds
+  ADD COLUMN IF NOT EXISTS next_fetch_at TIMESTAMPTZ;
+ALTER TABLE feeds DROP CONSTRAINT IF EXISTS feeds_fetch_interval_bucket;
+ALTER TABLE feeds ADD CONSTRAINT feeds_fetch_interval_bucket
+  CHECK (fetch_interval_min IN (15, 30, 60, 120, 240, 360));
+CREATE INDEX IF NOT EXISTS idx_feeds_next_fetch
+  ON feeds(next_fetch_at) WHERE enabled;
+"""
+
 _DEFAULT_URL = "postgresql://news:news@localhost:25432/news"
 _pool: ConnectionPool | None = None
 
@@ -114,6 +131,9 @@ def connection() -> Iterator[Conn]:
 
 
 def init_schema() -> None:
-  """Create tables and indexes if they don't exist."""
+  """Create tables and indexes if they don't exist, and apply idempotent
+  migrations for databases that pre-date newer columns / constraints.
+  """
   with connection() as conn:
     conn.execute(_SCHEMA)
+    conn.execute(_MIGRATIONS)

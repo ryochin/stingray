@@ -346,7 +346,7 @@ async def _fetch_single_feed(feed: FeedRow) -> None:
         repo.update_feed_fetch_status(feed.id, success=False, error="extraction rules not configured")
         return
       else:
-        articles, was_cached = await _fetch_rss(client, feed_cfg)
+        articles, was_cached, _tag = await _fetch_rss(client, feed_cfg)
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     source = "cache" if was_cached else "fresh"
     log.info(f"  [{source}] {len(articles)} items fetched in {elapsed_ms}ms.")
@@ -696,15 +696,16 @@ async def _run_refresh(
   *,
   trigger: str = "web",
   job_id: int | None = None,
+  force: bool = False,
 ) -> None:
   global _refresh_task
   start = time.perf_counter()
-  log.step(f"Refresh started (trigger={trigger})")
+  log.step(f"Refresh started (trigger={trigger}, force={force})")
   if _summarize_lock.locked():
     log.info("  Waiting for summarizer lock...")
   try:
     async with _summarize_lock:
-      await refresh_all(config, source=trigger, job_id=job_id)
+      await refresh_all(config, source=trigger, job_id=job_id, force=force)
     elapsed = time.perf_counter() - start
     log.success(f"Refresh completed in {elapsed:.1f}s (trigger={trigger})")
   except Exception as e:
@@ -727,7 +728,7 @@ async def trigger_refresh(request: Request) -> JSONResponse:
     # running=true by the time this response reaches the client.
     job_id = repo.create_refresh_job("web")
     _refresh_task = asyncio.create_task(
-      _run_refresh(config, trigger="web", job_id=job_id)
+      _run_refresh(config, trigger="web", job_id=job_id, force=True)
     )
     _background_tasks.add(_refresh_task)
     _refresh_task.add_done_callback(_log_task_exception)

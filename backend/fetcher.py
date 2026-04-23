@@ -48,35 +48,94 @@ def _needs_llm(article: Article, *, translate: bool) -> bool:
     return True
 
 
+def _classify_outcome(
+  source_tag: str | None,
+  feed_kind: str,
+  fetch_exc: Exception | None,
+  persist_exc: Exception | None,
+  inserted_count: int,
+) -> tuple[repo.Outcome, str | None]:
+  """Fold the 5 per-feed observations into a scheduler outcome + error string.
+
+  Returns (outcome, error) where outcome is one of
+  "fresh" / "miss" / "degraded" / "failure".
+  """
+  if fetch_exc is not None:
+    return "failure", f"{type(fetch_exc).__name__}: {fetch_exc}"
+  if persist_exc is not None:
+    return "failure", f"{type(persist_exc).__name__}: {persist_exc}"
+  if feed_kind == "web-norules":
+    return "degraded", "extraction rules not configured"
+  if source_tag in ("net-cache", "5xx-cache", "304-empty"):
+    return "degraded", None
+  # Normal path: fresh body or clean 304 / unchanged / web success (None tag).
+  return ("fresh" if inserted_count >= 1 else "miss"), None
+
+
 async def _fetch_and_persist_feeds(
   feeds_cfg: list[dict[str, Any]],
   feed_id_map: dict[str, int],
   config: AppConfig,
-) -> tuple[list[Article], list[tuple[int, bool, str | None]], int]:
+  *,
+  update_schedule: bool = True,
+) -> tuple[list[Article], int]:
   """Fetch all feeds in parallel and upsert each feed's articles as soon as it
-  finishes, so the web UI sees rows appear incrementally instead of waiting for
-  every feed plus LLM processing. LLM-filled fields are populated later by a
-  second upsert; `ON CONFLICT DO UPDATE COALESCE` makes that safe.
+  finishes. The per-feed callback also classifies the fetch outcome and, when
+  `update_schedule` is True, records it via `repo.record_feed_attempt` so the
+  adaptive interval learns from this cycle.
   """
   new_count_total = 0
   new_count_lock = asyncio.Lock()
 
-  async def _persist_feed(feed_cfg: dict[str, Any], feed_articles: list[Article]) -> None:
+  async def _persist_feed(
+    feed_cfg: dict[str, Any],
+    feed_articles: list[Article],
+    source_tag: str | None,
+    feed_kind: str,
+    fetch_exc: Exception | None,
+  ) -> None:
     nonlocal new_count_total
-    count = await asyncio.to_thread(repo.upsert_articles, feed_articles, feed_id_map)
-    if count:
+    # Only upsert is wrapped — LLM summarization runs separately after all
+    # fetches and must not contribute to the schedule signal.
+    inserted_count = 0
+    persist_exc: Exception | None = None
+    if feed_articles:
+      try:
+        inserted_count = await asyncio.to_thread(
+          repo.upsert_articles, feed_articles, feed_id_map,
+        )
+      except Exception as e:
+        persist_exc = e
+    if inserted_count:
       async with new_count_lock:
-        new_count_total += count
+        new_count_total += inserted_count
       name = feed_cfg.get("name") or "?"
-      log.info(f"  [db] {name}: +{count} new")
+      log.info(f"  [db] {name}: +{inserted_count} new")
 
-  articles, feed_results = await fetch_all(
+    if not update_schedule:
+      return
+    feed_id = feed_cfg.get("id")
+    if feed_id is None:
+      return
+    outcome, error = _classify_outcome(
+      source_tag, feed_kind, fetch_exc, persist_exc, inserted_count,
+    )
+    try:
+      await asyncio.to_thread(
+        repo.record_feed_attempt, feed_id, outcome, error=error,
+      )
+    except Exception as e:
+      log.error(
+        f"  [schedule-error] {feed_cfg.get('name')}: {type(e).__name__}: {e}"
+      )
+
+  articles = await fetch_all(
     feeds_cfg,
     max_age_hours=config.max_age_hours,
     max_items=config.max_items_per_feed,
     on_feed_done=_persist_feed,
   )
-  return articles, feed_results, new_count_total
+  return articles, new_count_total
 
 
 async def _run_summarize(
@@ -166,61 +225,81 @@ async def refresh_all(
   source: str = "cron",
   no_summary: bool = False,
   job_id: int | None = None,
+  force: bool = False,
 ) -> RefreshResult:
-  """Fetch all enabled feeds, summarize, and persist to DB.
+  """Fetch enabled feeds, summarize, and persist to DB.
 
   Single entry point used by both CLI (`main.py`) and Web (`POST /api/refresh`).
   When `job_id` is provided the caller already created the `refresh_jobs` row
   synchronously (so clients observe running=true immediately after the HTTP
   response); otherwise it is created here.
+
+  `force=True` bypasses the due-time filter and fetches every enabled feed
+  (used by the manual Refresh button). `force=False` only fetches feeds whose
+  `next_fetch_at` has passed or is NULL.
+
+  Concurrent runs are serialized by a Postgres advisory lock so cron and a
+  user-triggered web refresh cannot overlap; a blocked run closes its job as
+  "skipped" and returns immediately.
   """
   if job_id is None:
     job_id = repo.create_refresh_job(source)
   result = RefreshResult()
 
+  # The try/except wraps the advisory_lock context itself so a failure while
+  # acquiring the lock (rare DB error) still closes the refresh_jobs row.
   try:
-    feeds = repo.list_feeds(enabled=True)
-    if not feeds:
-      log.warn("No enabled feeds found.")
-      repo.finish_refresh_job(job_id, "completed", 0, None)
-      return result
+    with repo.advisory_lock() as got_lock:
+      if not got_lock:
+        log.info("Refresh skipped: another refresh is already running.")
+        repo.finish_refresh_job(
+          job_id, "skipped", 0, "another refresh is running",
+        )
+        return result
 
-    feeds_cfg = [f.to_feed_cfg() for f in feeds]
-    feed_id_map = _build_feed_id_map(feeds)
+      feeds = await asyncio.to_thread(repo.list_due_feeds, force)
+      if not feeds:
+        if force:
+          log.warn("No enabled feeds found.")
+        else:
+          log.info("No feeds are due for fetch.")
+        repo.finish_refresh_job(job_id, "completed", 0, None)
+        return result
 
-    log.step("Fetching feeds...")
-    articles, feed_results, new_count = await _fetch_and_persist_feeds(
-      feeds_cfg, feed_id_map, config,
-    )
-    for feed_id, success, error_msg in feed_results:
-      repo.update_feed_fetch_status(feed_id, success=success, error=error_msg)
-    log.info(f"  {len(articles)} articles total, {new_count} new saved.")
-    result.total_articles = len(articles)
-    result.new_count = new_count
+      feeds_cfg = [f.to_feed_cfg() for f in feeds]
+      feed_id_map = _build_feed_id_map(feeds)
 
-    if not articles:
-      log.warn("No articles found.")
-      repo.finish_refresh_job(job_id, "completed", 0, None)
-      return result
-
-    articles = enrich_from_legacy_cache(articles, Path(config.cache_dir))
-
-    if no_summary or not config.ollama.enabled:
-      if not no_summary:
-        log.info("  Skipping LLM processing: ollama.enabled=false in config.")
-    else:
-      result.summarize_failures = await _run_llm_pass(
-        articles, feeds, feed_id_map, config,
+      log.step(f"Fetching feeds... ({len(feeds)} due, force={force})")
+      articles, new_count = await _fetch_and_persist_feeds(
+        feeds_cfg, feed_id_map, config,
       )
+      log.info(f"  {len(articles)} articles total, {new_count} new saved.")
+      result.total_articles = len(articles)
+      result.new_count = new_count
 
-    await _backfill_site_urls(feeds)
+      if not articles:
+        log.warn("No articles found.")
+        repo.finish_refresh_job(job_id, "completed", 0, None)
+        return result
 
-    pruned = repo.prune_articles(config.article_cache_max_age_days)
-    if pruned:
-      log.info(f"  Pruned {pruned} old articles.")
+      articles = enrich_from_legacy_cache(articles, Path(config.cache_dir))
 
-    repo.finish_refresh_job(job_id, "completed", new_count, None)
-    return result
+      if no_summary or not config.ollama.enabled:
+        if not no_summary:
+          log.info("  Skipping LLM processing: ollama.enabled=false in config.")
+      else:
+        result.summarize_failures = await _run_llm_pass(
+          articles, feeds, feed_id_map, config,
+        )
+
+      await _backfill_site_urls(feeds)
+
+      pruned = repo.prune_articles(config.article_cache_max_age_days)
+      if pruned:
+        log.info(f"  Pruned {pruned} old articles.")
+
+      repo.finish_refresh_job(job_id, "completed", new_count, None)
+      return result
 
   except Exception as exc:
     repo.finish_refresh_job(job_id, "failed", 0, str(exc))

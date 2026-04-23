@@ -38,6 +38,8 @@ class FeedRow(BaseModel):
   consecutive_failures: int = 0
   last_error: str | None = None
   extraction_rules: str | None = None
+  fetch_interval_min: int = 15
+  next_fetch_at: datetime | None = None
   created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
   def to_feed_cfg(self) -> dict[str, object]:

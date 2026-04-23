@@ -304,14 +304,20 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
   return articles
 
 
-async def _fetch_rss(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Article], bool]:
+async def _fetch_rss(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Article], bool, str]:
+  """Fetch an RSS feed body with caching and parse it.
+
+  Returns (articles, was_cached, source_tag). The source_tag is forwarded
+  from _fetch_with_cache so schedulers downstream can distinguish a normal
+  fetch from a degraded cache fallback.
+  """
   url = feed_cfg["url"]
-  body, was_cached, _tag = await _fetch_with_cache(client, url)
+  body, was_cached, tag = await _fetch_with_cache(client, url)
   # Empty body happens on 304-without-cache (already logged in _fetch_with_cache).
   # Returning [] here lets callers treat it the same as "no new articles".
   if not body:
-    return [], was_cached
-  return _parse_rss(body, feed_cfg), was_cached
+    return [], was_cached, tag
+  return _parse_rss(body, feed_cfg), was_cached, tag
 
 
 _CONCURRENCY = 5
@@ -319,8 +325,12 @@ _CONCURRENCY = 5
 async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
   """Fetch a single feed with concurrency limit and random delay.
 
-  Returns (articles, was_cached, kind) where `kind` is a short label
-  indicating how the feed was fetched — used for per-feed summary logging.
+  Returns (articles, was_cached, kind, source_tag) where
+    - `kind` is a short label indicating how the feed was fetched
+      ("rss" / "web" / "web-norules") — used for per-feed summary logging.
+    - `source_tag` is the low-level fetch tag from _fetch_with_cache for RSS
+      feeds (e.g. "fresh", "unchanged", "304", "304-empty", "net-cache",
+      "5xx-cache"); None for web feeds (they don't go through the cache layer).
   """
   name = feed.get("name") or feed.get("url") or "?"
   async with sem:
@@ -336,18 +346,18 @@ async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         source = "cache" if was_cached else "fresh"
         log.info(f"  [web/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
-        return articles, was_cached, "web"
+        return articles, was_cached, "web", None
       log.warn(f"  [web/skip] {name}: extraction rules incomplete")
-      return [], False, "web-norules"
+      return [], False, "web-norules", None
     if is_web:
       log.warn(f"  [web/skip] {name}: no extraction rules configured")
-      return [], False, "web-norules"
+      return [], False, "web-norules", None
     start = time.perf_counter()
-    articles, was_cached = await _fetch_rss(client, feed)
+    articles, was_cached, source_tag = await _fetch_rss(client, feed)
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     source = "cache" if was_cached else "fresh"
     log.info(f"  [rss/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
-    return articles, was_cached, "rss"
+    return articles, was_cached, "rss", source_tag
 
 
 def _filter_by_cutoff(feed_articles: list[Article], cutoff: datetime) -> list[Article]:
@@ -367,19 +377,31 @@ def _filter_by_cutoff(feed_articles: list[Article], cutoff: datetime) -> list[Ar
   return fresh
 
 
+OnFeedDone = Callable[
+  [dict, list[Article], str | None, str, Exception | None],
+  Awaitable[None],
+]
+
+
 async def fetch_all(
   feeds_cfg: list[dict],
   max_age_hours: float = 48,
   max_items: int = 200,
-  on_feed_done: Callable[[dict, list[Article]], Awaitable[None]] | None = None,
-) -> tuple[list[Article], list[tuple[int, bool, str | None]]]:
+  on_feed_done: OnFeedDone | None = None,
+) -> list[Article]:
   """Fetch every feed in parallel.
 
-  If `on_feed_done` is given, it is invoked as soon as each individual feed
-  finishes (with that feed's articles already filtered by the age cutoff).
-  Callers use this to persist incrementally so downstream consumers — e.g. the
-  web UI reading `articles` — see rows appear feed-by-feed instead of waiting
-  for every fetch plus LLM processing to complete.
+  If `on_feed_done` is given, it is invoked exactly once per feed — on
+  success, on failure, and on empty results alike — with:
+    (feed_cfg, articles, source_tag, feed_kind, fetch_exc)
+
+  `articles` is the age-cutoff-filtered list; empty on failure or when the
+  feed had nothing in the window. `source_tag` is non-None only for RSS
+  feeds. `fetch_exc` is non-None only when the fetch itself raised.
+
+  Callers use the callback to persist incrementally (so the UI sees rows
+  appear feed-by-feed) and to record schedule outcomes for adaptive fetch
+  intervals.
   """
   sem = asyncio.Semaphore(_CONCURRENCY)
   for feed in feeds_cfg:
@@ -387,16 +409,25 @@ async def fetch_all(
   cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
 
   async def _run_one(client: httpx.AsyncClient, feed: dict):
-    result = await _delayed_fetch(client, feed, random.uniform(0, 2), sem)
+    try:
+      articles, was_cached, kind, source_tag = await _delayed_fetch(
+        client, feed, random.uniform(0, 2), sem,
+      )
+      fetch_exc: Exception | None = None
+    except Exception as e:
+      log.error(f"  [error] {feed.get('name')}: {type(e).__name__}: {e}")
+      articles, was_cached, kind, source_tag = [], False, "rss", None
+      fetch_exc = e
+
+    fresh = _filter_by_cutoff(articles, cutoff) if articles else []
+
     if on_feed_done is not None:
-      feed_articles, _was_cached, _kind = result
-      fresh = _filter_by_cutoff(feed_articles, cutoff)
-      if fresh:
-        try:
-          await on_feed_done(feed, fresh)
-        except Exception as e:
-          log.error(f"  [persist-error] {feed.get('name')}: {type(e).__name__}: {e}")
-    return result
+      try:
+        await on_feed_done(feed, fresh, source_tag, kind, fetch_exc)
+      except Exception as e:
+        log.error(f"  [persist-error] {feed.get('name')}: {type(e).__name__}: {e}")
+
+    return fresh, was_cached, kind, fetch_exc
 
   async with httpx.AsyncClient(
     timeout=httpx.Timeout(60, connect=30),
@@ -404,59 +435,45 @@ async def fetch_all(
     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
   ) as client:
     tasks = [_run_one(client, feed) for feed in feeds_cfg]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks)
 
-  return _aggregate_feed_results(feeds_cfg, results, cutoff)
+  return _aggregate_feed_results(feeds_cfg, results)
 
 
 def _aggregate_feed_results(
   feeds_cfg: list[dict],
-  results: list[tuple[list[Article], bool, str] | BaseException],
-  cutoff: datetime,
-) -> tuple[list[Article], list[tuple[int, bool, str | None]]]:
-  """Merge per-feed fetch outcomes into a deduped, cutoff-filtered article list
-  plus a per-feed (feed_id, success, error) tuple list for fetch_status updates,
-  and log a one-line summary.
+  results: list[tuple[list[Article], bool, str, Exception | None]],
+) -> list[Article]:
+  """Merge per-feed fetch outcomes into a deduped article list and log a
+  one-line summary. Articles are already cutoff-filtered by _run_one.
   """
   articles: list[Article] = []
-  feed_results: list[tuple[int, bool, str | None]] = []
   seen_urls: set[str] = set()
   cached_feeds = 0
   fetched_feeds = 0
   error_feeds = 0
   skipped_web_feeds = 0
   total_items = 0
-  total_fresh_items = 0
-  for feed, result in zip(feeds_cfg, results):
-    feed_id = feed.get("id")
-    if isinstance(result, BaseException):
+  for _feed, (feed_articles, was_cached, kind, fetch_exc) in zip(feeds_cfg, results):
+    if fetch_exc is not None:
       error_feeds += 1
-      log.error(f"  [error] {feed.get('name')}: {type(result).__name__}: {result}")
-      if feed_id is not None:
-        feed_results.append((feed_id, False, str(result)))
-      continue
-
-    feed_articles, was_cached, kind = result
-    if kind == "web-norules":
+    elif kind == "web-norules":
       skipped_web_feeds += 1
     elif was_cached:
       cached_feeds += 1
     else:
       fetched_feeds += 1
     total_items += len(feed_articles)
-    if feed_id is not None:
-      feed_results.append((feed_id, True, None))
-    for a in _filter_by_cutoff(feed_articles, cutoff):
+    for a in feed_articles:
       if a.url in seen_urls:
         continue
       seen_urls.add(a.url)
       articles.append(a)
-      total_fresh_items += 1
 
   log.info(
     f"  Feeds: {fetched_feeds} fresh, {cached_feeds} cached"
     f"{f', {error_feeds} errors' if error_feeds else ''}"
     f"{f', {skipped_web_feeds} skipped (no rules)' if skipped_web_feeds else ''}"
-    f" | items: {total_fresh_items} within window, {total_items} total."
+    f" | items: {len(articles)} within window, {total_items} total."
   )
-  return articles, feed_results
+  return articles

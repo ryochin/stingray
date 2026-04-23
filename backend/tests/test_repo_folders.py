@@ -167,24 +167,24 @@ class TestDeleteFeedCascade:
 
 
 class TestFetchStatus:
-  def test_success_resets_failures(self):
+  def test_success_clears_last_error(self):
     fid = repo.add_feed(FeedRow(name="F", url="https://f.example.com/")).id
     repo.update_feed_fetch_status(fid, success=False, error="boom")
-    repo.update_feed_fetch_status(fid, success=False, error="boom2")
     repo.update_feed_fetch_status(fid, success=True)
     feed = repo.get_feed_by_id(fid)
     assert feed is not None
-    assert feed.consecutive_failures == 0
     assert feed.last_error is None
     assert feed.last_fetched_at is not None
 
-  def test_failure_increments_and_sets_error(self):
+  def test_failure_sets_error_without_touching_failure_counter(self):
+    # Manual single-feed fetch must not pollute the adaptive-schedule signal.
+    # consecutive_failures is owned by record_feed_attempt (scheduled path).
     fid = repo.add_feed(FeedRow(name="F", url="https://f.example.com/")).id
     repo.update_feed_fetch_status(fid, success=False, error="boom")
     repo.update_feed_fetch_status(fid, success=False, error="boom again")
     feed = repo.get_feed_by_id(fid)
     assert feed is not None
-    assert feed.consecutive_failures == 2
+    assert feed.consecutive_failures == 0
     assert feed.last_error == "boom again"
 
 
