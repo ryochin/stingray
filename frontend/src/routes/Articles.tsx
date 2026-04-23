@@ -189,13 +189,23 @@ export default function Articles() {
     sessionReadUrls.current.clear()
   }, [selection])
 
-  // Clear focus when feed/filter changes; the first j/k press will focus the first article.
-  // Also reset scroll to the top so switching feeds (e.g. via j on the last card) always
-  // lands the reader at the header, not wherever the previous feed was scrolled to.
+  // Clear focus when feed/filter changes and scroll back to the top.
+  // A separate effect below picks up from -1 and focuses the first article
+  // once data is available (covers both mount and selection change, since
+  // articles are often still loading at the moment selection changes).
   useEffect(() => {
     setFocusIndex(-1)
     mainRef.current?.scrollTo({ top: 0 })
   }, [selection, showUnreadOnly])
+
+  // Auto-focus the first article whenever focus is cleared and there is
+  // something to focus. This makes opening the articles view land on the
+  // top unread item without requiring an initial j press.
+  useEffect(() => {
+    if (focusIndex === -1 && filtered.length > 0) {
+      setFocusIndex(0)
+    }
+  }, [focusIndex, filtered.length])
 
   // Detect when the header block becomes "stuck" to the top so we can shrink
   // the title. A zero-height sentinel placed just above the sticky wrapper
@@ -293,6 +303,37 @@ export default function Articles() {
     if (main) main.scrollTo({ top: main.scrollHeight, behavior: "smooth" })
   }, [])
 
+  // When k is pressed while the focused card's top has scrolled above the
+  // sticky header (e.g. after j-at-end scrolled to the bottom), re-align the
+  // current card instead of moving focus to the previous one.
+  const onKBeforeMove = useCallback((): boolean => {
+    const main = mainRef.current
+    if (!main || focusIndex < 0) return false
+    const el = articleRefs.current.get(focusIndex)
+    if (!el) return false
+    const headerBottom = stickyHeaderRef.current
+      ? stickyHeaderRef.current.getBoundingClientRect().bottom
+      : main.getBoundingClientRect().top
+    const cardTop = el.getBoundingClientRect().top
+    if (cardTop >= headerBottom - 4) return false
+    const target = focusIndex === 0
+      ? 0
+      : main.scrollTop + cardTop - headerBottom
+    const start = main.scrollTop
+    const distance = target - start
+    if (Math.abs(distance) < 1) return true
+    const duration = 150
+    const t0 = performance.now()
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / duration)
+      const eased = 1 - Math.pow(1 - p, 3)
+      main.scrollTop = start + distance * eased
+      if (p < 1) requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
+    return true
+  }, [focusIndex])
+
   useArticleKeyboard({
     filtered,
     setFocusIndex,
@@ -302,6 +343,7 @@ export default function Articles() {
     markAllRead: () => markAllRead.mutate(null),
     goToNextFeed,
     onJAtEnd,
+    onKBeforeMove,
     setShowHelp,
   })
 

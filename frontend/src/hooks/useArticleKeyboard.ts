@@ -10,6 +10,7 @@ interface Options {
   markAllRead: () => void
   goToNextFeed: () => void
   onJAtEnd: () => void
+  onKBeforeMove: () => boolean
   setShowHelp: Dispatch<SetStateAction<boolean>>
 }
 
@@ -30,7 +31,7 @@ interface Options {
  */
 export function useArticleKeyboard({
   filtered, setFocusIndex, markFocusedAsRead, scheduleRead, toggleRead,
-  markAllRead, goToNextFeed, onJAtEnd, setShowHelp,
+  markAllRead, goToNextFeed, onJAtEnd, onKBeforeMove, setShowHelp,
 }: Options) {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -74,6 +75,7 @@ export function useArticleKeyboard({
       return
     } else if (e.key === "k") {
       e.preventDefault()
+      if (onKBeforeMove()) return
       setFocusIndex((prev) => {
         markFocusedAsRead(prev)
         return Math.max(prev - 1, 0)
@@ -103,7 +105,7 @@ export function useArticleKeyboard({
     }
   }, [
     filtered, setFocusIndex, markFocusedAsRead, scheduleRead, toggleRead,
-    markAllRead, goToNextFeed, onJAtEnd, setShowHelp,
+    markAllRead, goToNextFeed, onJAtEnd, onKBeforeMove, setShowHelp,
   ])
 
   useEffect(() => {

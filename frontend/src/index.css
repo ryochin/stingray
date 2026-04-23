@@ -77,7 +77,7 @@ body {
    to advance past the last unread article. */
 @keyframes caught-up-pulse {
   0%   { transform: scale(1); }
-  40%  { transform: scale(1.20); }
+  40%  { transform: scale(1.15); }
   100% { transform: scale(1); }
 }
-.animate-caught-up-pulse { animation: caught-up-pulse 250ms ease-out; }
+.animate-caught-up-pulse { animation: caught-up-pulse 150ms ease-out; }
