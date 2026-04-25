@@ -235,6 +235,12 @@ export const api = {
     return fetchJson<{ marked: number }>(`/articles/read-all?${params}`, { method: "POST" })
   },
 
+  markAllUnread: (feedId?: number) => {
+    const params = new URLSearchParams()
+    if (feedId != null) params.set("feed_id", String(feedId))
+    return fetchJson<{ unmarked: number }>(`/articles/unread-all?${params}`, { method: "POST" })
+  },
+
   getFilters: () => fetchJson<FilterRule[]>("/filters"),
 
   createFilter: (pattern: string, target: string = "title") =>

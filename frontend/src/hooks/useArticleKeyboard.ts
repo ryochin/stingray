@@ -3,8 +3,10 @@ import type { Article } from "../api/client"
 
 interface Options {
   filtered: Article[]
+  focusIndex: number
   setFocusIndex: Dispatch<SetStateAction<number>>
   markFocusedAsRead: (index: number) => void
+  nextUnreadInView: (after: number) => number
   scheduleRead: (url: string) => void
   toggleRead: (url: string, isRead: boolean) => void
   markAllRead: () => void
@@ -17,7 +19,9 @@ interface Options {
 /**
  * Global keyboard shortcuts for the Articles view:
  *   j/k   — next/prev article (marks the previous one as read)
- *   Space — jump to next feed that still has unread articles
+ *   Space — when there are no more unread articles after focus in this view,
+ *           jump to the next feed that still has unread articles. Otherwise
+ *           do not intercept — let the browser scroll naturally.
  *   v/o/Enter — open focused article in a new tab
  *   m     — toggle read/unread on focused article
  *   Shift+A — mark all as read
@@ -30,8 +34,9 @@ interface Options {
  * triggers.
  */
 export function useArticleKeyboard({
-  filtered, setFocusIndex, markFocusedAsRead, scheduleRead, toggleRead,
-  markAllRead, goToNextFeed, onJAtEnd, onKBeforeMove, setShowHelp,
+  filtered, focusIndex, setFocusIndex, markFocusedAsRead, nextUnreadInView,
+  scheduleRead, toggleRead, markAllRead, goToNextFeed, onJAtEnd, onKBeforeMove,
+  setShowHelp,
 }: Options) {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -49,6 +54,10 @@ export function useArticleKeyboard({
     }
 
     if (e.key === " ") {
+      // Only steal Space when the user has finished the unread items in this
+      // view. While unread items still remain, leave the keystroke alone so
+      // the browser performs its default action (scroll the page down).
+      if (nextUnreadInView(focusIndex) >= 0) return
       e.preventDefault()
       // Call goToNextFeed OUTSIDE the setFocusIndex updater so its side
       // effect (setSelection) fires exactly once even under Strict Mode,
@@ -81,10 +90,11 @@ export function useArticleKeyboard({
     } else if (e.key === "k") {
       e.preventDefault()
       if (onKBeforeMove()) return
-      setFocusIndex((prev) => {
-        markFocusedAsRead(prev)
-        return Math.max(prev - 1, 0)
-      })
+      // k is "go back" — do NOT mark the article we're leaving as read.
+      // j is the forward/read motion; k should stay purely navigational so
+      // users can re-visit an article they just skimmed past without having
+      // their focus target silently marked behind them.
+      setFocusIndex((prev) => Math.max(prev - 1, 0))
     } else if (e.key === "v" || e.key === "o" || e.key === "Enter") {
       e.preventDefault()
       setFocusIndex((i) => {
@@ -109,8 +119,9 @@ export function useArticleKeyboard({
       markAllRead()
     }
   }, [
-    filtered, setFocusIndex, markFocusedAsRead, scheduleRead, toggleRead,
-    markAllRead, goToNextFeed, onJAtEnd, onKBeforeMove, setShowHelp,
+    filtered, focusIndex, setFocusIndex, markFocusedAsRead, nextUnreadInView,
+    scheduleRead, toggleRead, markAllRead, goToNextFeed, onJAtEnd, onKBeforeMove,
+    setShowHelp,
   ])
 
   useEffect(() => {

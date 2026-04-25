@@ -54,6 +54,58 @@ export function applyUnreadFilter(
   return articles.filter((a) => a.read_at == null || sessionReadUrls.has(a.url))
 }
 
+// Time range filter keyed by a stable string id so sessionStorage / <select>
+// values stay robust against malformed input. `"all"` disables filtering.
+export type TimeRangeId = "1d" | "3d" | "7d" | "14d" | "30d" | "all"
+
+export interface TimeRangeOption {
+  id: TimeRangeId
+  label: string
+  days: number | null
+}
+
+export const TIME_RANGE_OPTIONS: readonly TimeRangeOption[] = [
+  { id: "1d",  label: "24 hours", days: 1 },
+  { id: "3d",  label: "3 days",   days: 3 },
+  { id: "7d",  label: "1 week",   days: 7 },
+  { id: "14d", label: "2 weeks",  days: 14 },
+  { id: "30d", label: "30 days",  days: 30 },
+  { id: "all", label: "All",      days: null },
+]
+
+const TIME_RANGE_IDS: ReadonlySet<TimeRangeId> =
+  new Set(TIME_RANGE_OPTIONS.map((o) => o.id))
+
+// Coerce arbitrary input (sessionStorage, select onChange) into a known id.
+// Falls back to "all" — the widest/safest behavior — for anything unknown.
+export function parseTimeRangeId(input: unknown): TimeRangeId {
+  return typeof input === "string" && TIME_RANGE_IDS.has(input as TimeRangeId)
+    ? (input as TimeRangeId)
+    : "all"
+}
+
+export function timeRangeDays(id: TimeRangeId): number | null {
+  return TIME_RANGE_OPTIONS.find((o) => o.id === id)?.days ?? null
+}
+
+// Keeps articles published within the given range relative to `now`.
+// Articles without a parseable `published` are kept (can't be positively
+// excluded from the range if we don't know their date).
+export function applyTimeFilter(
+  articles: Article[],
+  id: TimeRangeId,
+  now: Date,
+): Article[] {
+  const days = timeRangeDays(id)
+  if (days == null) return articles
+  const threshold = now.getTime() - days * 24 * 60 * 60 * 1000
+  return articles.filter((a) => {
+    if (!a.published) return true
+    const t = Date.parse(a.published)
+    return Number.isFinite(t) ? t >= threshold : true
+  })
+}
+
 // Advance to the next feed in sidebar order that actually has unread items.
 // Returns null if there is no such feed (end of list or current id not in list).
 export function nextUnreadFeedId(

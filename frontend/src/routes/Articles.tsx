@@ -6,14 +6,19 @@ import type { Feed, Selection } from "../api/client"
 import Header from "../components/Header"
 import Sidebar from "../components/Sidebar"
 import ArticleCard from "../components/ArticleCard"
+import CaughtUpIndicator from "../components/CaughtUpIndicator"
 import MarkAllReadMenu from "../components/MarkAllReadMenu"
 import ShortcutsHelp from "../components/ShortcutsHelp"
 import { useArticleKeyboard } from "../hooks/useArticleKeyboard"
 import {
+  applyTimeFilter,
   applyUnreadFilter,
   computeFolderFeedOrder,
   nextUnreadFeedId,
+  parseTimeRangeId,
   selectArticles,
+  TIME_RANGE_OPTIONS,
+  type TimeRangeId,
 } from "../utils/articleView"
 
 export default function Articles() {
@@ -30,6 +35,23 @@ export default function Articles() {
     sessionStorage.setItem("feed-selection", JSON.stringify(sel))
   }, [])
   const [showUnreadOnly, setShowUnreadOnly] = useState(true)
+  const [timeRangeId, setTimeRangeId] = useState<TimeRangeId>(() => {
+    try {
+      return parseTimeRangeId(sessionStorage.getItem("time-range"))
+    } catch {
+      return "all"
+    }
+  })
+  // Anchor `now` to the moment the range was last picked (or component mount).
+  // `filtered` re-runs on every `localReadCount` / refetch change; if we re-
+  // evaluated `new Date()` there, border articles would slip in/out as the
+  // threshold drifted second-by-second.
+  const timeAnchorRef = useRef<Date>(new Date())
+  const updateTimeRangeId = useCallback((id: TimeRangeId) => {
+    timeAnchorRef.current = new Date()
+    setTimeRangeId(id)
+    sessionStorage.setItem("time-range", id)
+  }, [])
   const [focusIndex, setFocusIndex] = useState(-1)
   const [showHelp, setShowHelp] = useState(false)
   const sessionReadUrls = useRef<Set<string>>(new Set())
@@ -177,8 +199,14 @@ export default function Articles() {
   const filtered = useMemo(() => {
     void localReadCount // sessionReadUrls mutations are opaque to React; re-run when they tick.
     const selected = selectArticles(enabledArticles, selection, folderFeedOrder)
-    return applyUnreadFilter(selected, showUnreadOnly, sessionReadUrls.current)
-  }, [enabledArticles, selection, folderFeedOrder, showUnreadOnly, localReadCount])
+    // Time range only applies in "All" mode. In unread-only mode, rarity of
+    // unread items matters more than freshness, so time filtering would hide
+    // items the sidebar count says exist.
+    const inRange = showUnreadOnly
+      ? selected
+      : applyTimeFilter(selected, timeRangeId, timeAnchorRef.current)
+    return applyUnreadFilter(inRange, showUnreadOnly, sessionReadUrls.current)
+  }, [enabledArticles, selection, folderFeedOrder, timeRangeId, showUnreadOnly, localReadCount])
 
   // Validate restored selection against current data
   useEffect(() => {
@@ -202,7 +230,7 @@ export default function Articles() {
   useEffect(() => {
     setFocusIndex(-1)
     mainRef.current?.scrollTo({ top: 0 })
-  }, [selection, showUnreadOnly])
+  }, [selection, showUnreadOnly, timeRangeId])
 
   // Auto-focus the first article whenever focus is cleared and there is
   // something to focus. This makes opening the articles view land on the
@@ -290,6 +318,7 @@ export default function Articles() {
   } | null>(null)
   const prevSelectionRef = useRef(selection)
   const prevShowUnreadOnlyRef = useRef(showUnreadOnly)
+  const prevTimeRangeIdRef = useRef(timeRangeId)
   // Set right before a programmatic focusIndex change whose scroll the
   // subsequent focus-scroll effect must NOT override (the compensation
   // below already places the card visually).
@@ -299,12 +328,14 @@ export default function Articles() {
     const prev = prevFocusSnapshot.current
     const selectionChanged = prevSelectionRef.current !== selection
     const filterToggled = prevShowUnreadOnlyRef.current !== showUnreadOnly
+    const timeRangeChanged = prevTimeRangeIdRef.current !== timeRangeId
     prevSelectionRef.current = selection
     prevShowUnreadOnlyRef.current = showUnreadOnly
+    prevTimeRangeIdRef.current = timeRangeId
 
     // User-initiated list reset is handled elsewhere; drop the snapshot so
     // the next refetch-driven change re-captures from the post-reset state.
-    if (selectionChanged || filterToggled) {
+    if (selectionChanged || filterToggled || timeRangeChanged) {
       prevFocusSnapshot.current = null
       return
     }
@@ -354,7 +385,7 @@ export default function Articles() {
     prevFocusSnapshot.current = currentUrl != null && currentOffset != null
       ? { filtered, index: focusIndex, url: currentUrl, offset: currentOffset }
       : null
-  }, [filtered, focusIndex, virtualizer, selection, showUnreadOnly])
+  }, [filtered, focusIndex, virtualizer, selection, showUnreadOnly, timeRangeId])
 
   // Scroll focused article into view (custom rAF smooth scroll for tunable duration)
   useEffect(() => {
@@ -419,11 +450,28 @@ export default function Articles() {
     }
   }, [filtered, scheduleRead])
 
+  // Find the next still-unread article after `after` in the current view.
+  // Session-read items count as read so the user is not redirected to an
+  // article they just dismissed via j/m.
+  const nextUnreadInView = useCallback((after: number) => {
+    for (let i = after + 1; i < filtered.length; i++) {
+      const a = filtered[i]
+      if (a.read_at == null && !sessionReadUrls.current.has(a.url)) return i
+    }
+    return -1
+  }, [filtered])
+
   // Mark all as read mutation
   const markAllReadFeedId = selection.type === "feed" ? selection.id : undefined
   const markAllRead = useMutation({
     mutationFn: (olderThanHours: number | null) =>
       api.markAllRead(markAllReadFeedId, olderThanHours ?? undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["articles"] })
+    },
+  })
+  const markAllUnread = useMutation({
+    mutationFn: () => api.markAllUnread(markAllReadFeedId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
     },
@@ -519,8 +567,10 @@ export default function Articles() {
 
   useArticleKeyboard({
     filtered,
+    focusIndex,
     setFocusIndex,
     markFocusedAsRead,
+    nextUnreadInView,
     scheduleRead,
     toggleRead,
     markAllRead: () => markAllRead.mutate(null),
@@ -558,15 +608,21 @@ export default function Articles() {
     return null
   }, [selection, feedMap, folders])
 
-  const selectedUnread = useMemo(() => {
-    if (selection.type === "feed") return unreadCounts.get(selection.id) ?? 0
-    if (selection.type === "folder" && folderFeedOrder) {
-      let sum = 0
-      for (const feedId of folderFeedOrder.keys()) sum += unreadCounts.get(feedId) ?? 0
-      return sum
+  // Unread count shown on the header `Unread (N)` button. Scoped to the
+  // current selection AND time range so the number matches what the user
+  // is actually looking at. Sidebar badges stay on the global unread
+  // counts (see `unreadCounts`) — the per-feed badge there is a global
+  // indicator and shouldn't shrink when the user narrows the time window.
+  const selectedUnreadInView = useMemo(() => {
+    void localReadCount
+    const selected = selectArticles(enabledArticles, selection, folderFeedOrder)
+    const inRange = applyTimeFilter(selected, timeRangeId, timeAnchorRef.current)
+    let n = 0
+    for (const a of inRange) {
+      if (a.read_at == null && !sessionReadUrls.current.has(a.url)) n++
     }
-    return Array.from(unreadCounts.values()).reduce((a, b) => a + b, 0)
-  }, [selection, unreadCounts, folderFeedOrder])
+    return n
+  }, [enabledArticles, selection, folderFeedOrder, timeRangeId, localReadCount])
 
   return (
     <div className="flex flex-col h-screen">
@@ -604,32 +660,46 @@ export default function Articles() {
               </h2>
             )}
             <div className="flex items-center justify-between pb-2">
-              <div className="flex gap-1 text-sm">
-                <button
-                  onClick={() => setShowUnreadOnly(true)}
-                  className={`px-3 py-1 rounded transition-colors ${
-                    showUnreadOnly
-                      ? "bg-accent-bg text-accent-text"
-                      : "bg-bg-card text-text-muted hover:text-text"
-                  }`}
+              <div className="flex items-center gap-2 text-sm">
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setShowUnreadOnly(true)}
+                    className={`px-3 py-1 rounded transition-colors ${
+                      showUnreadOnly
+                        ? "bg-accent-bg text-accent-text"
+                        : "bg-bg-card text-text-muted hover:text-text"
+                    }`}
+                  >
+                    Unread{selectedUnreadInView > 0 ? ` (${selectedUnreadInView})` : ""}
+                  </button>
+                  <button
+                    onClick={() => setShowUnreadOnly(false)}
+                    className={`px-3 py-1 rounded transition-colors ${
+                      !showUnreadOnly
+                        ? "bg-warn-bg text-warn-text"
+                        : "bg-bg-card text-text-muted hover:text-text"
+                    }`}
+                  >
+                    All
+                  </button>
+                </div>
+                <select
+                  value={timeRangeId}
+                  onChange={(e) => updateTimeRangeId(parseTimeRangeId(e.target.value))}
+                  disabled={showUnreadOnly}
+                  className="px-2 py-1 rounded transition-colors outline-none border border-transparent focus:border-border bg-bg-card text-text-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="Time range filter"
                 >
-                  Unread{selectedUnread > 0 ? ` (${selectedUnread})` : ""}
-                </button>
-                <button
-                  onClick={() => setShowUnreadOnly(false)}
-                  className={`px-3 py-1 rounded transition-colors ${
-                    !showUnreadOnly
-                      ? "bg-warn-bg text-warn-text"
-                      : "bg-bg-card text-text-muted hover:text-text"
-                  }`}
-                >
-                  All
-                </button>
+                  {TIME_RANGE_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
               {filtered.length > 0 && (
                 <MarkAllReadMenu
-                  disabled={markAllRead.isPending}
+                  disabled={markAllRead.isPending || markAllUnread.isPending}
                   onChoose={(hours) => markAllRead.mutate(hours)}
+                  onChooseUnread={() => markAllUnread.mutate()}
                 />
               )}
             </div>
@@ -640,9 +710,11 @@ export default function Articles() {
           ) : isLoading ? (
             <div className="text-text-muted">Loading...</div>
           ) : filtered.length === 0 ? (
-            <div className="text-text-muted">
-              {showUnreadOnly ? "No unread articles" : "No articles"}
-            </div>
+            showUnreadOnly ? (
+              <CaughtUpIndicator label="No unread articles" />
+            ) : (
+              <div className="text-text-muted">No articles</div>
+            )
           ) : (
             <>
               <div
@@ -671,32 +743,16 @@ export default function Articles() {
                           transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
                         }}
                       >
-                        <div
+                        <CaughtUpIndicator
                           key={caughtUpPulseKey}
-                          className={`flex flex-col items-center gap-2 py-10 origin-center ${
+                          label="All caught up"
+                          className={`origin-center ${
                             caughtUpPulseKey > 0
                               ? "text-text animate-caught-up-pulse"
                               : "text-text-dim/60"
                           }`}
-                        >
-                          <svg
-                            className="w-7 h-7 text-accent-text/70"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.75"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden
-                          >
-                            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                            <path d="M5 3v4" />
-                            <path d="M19 17v4" />
-                            <path d="M3 5h4" />
-                            <path d="M17 19h4" />
-                          </svg>
-                          <span className="text-sm">All caught up</span>
-                        </div>
+                        />
+
                       </div>
                     )
                   }

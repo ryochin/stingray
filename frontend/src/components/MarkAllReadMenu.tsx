@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react"
 interface Props {
   disabled?: boolean
   onChoose: (olderThanHours: number | null) => void
+  onChooseUnread: () => void
 }
 
 const OPTIONS: readonly { label: string, hours: number | null }[] = [
@@ -13,7 +14,7 @@ const OPTIONS: readonly { label: string, hours: number | null }[] = [
 ]
 
 /** "Mark all as read" split into ALL / age-based cutoffs via a dropdown. */
-export default function MarkAllReadMenu({ disabled, onChoose }: Props) {
+export default function MarkAllReadMenu({ disabled, onChoose, onChooseUnread }: Props) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -56,6 +57,16 @@ export default function MarkAllReadMenu({ disabled, onChoose }: Props) {
               {opt.label}
             </button>
           ))}
+          <div className="my-1 border-t border-border" />
+          <button
+            onClick={() => {
+              setOpen(false)
+              onChooseUnread()
+            }}
+            className="block w-full text-left px-3 py-1.5 text-sm text-text-muted hover:bg-bg-hover hover:text-text"
+          >
+            Mark all as unread
+          </button>
         </div>
       )}
     </div>
