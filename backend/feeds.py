@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 import feedparser
 import httpx
 from bs4 import BeautifulSoup
+from pathlib import Path
 
 import lang
 import log
@@ -31,6 +32,23 @@ _FEED_LINK_TYPES = (
   "application/feed+json",
   "application/json",
 )
+
+
+# Base directory for `file://` feed URLs. Relative paths in a `file://` URL
+# are resolved against this directory. Debug-only; mounted read-only via
+# compose.yml.
+DEBUG_FEEDS_DIR = Path("/app/debug-feeds")
+
+
+def read_file_url(url: str) -> str:
+  """Read body of a `file://` feed URL (debug-only).
+
+  Absolute paths (`file:///abs/path`) are used as-is. Relative paths
+  (`file://name.xml`, `file://./name.xml`) resolve against DEBUG_FEEDS_DIR.
+  """
+  raw = url.removeprefix("file://")
+  path = Path(raw) if raw.startswith("/") else DEBUG_FEEDS_DIR / raw
+  return path.read_text(encoding="utf-8")
 
 
 def extract_feed_candidates(body: str, base_url: str) -> list[dict[str, str]]:
@@ -136,7 +154,13 @@ async def _fetch_with_cache(
     - "304-empty" : 304 but no cached copy available → body is empty
     - "net-cache" : network error, cached copy served
     - "5xx-cache" : HTTP 4xx/5xx, cached copy served
+    - "file"      : body read from a local file (debug-only file:// URL)
   """
+  if url.startswith("file://"):
+    body = read_file_url(url)
+    log.dim(f"    FILE {url} → {len(body.encode('utf-8')) / 1024:.1f}KB")
+    return body, False, "file"
+
   cached = load_feed_cache(url)
   if cached and "body" not in cached:
     cached = None

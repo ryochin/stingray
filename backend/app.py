@@ -25,7 +25,7 @@ import db
 import lang
 import log
 import repo
-from feeds import _fetch_rss, extract_feed_candidates, probe_feed_body  # type: ignore[import-untyped]
+from feeds import _fetch_rss, extract_feed_candidates, probe_feed_body, read_file_url  # type: ignore[import-untyped]
 from fetcher import refresh_all, summarize_pending
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
 from scraper import fetch_web_page  # type: ignore[import-untyped]
@@ -175,6 +175,14 @@ def mark_all_articles_read(
   return {"marked": count}
 
 
+@app.post("/api/articles/unread-all")
+def mark_all_articles_unread(
+  feed_id: int | None = Query(None),
+) -> dict[str, int]:
+  count = repo.mark_all_unread(feed_id)
+  return {"unmarked": count}
+
+
 # -- Folders --
 
 
@@ -295,27 +303,31 @@ async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
   If the URL is not a valid RSS/Atom feed, detect it as a web page.
   """
   try:
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-      resp = await client.get(url)
-      resp.raise_for_status()
-    body = resp.text
-    content_type = resp.headers.get("content-type", "")
+    if url.startswith("file://"):
+      # Debug-only: local file is always treated as RSS/Atom, skip HTML detection.
+      body = read_file_url(url)
+    else:
+      async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+      body = resp.text
+      content_type = resp.headers.get("content-type", "")
 
-    # Determine format before parsing
-    if _is_html(content_type, body):
-      title_match = re.search(r"<title[^>]*>(.*?)</title>", body, re.IGNORECASE | re.DOTALL)
-      title = title_match.group(1).strip() if title_match else None
-      # Resolve candidates against the response URL so redirects don't confuse relative hrefs.
-      final_url = str(resp.url) or url
-      candidates = extract_feed_candidates(body, final_url)
-      return ProbeResult(
-        title=title,
-        translate=False,
-        site_url=url,
-        is_web_page=True,
-        html=body,
-        feed_candidates=candidates,
-      )
+      # Determine format before parsing
+      if _is_html(content_type, body):
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", body, re.IGNORECASE | re.DOTALL)
+        title = title_match.group(1).strip() if title_match else None
+        # Resolve candidates against the response URL so redirects don't confuse relative hrefs.
+        final_url = str(resp.url) or url
+        candidates = extract_feed_candidates(body, final_url)
+        return ProbeResult(
+          title=title,
+          translate=False,
+          site_url=url,
+          is_web_page=True,
+          html=body,
+          feed_candidates=candidates,
+        )
 
     # Try RSS/Atom parsing
     title, site_url, feed_lang, has_entries = probe_feed_body(body)

@@ -600,6 +600,20 @@ def mark_unread(urls: list[str]) -> None:
     conn.execute("UPDATE articles SET read_at = NULL WHERE url = ANY(%s)", (urls,))
 
 
+def mark_all_unread(feed_id: int | None = None) -> int:
+  clauses: list[sql.Composable] = [sql.SQL("read_at IS NOT NULL")]
+  params: list[Any] = []
+  if feed_id is not None:
+    clauses.append(sql.SQL("feed_id = %s"))
+    params.append(feed_id)
+  query = sql.SQL("UPDATE articles SET read_at = NULL WHERE {}").format(
+    sql.SQL(" AND ").join(clauses),
+  )
+  with db.connection() as conn:
+    cur = conn.execute(query, params)
+    return cur.rowcount
+
+
 def mark_all_read(feed_id: int | None = None, older_than_hours: int | None = None) -> int:
   # Age is measured against COALESCE(published, fetched_at) so feeds without a
   # `published` value still age out based on when we first saw them.

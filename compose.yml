@@ -36,6 +36,7 @@ services:
     volumes:
       - ./config.yml:/app/config.yml:ro
       - ./cache:/app/cache
+      - ./debug-feeds:/app/debug-feeds:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,6 +63,7 @@ services:
     volumes:
       - ./config.yml:/app/config.yml:ro
       - ./cache:/app/cache
+      - ./debug-feeds:/app/debug-feeds:ro
     depends_on:
       postgres:
         condition: service_healthy
