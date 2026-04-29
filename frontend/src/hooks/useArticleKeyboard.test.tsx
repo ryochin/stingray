@@ -40,12 +40,13 @@ interface HarnessProps {
   goToNextFeed: () => boolean
   onFocus?: (i: number) => void
   onMarkRead?: (i: number) => void
+  onJAtEnd?: () => void
 }
 
 
 function Harness({
   filtered, initialFocus, sessionRead = new Set(), goToNextFeed,
-  onFocus, onMarkRead,
+  onFocus, onMarkRead, onJAtEnd,
 }: HarnessProps) {
   const [focusIndex, setFocusIndex] = useState(initialFocus)
   onFocus?.(focusIndex)
@@ -72,7 +73,7 @@ function Harness({
     toggleRead: () => {},
     markAllRead: () => {},
     goToNextFeed,
-    onJAtEnd: () => {},
+    onJAtEnd: onJAtEnd ?? (() => {}),
     onKBeforeMove: () => false,
     setShowHelp: () => {},
   })
@@ -223,5 +224,63 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(event.defaultPrevented).toBe(true)
     expect(nextFeed).toHaveBeenCalledTimes(1)
     expect(focusSpy).toHaveBeenLastCalledWith(-1)
+  })
+})
+
+
+describe("useArticleKeyboard — j key at end of list", () => {
+  it("on the last item, fires onJAtEnd, keeps focus, does NOT jump feeds", () => {
+    const articles = [
+      makeArticle({ url: "a", read_at: null }),
+      makeArticle({ url: "b", read_at: null }),
+      makeArticle({ url: "c", read_at: null }),
+    ]
+    const focusSpy = vi.fn()
+    const markSpy = vi.fn()
+    const nextFeed = vi.fn(() => true)
+    const jAtEnd = vi.fn()
+    render(
+      <Harness
+        filtered={articles}
+        initialFocus={2}
+        goToNextFeed={nextFeed}
+        onFocus={focusSpy}
+        onMarkRead={markSpy}
+        onJAtEnd={jAtEnd}
+      />,
+    )
+
+    press("j")
+
+    expect(jAtEnd).toHaveBeenCalledTimes(1)
+    expect(nextFeed).not.toHaveBeenCalled()
+    expect(markSpy).toHaveBeenCalledWith(2)
+    // Focus stays on the last item.
+    expect(focusSpy).toHaveBeenLastCalledWith(2)
+  })
+
+  it("not on the last item, advances focus and does NOT fire onJAtEnd", () => {
+    const articles = [
+      makeArticle({ url: "a", read_at: null }),
+      makeArticle({ url: "b", read_at: null }),
+    ]
+    const focusSpy = vi.fn()
+    const jAtEnd = vi.fn()
+    const nextFeed = vi.fn(() => true)
+    render(
+      <Harness
+        filtered={articles}
+        initialFocus={0}
+        goToNextFeed={nextFeed}
+        onFocus={focusSpy}
+        onJAtEnd={jAtEnd}
+      />,
+    )
+
+    press("j")
+
+    expect(jAtEnd).not.toHaveBeenCalled()
+    expect(nextFeed).not.toHaveBeenCalled()
+    expect(focusSpy).toHaveBeenLastCalledWith(1)
   })
 })

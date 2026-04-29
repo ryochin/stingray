@@ -29,32 +29,57 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     } catch {}
     return new Set()
   })
+  // Folders auto-expanded by a selection change. Transient (not persisted).
+  // When selection leaves an auto-expanded folder it gets re-collapsed.
+  // Promoted to "sticky open" when the user clicks a feed in it or toggles the caret.
+  const [autoExpanded, setAutoExpanded] = useState<Set<number>>(new Set())
 
   const enabledFeeds = feeds?.filter((f) => f.enabled) ?? []
   const totalUnreadCount = totalUnread(unreadCounts)
   const feedsByFolder = groupFeedsByFolder(feeds)
 
-  // Auto-expand folder containing the selected feed.
-  // The "is it currently collapsed?" check lives inside the setter so we don't
-  // need `collapsed` in the dependency list (which would re-trigger every toggle).
   useEffect(() => {
-    if (selection.type !== "feed") return
-    const selectedFeed = enabledFeeds.find((feed) => feed.id === selection.id)
-    const folderId = selectedFeed?.folder_id
-    if (folderId == null) return
-    setCollapsed((prev) => {
-      if (!prev.has(folderId)) return prev
-      const next = new Set(prev)
-      next.delete(folderId)
-      sessionStorage.setItem("collapsed-folders", JSON.stringify([...next]))
-      return next
-    })
-  }, [selection, enabledFeeds])
+    const selectedFolderId =
+      selection.type === "feed"
+        ? enabledFeeds.find((feed) => feed.id === selection.id)?.folder_id ?? null
+        : null
+
+    const toRecollapse: number[] = []
+    for (const id of autoExpanded) {
+      if (id !== selectedFolderId) toRecollapse.push(id)
+    }
+    const shouldAutoExpand =
+      selectedFolderId != null && collapsed.has(selectedFolderId) && !autoExpanded.has(selectedFolderId)
+
+    if (toRecollapse.length === 0 && !shouldAutoExpand) return
+
+    const nextAuto = new Set<number>()
+    if (selectedFolderId != null && autoExpanded.has(selectedFolderId)) nextAuto.add(selectedFolderId)
+    if (shouldAutoExpand) nextAuto.add(selectedFolderId)
+
+    const nextCollapsed = new Set(collapsed)
+    for (const id of toRecollapse) nextCollapsed.add(id)
+    if (shouldAutoExpand) nextCollapsed.delete(selectedFolderId)
+
+    setAutoExpanded(nextAuto)
+    setCollapsed(nextCollapsed)
+    sessionStorage.setItem("collapsed-folders", JSON.stringify([...nextCollapsed]))
+  }, [selection, enabledFeeds, collapsed, autoExpanded])
 
   const folderUnread = (folderId: number) =>
     folderUnreadCount(feedsByFolder, unreadCounts, folderId)
 
+  const promoteToSticky = (folderId: number) => {
+    setAutoExpanded((prev) => {
+      if (!prev.has(folderId)) return prev
+      const next = new Set(prev)
+      next.delete(folderId)
+      return next
+    })
+  }
+
   const toggleCollapse = (folderId: number) => {
+    promoteToSticky(folderId)
     setCollapsed((prev) => {
       const next = new Set(prev)
       if (next.has(folderId)) next.delete(folderId)
@@ -87,7 +112,10 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     return (
       <button
         key={feed.id}
-        onClick={() => onSelect({ type: "feed", id: feed.id })}
+        onClick={() => {
+          if (feed.folder_id != null) promoteToSticky(feed.folder_id)
+          onSelect({ type: "feed", id: feed.id })
+        }}
         className={btnClass(active)}
       >
         <span className="flex items-center gap-1.5 truncate mr-2">
