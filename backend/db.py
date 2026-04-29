@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS feeds (
   consecutive_failures  INTEGER NOT NULL DEFAULT 0,
   last_error            TEXT,
   extraction_rules      TEXT,
-  fetch_interval_min    INTEGER NOT NULL DEFAULT 15
-                        CHECK (fetch_interval_min IN (15, 30, 60, 120, 240, 360)),
+  fetch_interval_min    INTEGER NOT NULL DEFAULT 10
+                        CHECK (fetch_interval_min IN (10, 15, 30, 60, 120, 240, 360)),
   next_fetch_at         TIMESTAMPTZ,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -83,12 +83,12 @@ CREATE INDEX IF NOT EXISTS idx_feeds_folder_id    ON feeds(folder_id);
 # constraints. Each statement is safe to run on an already-migrated schema.
 _MIGRATIONS = """\
 ALTER TABLE feeds
-  ADD COLUMN IF NOT EXISTS fetch_interval_min INTEGER NOT NULL DEFAULT 15;
+  ADD COLUMN IF NOT EXISTS fetch_interval_min INTEGER NOT NULL DEFAULT 10;
 ALTER TABLE feeds
   ADD COLUMN IF NOT EXISTS next_fetch_at TIMESTAMPTZ;
 ALTER TABLE feeds DROP CONSTRAINT IF EXISTS feeds_fetch_interval_bucket;
 ALTER TABLE feeds ADD CONSTRAINT feeds_fetch_interval_bucket
-  CHECK (fetch_interval_min IN (15, 30, 60, 120, 240, 360));
+  CHECK (fetch_interval_min IN (10, 15, 30, 60, 120, 240, 360));
 CREATE INDEX IF NOT EXISTS idx_feeds_next_fetch
   ON feeds(next_fetch_at) WHERE enabled;
 """

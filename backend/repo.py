@@ -19,11 +19,11 @@ import db
 
 # -- Adaptive fetch scheduling --
 
-MIN_INTERVAL_MIN = 15
+MIN_INTERVAL_MIN = 10
 MAX_INTERVAL_MIN = 360  # 6 hours
-BUCKETS = (15, 30, 60, 120, 240, 360)
+BUCKETS = (10, 30, 60, 120, 240, 360)
 JITTER_RATIO = 0.10
-CRON_TICK_MIN = 15
+CRON_TICK_MIN = 10
 REFRESH_LOCK_KEY = 0xFEEDCAFE  # bigint key for pg_try_advisory_lock
 
 Outcome = Literal["fresh", "miss", "degraded", "failure"]
@@ -380,7 +380,7 @@ def rename_feed(feed_id: int, name: str) -> None:
     conn.execute("UPDATE feeds SET name = %s WHERE id = %s", (name, feed_id))
 
 
-def update_feed_site_url(feed_id: int, site_url: str) -> None:
+def update_feed_site_url(feed_id: int, site_url: str | None) -> None:
   with db.connection() as conn:
     conn.execute("UPDATE feeds SET site_url = %s WHERE id = %s", (site_url, feed_id))
 

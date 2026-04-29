@@ -22,7 +22,7 @@ def _make_feed(
   *,
   name: str = "F",
   enabled: bool = True,
-  fetch_interval_min: int = 15,
+  fetch_interval_min: int = 10,
   next_fetch_at: datetime | None = None,
   consecutive_failures: int = 0,
   last_error: str | None = None,
@@ -64,7 +64,7 @@ class TestStepBucket:
     assert repo.step_bucket(60, direction=-1) == 30
 
   def test_shrink_clamps_at_min(self):
-    assert repo.step_bucket(15, direction=-1) == 15
+    assert repo.step_bucket(10, direction=-1) == 10
 
   def test_grow_from_middle(self):
     assert repo.step_bucket(60, direction=+1) == 120
@@ -85,21 +85,21 @@ class TestScheduleNextAt:
   def test_lands_on_tick_boundary(self):
     now = datetime(2026, 4, 22, 10, 3, 0, tzinfo=timezone.utc)
     for _ in range(20):
-      next_at = repo.schedule_next_at(now, 15)
-      # Seconds since epoch must be a multiple of 15 minutes.
-      assert int(next_at.timestamp()) % (15 * 60) == 0
+      next_at = repo.schedule_next_at(now, 10)
+      # Seconds since epoch must be a multiple of 10 minutes.
+      assert int(next_at.timestamp()) % (10 * 60) == 0
 
   def test_always_in_the_future(self):
     now = datetime(2026, 4, 22, 10, 0, 0, tzinfo=timezone.utc)
     for _ in range(20):
-      assert repo.schedule_next_at(now, 15) > now
+      assert repo.schedule_next_at(now, 10) > now
 
   def test_roughly_matches_interval(self):
     now = datetime(2026, 4, 22, 10, 0, 0, tzinfo=timezone.utc)
     for _ in range(20):
       delta = repo.schedule_next_at(now, 60) - now
-      # 60 min ± 10% jitter, then ceil to next 15-min tick → range [54, 75].
-      assert timedelta(minutes=53) <= delta <= timedelta(minutes=75)
+      # 60 min ± 10% jitter, then ceil to next 10-min tick → range [60, 70].
+      assert timedelta(minutes=59) <= delta <= timedelta(minutes=71)
 
 
 # -- record_feed_attempt --
@@ -118,9 +118,9 @@ class TestRecordFeedAttempt:
     assert row["next_fetch_at"] is not None
 
   def test_fresh_clamps_at_minimum(self, clean_db):
-    fid = _make_feed(fetch_interval_min=15)
+    fid = _make_feed(fetch_interval_min=10)
     repo.record_feed_attempt(fid, "fresh")
-    assert _read_feed(fid)["fetch_interval_min"] == 15
+    assert _read_feed(fid)["fetch_interval_min"] == 10
 
   def test_miss_grows_bucket(self, clean_db):
     fid = _make_feed(fetch_interval_min=60)
