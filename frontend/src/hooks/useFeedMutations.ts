@@ -90,6 +90,12 @@ export function useFeedMutations({ onError }: Options) {
     onSuccess: invalidate,
     onError: reportError,
   })
+  const updateSiteUrl = useMutation({
+    mutationFn: ({ feedId, siteUrl }: { feedId: number, siteUrl: string | null }) =>
+      api.updateFeedSiteUrl(feedId, siteUrl),
+    onSuccess: invalidate,
+    onError: reportError,
+  })
   const moveFeed = useMutation({
     mutationFn: ({ feedId, folderId }: { feedId: number, folderId: number | null }) =>
       api.moveFeedToFolder(feedId, folderId),
@@ -147,6 +153,7 @@ export function useFeedMutations({ onError }: Options) {
     fetchFeed,
     renameFeed,
     updateTranslate,
+    updateSiteUrl,
     moveFeed,
     reorderFeeds,
   }

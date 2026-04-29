@@ -521,6 +521,20 @@ def rename_feed(feed_id: int, body: FeedRename) -> FeedRow:
   return updated
 
 
+class FeedSiteUrlUpdate(BaseModel):
+  site_url: str | None = None
+
+
+@app.patch("/api/feeds/{feed_id}/site_url")
+def update_feed_site_url(feed_id: int, body: FeedSiteUrlUpdate) -> FeedRow:
+  site_url = body.site_url.strip() if body.site_url else None
+  repo.update_feed_site_url(feed_id, site_url or None)
+  updated = repo.get_feed_by_id(feed_id)
+  if updated is None:
+    raise HTTPException(404, "Feed not found")
+  return updated
+
+
 @app.patch("/api/feeds/{feed_id}/folder")
 def move_feed_to_folder(feed_id: int, body: FeedMove) -> FeedRow:
   repo.move_feed_to_folder(feed_id, body.folder_id)

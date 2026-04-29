@@ -393,15 +393,61 @@ function ExtractionRulesEditor({ feed, onSaved }: { feed: Feed, onSaved: () => v
   )
 }
 
-function FeedDetails({ feed, stats, onDelete, onToggleTranslate, onRulesUpdated }: {
+function SiteUrlEditor({ feed, onSave }: {
+  feed: Feed
+  onSave: (siteUrl: string | null) => void
+}) {
+  const [value, setValue] = useState(feed.site_url ?? "")
+  // Absorb server-side updates (e.g. after refetch) without clobbering an
+  // in-progress edit: only reset when the persisted value actually changes.
+  useEffect(() => {
+    setValue(feed.site_url ?? "")
+  }, [feed.site_url])
+
+  const trimmed = value.trim()
+  const next = trimmed === "" ? null : trimmed
+  const dirty = next !== (feed.site_url ?? null)
+
+  const commit = () => {
+    if (dirty) onSave(next)
+  }
+
+  return (
+    <div className="flex items-center gap-2 mt-2 text-xs">
+      <span className="text-text-muted shrink-0">Site URL:</span>
+      <input
+        type="url"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit()
+          if (e.key === "Escape") setValue(feed.site_url ?? "")
+        }}
+        placeholder="https://example.com/"
+        className="flex-1 bg-bg-card text-text border border-border rounded px-2 py-0.5 focus:outline-none focus:border-accent"
+      />
+      <button
+        onClick={commit}
+        disabled={!dirty}
+        className="px-2 py-0.5 rounded bg-bg-card text-text-muted hover:text-text border border-border disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Save
+      </button>
+    </div>
+  )
+}
+
+function FeedDetails({ feed, stats, onDelete, onToggleTranslate, onUpdateSiteUrl, onRulesUpdated }: {
   feed: Feed
   stats?: FeedStats
   onDelete: () => void
   onToggleTranslate: () => void
+  onUpdateSiteUrl: (siteUrl: string | null) => void
   onRulesUpdated?: () => void
 }) {
   return (
     <div className="px-3 pb-3 border-t border-border ml-7">
+      <SiteUrlEditor feed={feed} onSave={onUpdateSiteUrl} />
       <div className="flex items-center gap-x-4 gap-y-1 text-xs text-text-muted mt-2">
         {stats && (
           <>
@@ -483,6 +529,7 @@ type FeedItemProps = {
   onToggleSummarize: (feedId: number) => void
   onMoveToFolder: (feedId: number, folderId: number | null) => void
   onToggleTranslate: (feedId: number, translate: boolean) => void
+  onUpdateSiteUrl: (feedId: number, siteUrl: string | null) => void
   onRulesUpdated: () => void
   onDragStart: (feed: Feed) => void
   onDragOver: (feed: Feed) => void
@@ -495,7 +542,7 @@ function FeedItem({
   feed, stats, folders, expanded, editing, editName, fetching, dragOver,
   onToggleExpand, onStartEdit, onCancelEdit, onChangeEditName, onCommitEdit,
   onDelete, onFetch, onToggleEnabled, onToggleSummarize, onMoveToFolder,
-  onToggleTranslate, onRulesUpdated,
+  onToggleTranslate, onUpdateSiteUrl, onRulesUpdated,
   onDragStart, onDragOver, onDragLeave, onDragEnd, onDrop,
 }: FeedItemProps) {
   const isUnhealthy = feed.consecutive_failures >= 3
@@ -634,6 +681,7 @@ function FeedItem({
         <FeedDetails feed={feed} stats={stats}
           onDelete={() => onDelete(feed)}
           onToggleTranslate={() => onToggleTranslate(feed.id, !feed.translate)}
+          onUpdateSiteUrl={(siteUrl) => onUpdateSiteUrl(feed.id, siteUrl)}
           onRulesUpdated={isWebFeed ? onRulesUpdated : undefined}
         />
       )}
@@ -649,6 +697,7 @@ export default function Feeds() {
   const [editFeedName, setEditFeedName] = useState("")
   const [expandedFeeds, setExpandedFeeds] = useState<Set<number>>(new Set())
   const [filter, setFilter] = useState("")
+  const [errorFilter, setErrorFilter] = useState<"all" | "with" | "without">("all")
 
   // While a refresh is running, poll faster so per-feed stats (Unread,
   // Articles count, Latest published) reflect as each feed finishes — both
@@ -687,7 +736,7 @@ export default function Feeds() {
     invalidate, fetchingFeeds,
     feedCandidates, candidatesFor, dismissCandidates,
     addFeed, toggleFeed, toggleSummarize, deleteFeed, fetchFeed,
-    renameFeed, updateTranslate, moveFeed, reorderFeeds,
+    renameFeed, updateTranslate, updateSiteUrl, moveFeed, reorderFeeds,
   } = mutations
 
   const { dragOverId, handlers: dndHandlers } = useFeedDnD({
@@ -695,16 +744,21 @@ export default function Feeds() {
     onReorder: (ids) => reorderFeeds.mutate(ids),
   })
 
-  // Filter by name or URL (case-insensitive substring). Empty query is a no-op.
+  // Filter by name/URL substring (case-insensitive) AND fetch-error status.
   // The drag reorder hook still sees the unfiltered list, so dragging preserves
   // global ordering even when the user has narrowed the view.
+  // "with errors" matches Sidebar's !!! warning threshold (consecutive_failures >= 3).
   const visibleFeeds = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    if (!q) return feeds ?? []
-    return (feeds ?? []).filter((f) =>
-      f.name.toLowerCase().includes(q) || (f.url?.toLowerCase().includes(q) ?? false)
-    )
-  }, [feeds, filter])
+    return (feeds ?? []).filter((f) => {
+      if (q && !f.name.toLowerCase().includes(q) && !(f.url?.toLowerCase().includes(q) ?? false)) {
+        return false
+      }
+      if (errorFilter === "with" && f.consecutive_failures < 3) return false
+      if (errorFilter === "without" && f.consecutive_failures >= 3) return false
+      return true
+    })
+  }, [feeds, filter, errorFilter])
 
   // Group feeds by folder
   const feedsByFolder = useMemo(() => {
@@ -745,6 +799,8 @@ export default function Feeds() {
     moveFeed.mutate({ feedId, folderId }), [moveFeed])
   const handleToggleTranslate = useCallback((feedId: number, translate: boolean) =>
     updateTranslate.mutate({ feedId, translate }), [updateTranslate])
+  const handleUpdateSiteUrl = useCallback((feedId: number, siteUrl: string | null) =>
+    updateSiteUrl.mutate({ feedId, siteUrl }), [updateSiteUrl])
 
   const renderFeed = (feed: Feed) => (
     <FeedItem
@@ -768,6 +824,7 @@ export default function Feeds() {
       onToggleSummarize={handleToggleSummarize}
       onMoveToFolder={handleMove}
       onToggleTranslate={handleToggleTranslate}
+      onUpdateSiteUrl={handleUpdateSiteUrl}
       onRulesUpdated={invalidate}
       {...dndHandlers}
     />
@@ -828,7 +885,16 @@ export default function Feeds() {
               placeholder="Filter by name or URL..."
               className="flex-1 bg-bg-card text-text border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-accent"
             />
-            {filter && (
+            <select
+              value={errorFilter}
+              onChange={(e) => setErrorFilter(e.target.value as "all" | "with" | "without")}
+              className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm focus:outline-none focus:border-accent"
+            >
+              <option value="all">All feeds</option>
+              <option value="with">With errors</option>
+              <option value="without">No errors</option>
+            </select>
+            {(filter || errorFilter !== "all") && (
               <span className="text-xs text-text-muted">
                 {visibleFeeds.length}/{feeds?.length ?? 0}
               </span>

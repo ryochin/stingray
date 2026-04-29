@@ -209,6 +209,13 @@ export const api = {
       body: JSON.stringify({ translate }),
     }),
 
+  updateFeedSiteUrl: (id: number, siteUrl: string | null) =>
+    fetchJson<Feed>(`/feeds/${id}/site_url`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site_url: siteUrl }),
+    }),
+
   refresh: () =>
     fetchJson<{ message: string }>("/refresh", { method: "POST" }),
 
