@@ -80,6 +80,42 @@ class TestFeedStats:
     assert list(stats.keys()) == [fid]
     assert stats[fid].article_count == 1
 
+  def test_filters_excluded_from_counts(self):
+    # Counts must agree with what list_articles surfaces. If every unread
+    # article matches an NG-word filter, the badge should read 0 unread —
+    # otherwise the user sees "39 unread" beside an "All caught up" list.
+    fid = _feed()
+    with db.connection() as conn:
+      conn.execute(
+        """INSERT INTO articles (url, feed_id, title, source) VALUES
+           (%s, %s, %s, 'F'), (%s, %s, %s, 'F')""",
+        ("ng-1", fid, "ネタバレ注意 something", "ng-2", fid, "another ネタバレ注意"),
+      )
+      conn.execute(
+        "INSERT INTO articles (url, feed_id, title, source) VALUES (%s, %s, 'clean', 'F')",
+        ("clean", fid),
+      )
+      conn.execute(
+        "INSERT INTO filters (pattern, target) VALUES ('ネタバレ注意', 'title')",
+      )
+    stats = repo.get_feed_stats()
+    assert stats[fid].article_count == 1
+    assert stats[fid].unread_count == 1
+
+  def test_feed_drops_out_when_all_articles_filtered(self):
+    fid = _feed()
+    with db.connection() as conn:
+      conn.execute(
+        "INSERT INTO articles (url, feed_id, title, source) VALUES (%s, %s, 'NG word', 'F')",
+        ("only", fid),
+      )
+      conn.execute(
+        "INSERT INTO filters (pattern, target) VALUES ('NG word', 'title')",
+      )
+    # Feed has only filter-matched articles → no entry in stats (parallels
+    # `test_feeds_without_articles_omitted` semantics).
+    assert repo.get_feed_stats() == {}
+
 
 class TestUpdateArticleSummary:
   def _base(self) -> str:

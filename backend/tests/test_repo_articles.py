@@ -146,6 +146,64 @@ class TestMarkReadEdgeCases:
     repo.mark_unread([])
 
 
+class TestSinceDaysFilter:
+  def test_none_returns_all(self):
+    fid = _make_feed()
+    repo.upsert_articles([_art(url="u1"), _art(url="u2")], {"F": fid})
+    assert len(repo.list_articles(since_days=None)) == 2
+
+  def test_filters_by_published(self):
+    fid = _make_feed()
+    now = datetime.now(tz=timezone.utc)
+    repo.upsert_articles(
+      [
+        _art(url="recent", published=now - timedelta(days=2)),
+        _art(url="old", published=now - timedelta(days=30)),
+      ],
+      {"F": fid},
+    )
+    urls = {r.url for r in repo.list_articles(since_days=7)}
+    assert urls == {"recent"}
+
+  def test_published_null_falls_back_to_fetched_at(self):
+    # COALESCE(published, fetched_at) — a row with no published date is judged
+    # by ingest time. Recent fetch survives a 7-day window even without
+    # published; an old fetch is excluded.
+    fid = _make_feed()
+    now = datetime.now(tz=timezone.utc)
+    with db.connection() as conn:
+      conn.execute(
+        """INSERT INTO articles (url, feed_id, title, source, published, fetched_at)
+           VALUES (%s, %s, %s, %s, NULL, %s)""",
+        ("fresh-no-pub", fid, "T", "F", now - timedelta(days=1)),
+      )
+      conn.execute(
+        """INSERT INTO articles (url, feed_id, title, source, published, fetched_at)
+           VALUES (%s, %s, %s, %s, NULL, %s)""",
+        ("stale-no-pub", fid, "T", "F", now - timedelta(days=30)),
+      )
+    urls = {r.url for r in repo.list_articles(since_days=7)}
+    assert urls == {"fresh-no-pub"}
+
+  def test_combined_with_unread_and_feed_id(self):
+    f1 = _make_feed(name="A")
+    f2 = _make_feed(name="B")
+    now = datetime.now(tz=timezone.utc)
+    repo.upsert_articles(
+      [
+        _art(url="a-recent", source="A", published=now - timedelta(days=1)),
+        _art(url="a-old", source="A", published=now - timedelta(days=30)),
+        _art(url="b-recent", source="B", published=now - timedelta(days=1)),
+      ],
+      {"A": f1, "B": f2},
+    )
+    repo.mark_read(["a-recent"])
+    rows = repo.list_articles(feed_id=f1, unread=True, since_days=7)
+    # f1 + unread + within 7 days → only "a-recent" is in window but it's read,
+    # "a-old" is unread but outside the window. So nothing matches.
+    assert rows == []
+
+
 class TestPruneArticles:
   def test_deletes_only_old_articles(self):
     fid = _make_feed()

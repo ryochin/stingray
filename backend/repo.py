@@ -402,28 +402,54 @@ def update_feed_translate(feed_id: int, translate: bool) -> None:
 
 
 def get_feed_stats() -> dict[int, FeedStats]:
-  """Return per-feed article statistics."""
+  """Return per-feed article statistics.
+
+  Filters are applied post-SQL so the counts agree with `list_articles`,
+  which also drops filter-matched rows. Without this the sidebar badges
+  would diverge from the visible list (e.g. "39 unread" beside "All caught
+  up" when every unread article is hidden by an NG-word filter).
+  """
+  filters = list_filters()
   with db.connection() as conn:
+    if not filters:
+      rows = conn.execute(
+        """SELECT
+             feed_id,
+             COUNT(*)                                        AS article_count,
+             SUM(CASE WHEN read_at IS NULL THEN 1 ELSE 0 END) AS unread_count,
+             MAX(published)                                  AS latest_published,
+             MIN(published)                                  AS oldest_published
+           FROM articles
+           WHERE feed_id IS NOT NULL
+           GROUP BY feed_id""",
+      ).fetchall()
+      return {
+        r["feed_id"]: FeedStats(
+          article_count=r["article_count"],
+          unread_count=r["unread_count"],
+          latest_published=r["latest_published"],
+          oldest_published=r["oldest_published"],
+        )
+        for r in rows
+      }
     rows = conn.execute(
-      """SELECT
-           feed_id,
-           COUNT(*)                                        AS article_count,
-           SUM(CASE WHEN read_at IS NULL THEN 1 ELSE 0 END) AS unread_count,
-           MAX(published)                                  AS latest_published,
-           MIN(published)                                  AS oldest_published
-         FROM articles
-         WHERE feed_id IS NOT NULL
-         GROUP BY feed_id""",
+      "SELECT * FROM articles WHERE feed_id IS NOT NULL",
     ).fetchall()
-    return {
-      r["feed_id"]: FeedStats(
-        article_count=r["article_count"],
-        unread_count=r["unread_count"],
-        latest_published=r["latest_published"],
-        oldest_published=r["oldest_published"],
-      )
-      for r in rows
-    }
+  articles = [ArticleRow.model_validate(r) for r in rows]
+  visible = [a for a in articles if not _article_matches_filter(a, filters)]
+  by_feed: dict[int, list[ArticleRow]] = {}
+  for a in visible:
+    by_feed.setdefault(a.feed_id, []).append(a)  # type: ignore[arg-type]
+  result: dict[int, FeedStats] = {}
+  for fid, group in by_feed.items():
+    pubs = [a.published for a in group if a.published is not None]
+    result[fid] = FeedStats(
+      article_count=len(group),
+      unread_count=sum(1 for a in group if a.read_at is None),
+      latest_published=max(pubs) if pubs else None,
+      oldest_published=min(pubs) if pubs else None,
+    )
+  return result
 
 
 def update_feed_fetch_status(
@@ -511,7 +537,8 @@ def list_articles(
   *,
   feed_id: int | None = None,
   unread: bool = False,
-  limit: int = 1000,
+  since_days: int | None = None,
+  limit: int = 10000,
 ) -> list[ArticleRow]:
   with db.connection() as conn:
     clauses: list[sql.Composable] = []
@@ -521,20 +548,32 @@ def list_articles(
       params.append(feed_id)
     if unread:
       clauses.append(sql.SQL("read_at IS NULL"))
+    if since_days is not None:
+      clauses.append(sql.SQL(
+        "COALESCE(published, fetched_at) >= NOW() - %s * INTERVAL '1 day'"
+      ))
+      params.append(since_days)
     where = sql.SQL("WHERE ") + sql.SQL(" AND ").join(clauses) if clauses else sql.SQL("")
     filters = list_filters()
     # Over-fetch when filters are active so post-SQL filtering still yields
     # roughly `limit` results.
     fetch_limit = limit * 3 if filters else limit
     params.append(fetch_limit)
+    # SQL returns newest first so LIMIT keeps the most recent `limit` rows
+    # even when total >> limit. Final response is reversed to oldest-first so
+    # the UI can render in ascending publication order without re-sorting.
     rows = conn.execute(
-      sql.SQL("SELECT * FROM articles {where} ORDER BY published ASC LIMIT %s").format(where=where),
+      sql.SQL(
+        "SELECT * FROM articles {where} "
+        "ORDER BY COALESCE(published, fetched_at) DESC NULLS LAST "
+        "LIMIT %s"
+      ).format(where=where),
       params,
     ).fetchall()
     articles = [ArticleRow.model_validate(r) for r in rows]
     if filters:
       articles = [a for a in articles if not _article_matches_filter(a, filters)]
-    return articles[:limit]
+    return list(reversed(articles[:limit]))
 
 
 def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:

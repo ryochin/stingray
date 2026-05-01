@@ -122,11 +122,12 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getArticles: (feedId?: number, limit = 1000) => {
+  getArticles: (opts?: { feedId?: number, sinceDays?: number | null }) => {
     const params = new URLSearchParams()
-    if (feedId != null) params.set("feed_id", String(feedId))
-    params.set("limit", String(limit))
-    return fetchJson<Article[]>(`/articles?${params}`)
+    if (opts?.feedId != null) params.set("feed_id", String(opts.feedId))
+    if (opts?.sinceDays != null) params.set("since_days", String(opts.sinceDays))
+    const qs = params.toString()
+    return fetchJson<Article[]>(qs ? `/articles?${qs}` : "/articles")
   },
 
   getFolders: () => fetchJson<Folder[]>("/folders"),

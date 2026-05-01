@@ -147,9 +147,12 @@ app = FastAPI(title="News Reader", lifespan=lifespan)
 def get_articles(
   feed_id: int | None = Query(None),
   unread: bool = Query(False),
-  limit: int = Query(1000, ge=1, le=5000),
+  since_days: int | None = Query(None, ge=1, le=3650),
+  limit: int = Query(10000, ge=1, le=10000),
 ) -> list[ArticleRow]:
-  return repo.list_articles(feed_id=feed_id, unread=unread, limit=limit)
+  return repo.list_articles(
+    feed_id=feed_id, unread=unread, since_days=since_days, limit=limit,
+  )
 
 
 class ArticleUrls(BaseModel):

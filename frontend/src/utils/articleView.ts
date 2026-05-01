@@ -1,7 +1,7 @@
 // Pure selectors/transforms for the Articles view.
 // Extracted from routes/Articles.tsx so the logic is testable in isolation.
 
-import type { Article, Feed, Selection } from "../api/client"
+import type { Article, Feed, FeedStats, Selection } from "../api/client"
 
 // Feeds ordered as they appear under a folder in the sidebar.
 // Value = position index within the folder (used as sort key).
@@ -88,22 +88,46 @@ export function timeRangeDays(id: TimeRangeId): number | null {
   return TIME_RANGE_OPTIONS.find((o) => o.id === id)?.days ?? null
 }
 
-// Keeps articles published within the given range relative to `now`.
-// Articles without a parseable `published` are kept (can't be positively
-// excluded from the range if we don't know their date).
-export function applyTimeFilter(
-  articles: Article[],
-  id: TimeRangeId,
-  now: Date,
-): Article[] {
-  const days = timeRangeDays(id)
-  if (days == null) return articles
-  const threshold = now.getTime() - days * 24 * 60 * 60 * 1000
-  return articles.filter((a) => {
-    if (!a.published) return true
-    const t = Date.parse(a.published)
-    return Number.isFinite(t) ? t >= threshold : true
-  })
+// Per-feed tally of session-local read URLs that the DB hasn't caught up
+// with yet. Only articles still showing `read_at == null` in the cached
+// list contribute: once the refetch after `flushReads` lands and `read_at`
+// is populated, `feed-stats` already reflects that read, so subtracting
+// here too would double-count.
+export function tallySessionReadByFeed(
+  articles: readonly Article[],
+  sessionReadUrls: ReadonlySet<string>,
+): Map<number, number> {
+  const tally = new Map<number, number>()
+  for (const a of articles) {
+    if (
+      a.feed_id != null
+      && a.read_at == null
+      && sessionReadUrls.has(a.url)
+    ) {
+      tally.set(a.feed_id, (tally.get(a.feed_id) ?? 0) + 1)
+    }
+  }
+  return tally
+}
+
+// Sidebar unread badges: stats from the DB, restricted to enabled feeds (the
+// only ones the sidebar shows), minus session-local reads not yet reflected
+// in stats. Clamped at 0 to absorb the rare race where stats arrives stale.
+export function deriveUnreadCounts(
+  feedStats: Record<string, FeedStats> | undefined,
+  enabledFeedIds: ReadonlySet<number> | null,
+  sessionReadByFeed: ReadonlyMap<number, number>,
+): Map<number, number> {
+  const map = new Map<number, number>()
+  if (!feedStats || !enabledFeedIds) return map
+  for (const [fidStr, s] of Object.entries(feedStats)) {
+    const fid = Number(fidStr)
+    if (!enabledFeedIds.has(fid)) continue
+    const local = sessionReadByFeed.get(fid) ?? 0
+    const count = Math.max(0, s.unread_count - local)
+    if (count > 0) map.set(fid, count)
+  }
+  return map
 }
 
 // Advance to the next feed in sidebar order that actually has unread items.

@@ -1,14 +1,15 @@
 import { describe, it, expect } from "vitest"
 import {
-  applyTimeFilter,
   applyUnreadFilter,
   computeFolderFeedOrder,
+  deriveUnreadCounts,
   nextUnreadFeedId,
   parseTimeRangeId,
   selectArticles,
+  tallySessionReadByFeed,
   timeRangeDays,
 } from "./articleView"
-import type { Article, Feed, Selection } from "../api/client"
+import type { Article, Feed, FeedStats, Selection } from "../api/client"
 
 function feed(id: number, overrides: Partial<Feed> = {}): Feed {
   return {
@@ -186,67 +187,96 @@ describe("timeRangeDays", () => {
 })
 
 
-describe("applyTimeFilter", () => {
-  const now = new Date("2026-01-20T12:00:00Z")
-  const list = [
-    article({ url: "today",      published: "2026-01-20T09:00:00Z" }),
-    article({ url: "yesterday",  published: "2026-01-19T12:00:00Z" }),
-    article({ url: "four-days",  published: "2026-01-16T12:00:00Z" }),
-    article({ url: "ten-days",   published: "2026-01-10T12:00:00Z" }),
-    article({ url: "ancient",    published: "2020-01-01T00:00:00Z" }),
-    article({ url: "no-date",    published: null }),
-    article({ url: "garbled",    published: "not-a-date" }),
-  ]
-
-  it("returns everything untouched for 'all'", () => {
-    const out = applyTimeFilter(list, "all", now)
-    expect(out).toEqual(list)
+describe("tallySessionReadByFeed", () => {
+  it("counts session-read URLs per feed via the article→feed map", () => {
+    const articles: Article[] = [
+      article({ url: "a1", feed_id: 1 }),
+      article({ url: "a2", feed_id: 1 }),
+      article({ url: "b1", feed_id: 2 }),
+    ]
+    const tally = tallySessionReadByFeed(articles, new Set(["a1", "a2", "b1"]))
+    expect(tally.get(1)).toBe(2)
+    expect(tally.get(2)).toBe(1)
   })
 
-  it("keeps only articles within the given window", () => {
-    const out = applyTimeFilter(list, "3d", now)
-    // 3-day threshold = 2026-01-17T12:00Z. today & yesterday pass; four-days
-    // is outside. no-date/garbled are kept (can't be positively excluded).
-    expect(out.map((a) => a.url).sort()).toEqual(
-      ["garbled", "no-date", "today", "yesterday"].sort(),
+  it("ignores URLs not present in the article list", () => {
+    const articles: Article[] = [article({ url: "a1", feed_id: 1 })]
+    const tally = tallySessionReadByFeed(articles, new Set(["a1", "ghost"]))
+    expect(tally.get(1)).toBe(1)
+    expect(tally.size).toBe(1)
+  })
+
+  it("ignores articles with null feed_id", () => {
+    const articles: Article[] = [article({ url: "a1", feed_id: null })]
+    const tally = tallySessionReadByFeed(articles, new Set(["a1"]))
+    expect(tally.size).toBe(0)
+  })
+
+  it("ignores articles whose read_at is already populated", () => {
+    // Stats has already absorbed this read after the post-markRead refetch;
+    // counting it locally too would double-decrement the badge.
+    const articles: Article[] = [
+      article({ url: "fresh", feed_id: 1, read_at: null }),
+      article({ url: "synced", feed_id: 1, read_at: "2026-04-30T00:00:00Z" }),
+    ]
+    const tally = tallySessionReadByFeed(articles, new Set(["fresh", "synced"]))
+    expect(tally.get(1)).toBe(1)
+  })
+})
+
+
+function stats(unread: number): FeedStats {
+  return {
+    article_count: unread + 5,
+    unread_count: unread,
+    latest_published: null,
+    oldest_published: null,
+  }
+}
+
+
+describe("deriveUnreadCounts", () => {
+  it("returns empty map when stats or enabledFeedIds is missing", () => {
+    expect(deriveUnreadCounts(undefined, new Set([1]), new Map()).size).toBe(0)
+    expect(deriveUnreadCounts({ "1": stats(3) }, null, new Map()).size).toBe(0)
+  })
+
+  it("excludes disabled feeds even when stats lists them", () => {
+    const out = deriveUnreadCounts(
+      { "1": stats(3), "2": stats(5) },
+      new Set([1]),
+      new Map(),
     )
+    expect(out.get(1)).toBe(3)
+    expect(out.has(2)).toBe(false)
   })
 
-  it("keeps articles whose published exactly matches the threshold (>= compare)", () => {
-    // Boundary article published exactly 7 days before `now`.
-    const boundary = article({
-      url: "boundary",
-      published: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    })
-    const out = applyTimeFilter([boundary], "7d", now)
-    expect(out.map((a) => a.url)).toEqual(["boundary"])
-  })
-
-  it("keeps articles with null published", () => {
-    const out = applyTimeFilter([article({ url: "no-date", published: null })], "1d", now)
-    expect(out.map((a) => a.url)).toEqual(["no-date"])
-  })
-
-  it("keeps articles with unparseable published string", () => {
-    const out = applyTimeFilter(
-      [article({ url: "garbled", published: "not-a-date" })],
-      "1d",
-      now,
+  it("subtracts session-local reads", () => {
+    const out = deriveUnreadCounts(
+      { "1": stats(10) },
+      new Set([1]),
+      new Map([[1, 4]]),
     )
-    expect(out.map((a) => a.url)).toEqual(["garbled"])
+    expect(out.get(1)).toBe(6)
   })
 
-  it("30d id really corresponds to 30 days", () => {
-    const thirtyOne = article({
-      url: "31d",
-      published: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString(),
-    })
-    const twentyNine = article({
-      url: "29d",
-      published: new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000).toISOString(),
-    })
-    const out = applyTimeFilter([thirtyOne, twentyNine], "30d", now)
-    expect(out.map((a) => a.url)).toEqual(["29d"])
+  it("clamps at zero when local reads outpace stats", () => {
+    const out = deriveUnreadCounts(
+      { "1": stats(2) },
+      new Set([1]),
+      new Map([[1, 5]]),
+    )
+    expect(out.has(1)).toBe(false) // count clamped to 0, then dropped
+  })
+
+  it("omits feeds whose effective count is zero", () => {
+    const out = deriveUnreadCounts(
+      { "1": stats(0), "2": stats(3) },
+      new Set([1, 2]),
+      new Map(),
+    )
+    expect(out.has(1)).toBe(false)
+    expect(out.get(2)).toBe(3)
   })
 })
 

@@ -11,12 +11,14 @@ import MarkAllReadMenu from "../components/MarkAllReadMenu"
 import ShortcutsHelp from "../components/ShortcutsHelp"
 import { useArticleKeyboard } from "../hooks/useArticleKeyboard"
 import {
-  applyTimeFilter,
   applyUnreadFilter,
   computeFolderFeedOrder,
+  deriveUnreadCounts,
   nextUnreadFeedId,
   parseTimeRangeId,
   selectArticles,
+  tallySessionReadByFeed,
+  timeRangeDays,
   TIME_RANGE_OPTIONS,
   type TimeRangeId,
 } from "../utils/articleView"
@@ -42,13 +44,7 @@ export default function Articles() {
       return "all"
     }
   })
-  // Anchor `now` to the moment the range was last picked (or component mount).
-  // `filtered` re-runs on every `localReadCount` / refetch change; if we re-
-  // evaluated `new Date()` there, border articles would slip in/out as the
-  // threshold drifted second-by-second.
-  const timeAnchorRef = useRef<Date>(new Date())
   const updateTimeRangeId = useCallback((id: TimeRangeId) => {
-    timeAnchorRef.current = new Date()
     setTimeRangeId(id)
     sessionStorage.setItem("time-range", id)
   }, [])
@@ -78,6 +74,7 @@ export default function Articles() {
     pendingReadUrls.current.clear()
     api.markRead(urls).then(() => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
+      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
     })
   }, [queryClient])
 
@@ -111,9 +108,14 @@ export default function Articles() {
   // as each feed finishes (OPML import, manual refresh).
   const activeInterval = running ? 3_000 : 15_000
 
+  // Unread mode bypasses the time filter: the user wants every still-unread
+  // item to be reachable regardless of age. Otherwise the backend trims to
+  // the selected window so the response naturally matches the visible list.
+  const sinceDays = showUnreadOnly ? null : timeRangeDays(timeRangeId)
+
   const { data: allArticles, isLoading, isError } = useQuery({
-    queryKey: ["articles"],
-    queryFn: () => api.getArticles(),
+    queryKey: ["articles", { sinceDays }],
+    queryFn: () => api.getArticles({ sinceDays }),
     refetchInterval: activeInterval,
   })
 
@@ -130,6 +132,7 @@ export default function Articles() {
     if (running && !prevRunning.current) {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
       queryClient.invalidateQueries({ queryKey: ["feeds"] })
+      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
     }
     prevRunning.current = running
   }, [running, queryClient])
@@ -137,6 +140,15 @@ export default function Articles() {
   const { data: folders } = useQuery({
     queryKey: ["folders"],
     queryFn: api.getFolders,
+  })
+
+  // Per-feed unread totals from the DB (not from the time-bounded /articles
+  // response). This is the source of truth for sidebar badges so they stay
+  // consistent regardless of the active time range.
+  const { data: feedStats } = useQuery({
+    queryKey: ["feed-stats"],
+    queryFn: api.getFeedStats,
+    refetchInterval: activeInterval,
   })
 
   const feedMap = useMemo(() => {
@@ -179,17 +191,17 @@ export default function Articles() {
     )
   }, [allArticles, enabledFeedIds])
 
-  // Unread counts (always from full list, not filtered)
-  const unreadCounts = useMemo(() => {
-    void localReadCount // trigger recomputation on local reads
-    const map = new Map<number, number>()
-    for (const a of enabledArticles) {
-      if (a.feed_id != null && a.read_at == null && !sessionReadUrls.current.has(a.url)) {
-        map.set(a.feed_id, (map.get(a.feed_id) ?? 0) + 1)
-      }
-    }
-    return map
+  // Decrement stats-derived unread counts by URLs the user just marked read
+  // locally, so the sidebar reflects the change before the next stats refetch.
+  const sessionReadByFeed = useMemo(() => {
+    void localReadCount
+    return tallySessionReadByFeed(enabledArticles, sessionReadUrls.current)
   }, [enabledArticles, localReadCount])
+
+  const unreadCounts = useMemo(
+    () => deriveUnreadCounts(feedStats, enabledFeedIds, sessionReadByFeed),
+    [feedStats, enabledFeedIds, sessionReadByFeed],
+  )
 
   const folderFeedOrder = useMemo(
     () => computeFolderFeedOrder(selection, feeds),
@@ -199,14 +211,10 @@ export default function Articles() {
   const filtered = useMemo(() => {
     void localReadCount // sessionReadUrls mutations are opaque to React; re-run when they tick.
     const selected = selectArticles(enabledArticles, selection, folderFeedOrder)
-    // Time range only applies in "All" mode. In unread-only mode, rarity of
-    // unread items matters more than freshness, so time filtering would hide
-    // items the sidebar count says exist.
-    const inRange = showUnreadOnly
-      ? selected
-      : applyTimeFilter(selected, timeRangeId, timeAnchorRef.current)
-    return applyUnreadFilter(inRange, showUnreadOnly, sessionReadUrls.current)
-  }, [enabledArticles, selection, folderFeedOrder, timeRangeId, showUnreadOnly, localReadCount])
+    // Time-range filtering happens at the API layer (sinceDays). The list we
+    // got is already bounded; here we only layer the unread toggle on top.
+    return applyUnreadFilter(selected, showUnreadOnly, sessionReadUrls.current)
+  }, [enabledArticles, selection, folderFeedOrder, showUnreadOnly, localReadCount])
 
   // Validate restored selection against current data
   useEffect(() => {
@@ -218,9 +226,13 @@ export default function Articles() {
     }
   }, [feeds, folders])
 
-  // Clear session reads and reset focus when selection changes
+  // Clear session reads and reset focus when selection changes. Resetting
+  // `localReadCount` is what actually invalidates the `sessionReadByFeed`
+  // memo — clearing the ref alone is opaque to React, so the cached tally
+  // would otherwise leak the previous selection's reads into the new view.
   useEffect(() => {
     sessionReadUrls.current.clear()
+    setLocalReadCount(0)
   }, [selection])
 
   // Clear focus when feed/filter changes and scroll back to the top.
@@ -468,12 +480,14 @@ export default function Articles() {
       api.markAllRead(markAllReadFeedId, olderThanHours ?? undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
+      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
     },
   })
   const markAllUnread = useMutation({
     mutationFn: () => api.markAllUnread(markAllReadFeedId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
+      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
     },
   })
 
@@ -483,6 +497,7 @@ export default function Articles() {
       isRead ? api.markUnread([url]) : api.markRead([url]),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
+      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
     },
     onError: (err) => {
       console.error("Failed to toggle read status:", err)
@@ -608,21 +623,19 @@ export default function Articles() {
     return null
   }, [selection, feedMap, folders])
 
-  // Unread count shown on the header `Unread (N)` button. Scoped to the
-  // current selection AND time range so the number matches what the user
-  // is actually looking at. Sidebar badges stay on the global unread
-  // counts (see `unreadCounts`) — the per-feed badge there is a global
-  // indicator and shouldn't shrink when the user narrows the time window.
+  // Unread count for the header `Unread (N)` button. `filtered` already
+  // applied selection + (in unread mode) the unread filter, so iterate that
+  // directly. Session-read items are kept in `filtered` (intentional, so the
+  // user can still see what they just dismissed) — exclude them here so the
+  // count reflects only true unreads.
   const selectedUnreadInView = useMemo(() => {
     void localReadCount
-    const selected = selectArticles(enabledArticles, selection, folderFeedOrder)
-    const inRange = applyTimeFilter(selected, timeRangeId, timeAnchorRef.current)
     let n = 0
-    for (const a of inRange) {
+    for (const a of filtered) {
       if (a.read_at == null && !sessionReadUrls.current.has(a.url)) n++
     }
     return n
-  }, [enabledArticles, selection, folderFeedOrder, timeRangeId, localReadCount])
+  }, [filtered, localReadCount])
 
   return (
     <div className="flex flex-col h-screen">
