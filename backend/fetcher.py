@@ -193,30 +193,36 @@ async def _run_llm_pass(
   failures = await _run_summarize(need_llm, translate_set, config)
   # Re-upsert to persist LLM-filled fields. Rows already exist from the
   # per-feed pass; COALESCE in _UPSERT_ARTICLE only fills newly non-null ones.
-  repo.upsert_articles(need_llm, feed_id_map)
+  await asyncio.to_thread(repo.upsert_articles, need_llm, feed_id_map)
   return failures
 
 
 async def _backfill_site_urls(feeds: list[FeedRow]) -> None:
   """Look up `site_url` for any feed missing it by fetching the feed URL and
-  scraping its declared site link.
+  scraping its declared site link. Runs feeds in parallel (capped) to keep
+  refresh latency from scaling linearly with the missing count.
   """
   missing = [f for f in feeds if not f.site_url and f.url]
   if not missing:
     return
   log.step(f"Backfilling site_url for {len(missing)} feeds...")
-  async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-    for f in missing:
-      if not f.url:
-        continue
+  sem = asyncio.Semaphore(8)
+
+  async def _one(client: httpx.AsyncClient, f: FeedRow) -> None:
+    if not f.url:
+      return
+    async with sem:
       try:
         resp = await client.get(f.url)
         resp.raise_for_status()
         site_url = extract_site_url(resp.text)
         if site_url:
-          repo.update_feed_site_url(f.id, site_url)
+          await asyncio.to_thread(repo.update_feed_site_url, f.id, site_url)
       except Exception:
-        continue
+        return
+
+  async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+    await asyncio.gather(*(_one(client, f) for f in missing))
 
 
 async def refresh_all(

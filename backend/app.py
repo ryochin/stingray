@@ -458,29 +458,30 @@ def delete_feed(feed_id: int) -> None:
   repo.delete_feed(feed_id)
 
 
+def _get_feed_or_404(feed_id: int) -> FeedRow:
+  """Fetch a feed by id or raise 404. Used after every mutation handler so
+  the response body matches the post-update state."""
+  feed = repo.get_feed_by_id(feed_id)
+  if feed is None:
+    raise HTTPException(404, "Feed not found")
+  return feed
+
+
 @app.post("/api/feeds/{feed_id}/toggle")
 def toggle_feed(feed_id: int) -> FeedRow:
   repo.toggle_feed(feed_id)
-  updated = repo.get_feed_by_id(feed_id)
-  if updated is None:
-    raise HTTPException(404, "Feed not found")
-  return updated
+  return _get_feed_or_404(feed_id)
 
 
 @app.post("/api/feeds/{feed_id}/summarize")
 def toggle_summarize(feed_id: int) -> FeedRow:
   repo.toggle_summarize(feed_id)
-  updated = repo.get_feed_by_id(feed_id)
-  if updated is None:
-    raise HTTPException(404, "Feed not found")
-  return updated
+  return _get_feed_or_404(feed_id)
 
 
 @app.patch("/api/feeds/{feed_id}/rules")
 async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
-  feed = repo.get_feed_by_id(feed_id)
-  if feed is None:
-    raise HTTPException(404, "Feed not found")
+  feed = _get_feed_or_404(feed_id)
   if feed.extraction_rules is None:
     raise HTTPException(400, "Not a web page feed")
   rules_raw: object = await request.json()
@@ -492,10 +493,7 @@ async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
     if not value or not isinstance(value, str):
       raise HTTPException(422, f"Missing or empty required field: {key}")
   repo.update_feed_extraction_rules(feed_id, json.dumps(rules))
-  updated = repo.get_feed_by_id(feed_id)
-  if updated is None:
-    raise HTTPException(404, "Feed not found")
-  return updated
+  return _get_feed_or_404(feed_id)
 
 
 class FeedTranslateUpdate(BaseModel):
@@ -505,10 +503,7 @@ class FeedTranslateUpdate(BaseModel):
 @app.patch("/api/feeds/{feed_id}/translate")
 def update_feed_translate(feed_id: int, body: FeedTranslateUpdate) -> FeedRow:
   repo.update_feed_translate(feed_id, body.translate)
-  updated = repo.get_feed_by_id(feed_id)
-  if updated is None:
-    raise HTTPException(404, "Feed not found")
-  return updated
+  return _get_feed_or_404(feed_id)
 
 
 class FeedRename(BaseModel):
@@ -518,10 +513,7 @@ class FeedRename(BaseModel):
 @app.patch("/api/feeds/{feed_id}/name")
 def rename_feed(feed_id: int, body: FeedRename) -> FeedRow:
   repo.rename_feed(feed_id, body.name)
-  updated = repo.get_feed_by_id(feed_id)
-  if updated is None:
-    raise HTTPException(404, "Feed not found")
-  return updated
+  return _get_feed_or_404(feed_id)
 
 
 class FeedSiteUrlUpdate(BaseModel):
@@ -532,19 +524,13 @@ class FeedSiteUrlUpdate(BaseModel):
 def update_feed_site_url(feed_id: int, body: FeedSiteUrlUpdate) -> FeedRow:
   site_url = body.site_url.strip() if body.site_url else None
   repo.update_feed_site_url(feed_id, site_url or None)
-  updated = repo.get_feed_by_id(feed_id)
-  if updated is None:
-    raise HTTPException(404, "Feed not found")
-  return updated
+  return _get_feed_or_404(feed_id)
 
 
 @app.patch("/api/feeds/{feed_id}/folder")
 def move_feed_to_folder(feed_id: int, body: FeedMove) -> FeedRow:
   repo.move_feed_to_folder(feed_id, body.folder_id)
-  updated = repo.get_feed_by_id(feed_id)
-  if updated is None:
-    raise HTTPException(404, "Feed not found")
-  return updated
+  return _get_feed_or_404(feed_id)
 
 
 # -- Filters --

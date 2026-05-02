@@ -66,6 +66,86 @@ class TestUpsertArticles:
     n = repo.upsert_articles([_art(url="u1", content_snippet="second")], {"F": fid})
     assert n == 0
 
+  def test_mixed_batch_counts_only_new(self):
+    # Batched multi-row INSERT must distinguish inserts from updates within
+    # the same statement (xmax = 0 per row) and return the new-row count.
+    fid = _make_feed(name="F")
+    repo.upsert_articles([_art(url="u1"), _art(url="u2")], {"F": fid})
+    batch = [_art(url=u) for u in ("u1", "u2", "u3", "u4", "u5")]
+    n = repo.upsert_articles(batch, {"F": fid})
+    assert n == 3
+    assert len(repo.list_articles()) == 5
+
+  def test_duplicate_urls_in_same_batch_are_collapsed(self):
+    # PostgreSQL's `ON CONFLICT DO UPDATE` rejects two rows in one statement
+    # that target the same conflict key, so the implementation must collapse
+    # duplicates before the multi-row INSERT.
+    fid = _make_feed(name="F")
+    n = repo.upsert_articles(
+      [_art(url="u1", summary="first"), _art(url="u1", summary="second")],
+      {"F": fid},
+    )
+    assert n == 1
+    rows = repo.list_articles()
+    assert len(rows) == 1
+    # `summary` is in the COALESCE-managed set, so later non-empty wins.
+    assert rows[0].summary == "second"
+
+  def test_duplicate_urls_keep_first_rows_insert_only_columns(self):
+    # ON CONFLICT DO UPDATE only rewrites content_*/title_translated/summary
+    # /content_translated. Under the row-by-row loop, the first row's title /
+    # source / published (and the derived feed_id) would stick across a
+    # same-batch dup. The merged-batch path must preserve that.
+    f1 = _make_feed(name="A")
+    _make_feed(name="B")
+    early = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    late = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    n = repo.upsert_articles(
+      [
+        _art(url="u1", title="first-title", source="A", summary="", published=early),
+        _art(url="u1", title="second-title", source="B", summary="late", published=late),
+      ],
+      {"A": f1},
+    )
+    assert n == 1
+    rows = repo.list_articles()
+    assert len(rows) == 1
+    assert rows[0].title == "first-title"
+    assert rows[0].source == "A"
+    assert rows[0].feed_id == f1
+    assert rows[0].published == early
+    # COALESCE-managed column still picks up the later non-empty value.
+    assert rows[0].summary == "late"
+
+  def test_duplicate_urls_merge_preserves_earlier_non_empty_field(self):
+    # A later empty value MUST NOT clobber an earlier non-empty COALESCE
+    # column — the row-by-row loop's COALESCE would have preserved it.
+    fid = _make_feed(name="F")
+    n = repo.upsert_articles(
+      [
+        _art(url="u1", summary="rich", content_html="<p>full</p>"),
+        _art(url="u1", summary="", content_html=""),
+      ],
+      {"F": fid},
+    )
+    assert n == 1
+    rows = repo.list_articles()
+    assert len(rows) == 1
+    assert rows[0].summary == "rich"
+    assert rows[0].content_html == "<p>full</p>"
+
+  def test_duplicate_urls_merge_later_value_wins_when_both_present(self):
+    fid = _make_feed(name="F")
+    repo.upsert_articles(
+      [
+        _art(url="u1", summary="early"),
+        _art(url="u1", summary="late"),
+      ],
+      {"F": fid},
+    )
+    rows = repo.list_articles()
+    assert rows[0].summary == "late"
+
   def test_update_fills_missing_fields_without_overwriting(self):
     # The upsert uses COALESCE(EXCLUDED, existing): a NULL-ish incoming value
     # must NOT wipe an existing translated/summary field.

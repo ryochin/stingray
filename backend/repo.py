@@ -200,6 +200,68 @@ def _parse_filter_pattern(pattern: str) -> tuple[bool, str]:
   return False, pattern
 
 
+# LIKE escape character. Using `!` instead of `\` sidesteps any
+# standard_conforming_strings interactions with backslash.
+_LIKE_ESCAPE = "!"
+
+
+def _like_value(pattern: str) -> str:
+  """Wrap `pattern` for ILIKE substring match, escaping LIKE metacharacters."""
+  e = _LIKE_ESCAPE
+  esc = pattern.replace(e, e * 2).replace("%", e + "%").replace("_", e + "_")
+  return f"%{esc}%"
+
+
+def _split_filters(
+  filters: list[FilterRow],
+) -> tuple[list[FilterRow], list[FilterRow]]:
+  """Partition filters into (contains, regex). Invalid or oversized regex
+  patterns are dropped — same skip behavior as `_article_matches_filter`."""
+  contains: list[FilterRow] = []
+  regexes: list[FilterRow] = []
+  for f in filters:
+    is_regex, pat = _parse_filter_pattern(f.pattern)
+    if not is_regex:
+      contains.append(f)
+      continue
+    if len(pat) > 200:
+      continue
+    try:
+      re.compile(pat)
+    except re.error:
+      continue
+    regexes.append(f)
+  return contains, regexes
+
+
+def _contains_match_expr(
+  filters: list[FilterRow],
+) -> tuple[sql.Composable | None, list[Any]]:
+  """Build a Composable expression that is TRUE for any article matching at
+  least one of the given contains filters. Returns `(None, [])` when no
+  filters are usable, so callers can omit the WHERE fragment entirely.
+  """
+  clauses: list[sql.Composable] = []
+  params: list[Any] = []
+  for f in filters:
+    _, pat = _parse_filter_pattern(f.pattern)
+    cols = ["title", "title_translated"]
+    if f.target != "title":
+      cols += ["content_snippet", "summary"]
+    col_clauses: list[sql.Composable] = []
+    val = _like_value(pat)
+    for col in cols:
+      col_clauses.append(
+        sql.SQL("COALESCE({c}, '') ILIKE %s ESCAPE %s").format(c=sql.Identifier(col)),
+      )
+      params.append(val)
+      params.append(_LIKE_ESCAPE)
+    clauses.append(sql.SQL("(") + sql.SQL(" OR ").join(col_clauses) + sql.SQL(")"))
+  if not clauses:
+    return None, []
+  return sql.SQL(" OR ").join(clauses), params
+
+
 def _article_matches_filter(article: ArticleRow, filters: list[FilterRow]) -> bool:
   for f in filters:
     is_regex, pat = _parse_filter_pattern(f.pattern)
@@ -404,39 +466,57 @@ def update_feed_translate(feed_id: int, translate: bool) -> None:
 def get_feed_stats() -> dict[int, FeedStats]:
   """Return per-feed article statistics.
 
-  Filters are applied post-SQL so the counts agree with `list_articles`,
-  which also drops filter-matched rows. Without this the sidebar badges
-  would diverge from the visible list (e.g. "39 unread" beside "All caught
-  up" when every unread article is hidden by an NG-word filter).
+  Filters are applied so counts agree with `list_articles`, which also drops
+  filter-matched rows. Without this the sidebar badges would diverge from
+  the visible list (e.g. "39 unread" beside "All caught up" when every
+  unread article is hidden by an NG-word filter).
+
+  Contains filters are pushed into SQL via `ILIKE` so even large article
+  tables stay aggregate-only. Regex filters use Python's `re` (PostgreSQL's
+  `~*` is POSIX, incompatible with patterns like `\\d+`), so when any regex
+  filter is active we fall back to the legacy "load + filter in Python"
+  path.
   """
   filters = list_filters()
+  contains_filters, regex_filters = _split_filters(filters)
+  match_expr, match_params = _contains_match_expr(contains_filters)
+
+  if not regex_filters:
+    where_parts: list[sql.Composable] = [sql.SQL("feed_id IS NOT NULL")]
+    if match_expr is not None:
+      where_parts.append(sql.SQL("NOT (") + match_expr + sql.SQL(")"))
+    where = sql.SQL(" AND ").join(where_parts)
+    query = sql.SQL(
+      "SELECT feed_id, "
+      "       COUNT(*) AS article_count, "
+      "       SUM(CASE WHEN read_at IS NULL THEN 1 ELSE 0 END) AS unread_count, "
+      "       MAX(published) AS latest_published, "
+      "       MIN(published) AS oldest_published "
+      "FROM articles WHERE {where} GROUP BY feed_id"
+    ).format(where=where)
+    with db.connection() as conn:
+      rows = conn.execute(query, match_params).fetchall()
+    return {
+      r["feed_id"]: FeedStats(
+        article_count=r["article_count"],
+        unread_count=r["unread_count"],
+        latest_published=r["latest_published"],
+        oldest_published=r["oldest_published"],
+      )
+      for r in rows
+    }
+
+  # Regex fallback: pre-filter with SQL where possible, then apply regex
+  # filters in Python on the (already-trimmed) result set.
+  where_parts = [sql.SQL("feed_id IS NOT NULL")]
+  if match_expr is not None:
+    where_parts.append(sql.SQL("NOT (") + match_expr + sql.SQL(")"))
+  where = sql.SQL(" AND ").join(where_parts)
+  query = sql.SQL("SELECT * FROM articles WHERE {where}").format(where=where)
   with db.connection() as conn:
-    if not filters:
-      rows = conn.execute(
-        """SELECT
-             feed_id,
-             COUNT(*)                                        AS article_count,
-             SUM(CASE WHEN read_at IS NULL THEN 1 ELSE 0 END) AS unread_count,
-             MAX(published)                                  AS latest_published,
-             MIN(published)                                  AS oldest_published
-           FROM articles
-           WHERE feed_id IS NOT NULL
-           GROUP BY feed_id""",
-      ).fetchall()
-      return {
-        r["feed_id"]: FeedStats(
-          article_count=r["article_count"],
-          unread_count=r["unread_count"],
-          latest_published=r["latest_published"],
-          oldest_published=r["oldest_published"],
-        )
-        for r in rows
-      }
-    rows = conn.execute(
-      "SELECT * FROM articles WHERE feed_id IS NOT NULL",
-    ).fetchall()
+    rows = conn.execute(query, match_params).fetchall()
   articles = [ArticleRow.model_validate(r) for r in rows]
-  visible = [a for a in articles if not _article_matches_filter(a, filters)]
+  visible = [a for a in articles if not _article_matches_filter(a, regex_filters)]
   by_feed: dict[int, list[ArticleRow]] = {}
   for a in visible:
     by_feed.setdefault(a.feed_id, []).append(a)  # type: ignore[arg-type]
@@ -487,35 +567,85 @@ def toggle_summarize(feed_id: int) -> None:
 # -- Articles --
 
 
-_UPSERT_ARTICLE = """\
-INSERT INTO articles
-  (url, feed_id, title, title_translated, source, published,
-   content_snippet, summary, content_html, content_translated)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (url) DO UPDATE SET
-  content_html       = COALESCE(EXCLUDED.content_html,       articles.content_html),
-  content_snippet    = COALESCE(EXCLUDED.content_snippet,    articles.content_snippet),
-  title_translated   = COALESCE(EXCLUDED.title_translated,   articles.title_translated),
-  summary            = COALESCE(EXCLUDED.summary,            articles.summary),
-  content_translated = COALESCE(EXCLUDED.content_translated, articles.content_translated)
-RETURNING (xmax = 0) AS inserted
-"""
+# Cap chunk size so we stay well under PostgreSQL's 65535 bound parameters
+# limit (10 columns per row * 5000 rows = 50000, with headroom).
+_UPSERT_CHUNK = 5000
+
+
+def _merge_articles(prev: Article, curr: Article) -> Article:
+  """Field-wise merge for same-URL duplicates within one upsert batch.
+  Mirrors the row-by-row UPSERT loop's effective behavior:
+
+  - The columns that `ON CONFLICT DO UPDATE` actually rewrites
+    (content_html/content_snippet/title_translated/summary/content_translated)
+    are merged with `later non-empty wins`.
+  - The columns that are only set on INSERT (title/source/published, and
+    therefore the derived feed_id) keep the first row's values — under the
+    old loop, the second row's UPSERT would not touch these.
+  """
+  return Article(
+    url=prev.url,
+    # Insert-only columns: first row wins.
+    title=prev.title,
+    source=prev.source,
+    published=prev.published,
+    # COALESCE-managed columns: later non-empty wins.
+    content_snippet=curr.content_snippet or prev.content_snippet,
+    title_translated=curr.title_translated or prev.title_translated,
+    summary=curr.summary or prev.summary,
+    content_html=curr.content_html or prev.content_html,
+    content_translated=curr.content_translated or prev.content_translated,
+  )
 
 
 def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None = None) -> int:
   """Insert new articles; update content_* on existing ones if newly available.
 
   Returns count of newly inserted rows (not updates).
+
+  Uses a single multi-row INSERT per chunk so a refresh of N articles costs
+  one round-trip instead of N (the COALESCE-based UPSERT semantics are
+  preserved verbatim).
+
+  Same-URL duplicates within `articles` are merged into one row.
+  PostgreSQL's `ON CONFLICT DO UPDATE` rejects two rows in one statement
+  that target the same conflict key, so we collapse beforehand. The merge
+  is field-wise: a non-empty later value wins, otherwise the earlier value
+  is kept. This matches the old per-row loop's behavior, where COALESCE in
+  the UPSERT preserved any non-empty field across successive same-url
+  upserts within the same batch.
   """
   if not articles:
     return 0
   feed_id_map = feed_id_map or {}
-  new_count = 0
+  merged: dict[str, Article] = {}
+  for a in articles:
+    prev = merged.get(a.url)
+    merged[a.url] = a if prev is None else _merge_articles(prev, a)
+  unique_articles = list(merged.values())
+  total = 0
   with db.connection() as conn, conn.cursor() as cur:
-    for a in articles:
-      row = cur.execute(
-        _UPSERT_ARTICLE,
-        (
+    for start in range(0, len(unique_articles), _UPSERT_CHUNK):
+      chunk = unique_articles[start:start + _UPSERT_CHUNK]
+      values_sql = sql.SQL(", ").join(
+        sql.SQL("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)") for _ in chunk
+      )
+      query = sql.SQL(
+        "INSERT INTO articles "
+        "  (url, feed_id, title, title_translated, source, published, "
+        "   content_snippet, summary, content_html, content_translated) "
+        "VALUES {values} "
+        "ON CONFLICT (url) DO UPDATE SET "
+        "  content_html       = COALESCE(EXCLUDED.content_html,       articles.content_html), "
+        "  content_snippet    = COALESCE(EXCLUDED.content_snippet,    articles.content_snippet), "
+        "  title_translated   = COALESCE(EXCLUDED.title_translated,   articles.title_translated), "
+        "  summary            = COALESCE(EXCLUDED.summary,            articles.summary), "
+        "  content_translated = COALESCE(EXCLUDED.content_translated, articles.content_translated) "
+        "RETURNING (xmax = 0) AS inserted"
+      ).format(values=values_sql)
+      params: list[Any] = []
+      for a in chunk:
+        params.extend((
           a.url,
           feed_id_map.get(a.source),
           a.title,
@@ -526,11 +656,10 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
           a.summary or None,
           a.content_html or None,
           a.content_translated or None,
-        ),
-      ).fetchone()
-      if row and row["inserted"]:
-        new_count += 1
-  return new_count
+        ))
+      rows = cur.execute(query, params).fetchall()
+      total += sum(1 for r in rows if r["inserted"])
+  return total
 
 
 def list_articles(
@@ -540,40 +669,44 @@ def list_articles(
   since_days: int | None = None,
   limit: int = 10000,
 ) -> list[ArticleRow]:
+  filters = list_filters()
+  contains_filters, regex_filters = _split_filters(filters)
+  match_expr, match_params = _contains_match_expr(contains_filters)
+
+  clauses: list[sql.Composable] = []
+  params: list[object] = []
+  if feed_id is not None:
+    clauses.append(sql.SQL("feed_id = %s"))
+    params.append(feed_id)
+  if unread:
+    clauses.append(sql.SQL("read_at IS NULL"))
+  if since_days is not None:
+    clauses.append(sql.SQL(
+      "COALESCE(published, fetched_at) >= NOW() - %s * INTERVAL '1 day'"
+    ))
+    params.append(since_days)
+  if match_expr is not None:
+    clauses.append(sql.SQL("NOT (") + match_expr + sql.SQL(")"))
+    params.extend(match_params)
+
+  where = sql.SQL("WHERE ") + sql.SQL(" AND ").join(clauses) if clauses else sql.SQL("")
+  # Over-fetch only when regex filters need a Python pass after SQL.
+  fetch_limit = limit * 3 if regex_filters else limit
+  params.append(fetch_limit)
+  # SQL returns newest first so LIMIT keeps the most recent `limit` rows
+  # even when total >> limit. Final response is reversed to oldest-first so
+  # the UI can render in ascending publication order without re-sorting.
+  query = sql.SQL(
+    "SELECT * FROM articles {where} "
+    "ORDER BY COALESCE(published, fetched_at) DESC NULLS LAST "
+    "LIMIT %s"
+  ).format(where=where)
   with db.connection() as conn:
-    clauses: list[sql.Composable] = []
-    params: list[object] = []
-    if feed_id is not None:
-      clauses.append(sql.SQL("feed_id = %s"))
-      params.append(feed_id)
-    if unread:
-      clauses.append(sql.SQL("read_at IS NULL"))
-    if since_days is not None:
-      clauses.append(sql.SQL(
-        "COALESCE(published, fetched_at) >= NOW() - %s * INTERVAL '1 day'"
-      ))
-      params.append(since_days)
-    where = sql.SQL("WHERE ") + sql.SQL(" AND ").join(clauses) if clauses else sql.SQL("")
-    filters = list_filters()
-    # Over-fetch when filters are active so post-SQL filtering still yields
-    # roughly `limit` results.
-    fetch_limit = limit * 3 if filters else limit
-    params.append(fetch_limit)
-    # SQL returns newest first so LIMIT keeps the most recent `limit` rows
-    # even when total >> limit. Final response is reversed to oldest-first so
-    # the UI can render in ascending publication order without re-sorting.
-    rows = conn.execute(
-      sql.SQL(
-        "SELECT * FROM articles {where} "
-        "ORDER BY COALESCE(published, fetched_at) DESC NULLS LAST "
-        "LIMIT %s"
-      ).format(where=where),
-      params,
-    ).fetchall()
-    articles = [ArticleRow.model_validate(r) for r in rows]
-    if filters:
-      articles = [a for a in articles if not _article_matches_filter(a, filters)]
-    return list(reversed(articles[:limit]))
+    rows = conn.execute(query, params).fetchall()
+  articles = [ArticleRow.model_validate(r) for r in rows]
+  if regex_filters:
+    articles = [a for a in articles if not _article_matches_filter(a, regex_filters)]
+  return list(reversed(articles[:limit]))
 
 
 def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:

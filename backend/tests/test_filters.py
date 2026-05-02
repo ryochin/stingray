@@ -122,11 +122,18 @@ def _feed() -> int:
     return int(row["id"])
 
 
-def _insert_article(feed_id: int, *, url: str, title: str) -> None:
+def _insert_article(
+  feed_id: int,
+  *,
+  url: str,
+  title: str,
+  content_snippet: str | None = None,
+) -> None:
   with db.connection() as conn:
     conn.execute(
-      "INSERT INTO articles (url, feed_id, title, source) VALUES (%s, %s, %s, 'F')",
-      (url, feed_id, title),
+      "INSERT INTO articles (url, feed_id, title, source, content_snippet) "
+      "VALUES (%s, %s, %s, 'F', %s)",
+      (url, feed_id, title, content_snippet),
     )
 
 
@@ -146,3 +153,88 @@ class TestListArticlesFilterIntegration:
     _insert_article(fid, url="u2", title="Real news")
     rows = repo.list_articles()
     assert {r.url for r in rows} == {"u1", "u2"}
+
+  def test_filter_escapes_like_metacharacters(self):
+    # `_` and `%` in the pattern must NOT be interpreted as wildcards.
+    fid = _feed()
+    _insert_article(fid, url="u1", title="50% off")
+    _insert_article(fid, url="u2", title="500FF")  # would match if `%` were wild
+    repo.add_filter("50%")
+    rows = repo.list_articles()
+    assert [r.url for r in rows] == ["u2"]
+
+  def test_filter_substring_case_insensitive_unicode(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="日本語のニュース")
+    _insert_article(fid, url="u2", title="English news")
+    repo.add_filter("日本語")
+    rows = repo.list_articles()
+    assert [r.url for r in rows] == ["u2"]
+
+  def test_filter_target_body_matches_snippet(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="ok", content_snippet="this contains AD spam")
+    _insert_article(fid, url="u2", title="ok2", content_snippet="harmless")
+    repo.add_filter("AD spam", target="body")
+    rows = repo.list_articles()
+    assert [r.url for r in rows] == ["u2"]
+
+  def test_filter_target_title_ignores_body(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="ok", content_snippet="AD spam in body")
+    repo.add_filter("AD spam", target="title")
+    rows = repo.list_articles()
+    assert [r.url for r in rows] == ["u1"]
+
+  def test_regex_filter_still_works(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="Article 42")
+    _insert_article(fid, url="u2", title="Article foo")
+    repo.add_filter(r"/\d+/")
+    rows = repo.list_articles()
+    assert [r.url for r in rows] == ["u2"]
+
+  def test_invalid_regex_is_skipped(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="anything")
+    repo.add_filter("/[unclosed/")
+    rows = repo.list_articles()
+    assert [r.url for r in rows] == ["u1"]
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestGetFeedStatsFilterIntegration:
+  def test_stats_excludes_filtered_articles(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="AD: sponsored")
+    _insert_article(fid, url="u2", title="Real news")
+    _insert_article(fid, url="u3", title="More real news")
+    repo.add_filter("AD:")
+    stats = repo.get_feed_stats()
+    assert stats[fid].article_count == 2
+    assert stats[fid].unread_count == 2
+
+  def test_stats_no_filter(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="x")
+    _insert_article(fid, url="u2", title="y")
+    stats = repo.get_feed_stats()
+    assert stats[fid].article_count == 2
+
+  def test_stats_with_regex_filter(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="Article 42")
+    _insert_article(fid, url="u2", title="Article foo")
+    repo.add_filter(r"/\d+/")
+    stats = repo.get_feed_stats()
+    assert stats[fid].article_count == 1
+
+  def test_stats_combines_contains_and_regex(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="AD: spam")
+    _insert_article(fid, url="u2", title="Article 42")
+    _insert_article(fid, url="u3", title="Real news")
+    repo.add_filter("AD:")  # contains
+    repo.add_filter(r"/\d+/")  # regex
+    stats = repo.get_feed_stats()
+    assert stats[fid].article_count == 1
