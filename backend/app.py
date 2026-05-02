@@ -10,6 +10,7 @@ import time
 import xml.etree.ElementTree as _ET
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import AsyncIterator, Coroutine, cast
 
@@ -604,10 +605,11 @@ def opml_export() -> Response:
   folders = repo.list_folders()
   feeds = repo.list_feeds()
   xml = export_opml(folders, feeds)
+  filename = f"news_reader_subscriptions_{date.today().strftime('%Y%m%d')}.opml"
   return Response(
     content=xml,
     media_type="text/xml",
-    headers={"Content-Disposition": 'attachment; filename="subscriptions.opml"'},
+    headers={"Content-Disposition": f'attachment; filename="{filename}"'},
   )
 
 
