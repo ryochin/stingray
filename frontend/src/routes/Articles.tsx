@@ -493,6 +493,7 @@ export default function Articles() {
     goToNextFeed,
     onJAtEnd,
     onKBeforeMove,
+    toggleUnreadFilter: () => setShowUnreadOnly((v) => !v),
     setShowHelp,
   })
 

@@ -13,6 +13,7 @@ interface Options {
   goToNextFeed: () => boolean
   onJAtEnd: () => void
   onKBeforeMove: () => boolean
+  toggleUnreadFilter: () => void
   setShowHelp: Dispatch<SetStateAction<boolean>>
 }
 
@@ -25,6 +26,7 @@ interface Options {
  *   v/o/Enter — open focused article in a new tab
  *   m     — toggle read/unread on focused article
  *   Shift+A — mark all as read
+ *   u     — toggle Unread / All filter
  *   ?     — show/hide help
  *   Esc   — close help
  *
@@ -36,7 +38,7 @@ interface Options {
 export function useArticleKeyboard({
   filtered, focusIndex, setFocusIndex, markFocusedAsRead, nextUnreadInView,
   scheduleRead, toggleRead, markAllRead, goToNextFeed, onJAtEnd, onKBeforeMove,
-  setShowHelp,
+  toggleUnreadFilter, setShowHelp,
 }: Options) {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -69,6 +71,15 @@ export function useArticleKeyboard({
         // the auto-focus effect doesn't yank the user back to index 0.
         return moved ? -1 : prev
       })
+      return
+    }
+
+    if (e.key === "u") {
+      // Toggle Unread / All. Independent of list contents — toggling while
+      // the view is empty is still meaningful (e.g. switching from Unread to
+      // All to see what was just marked read).
+      e.preventDefault()
+      toggleUnreadFilter()
       return
     }
 
@@ -121,7 +132,7 @@ export function useArticleKeyboard({
   }, [
     filtered, focusIndex, setFocusIndex, markFocusedAsRead, nextUnreadInView,
     scheduleRead, toggleRead, markAllRead, goToNextFeed, onJAtEnd, onKBeforeMove,
-    setShowHelp,
+    toggleUnreadFilter, setShowHelp,
   ])
 
   useEffect(() => {

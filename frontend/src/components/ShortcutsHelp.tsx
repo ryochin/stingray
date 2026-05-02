@@ -9,6 +9,7 @@ const SHORTCUTS: readonly (readonly [string, string])[] = [
   ["v / o / Enter", "Open in new tab"],
   ["m", "Toggle read/unread"],
   ["Shift+A", "Mark all as read"],
+  ["u", "Toggle Unread / All"],
   ["?", "Show/hide this help"],
   ["a", "Go to Articles"],
   ["f", "Go to Feeds"],

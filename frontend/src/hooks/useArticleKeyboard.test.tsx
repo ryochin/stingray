@@ -41,12 +41,13 @@ interface HarnessProps {
   onFocus?: (i: number) => void
   onMarkRead?: (i: number) => void
   onJAtEnd?: () => void
+  toggleUnreadFilter?: () => void
 }
 
 
 function Harness({
   filtered, initialFocus, sessionRead = new Set(), goToNextFeed,
-  onFocus, onMarkRead, onJAtEnd,
+  onFocus, onMarkRead, onJAtEnd, toggleUnreadFilter,
 }: HarnessProps) {
   const [focusIndex, setFocusIndex] = useState(initialFocus)
   onFocus?.(focusIndex)
@@ -75,6 +76,7 @@ function Harness({
     goToNextFeed,
     onJAtEnd: onJAtEnd ?? (() => {}),
     onKBeforeMove: () => false,
+    toggleUnreadFilter: toggleUnreadFilter ?? (() => {}),
     setShowHelp: () => {},
   })
   return null
@@ -224,6 +226,90 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(event.defaultPrevented).toBe(true)
     expect(nextFeed).toHaveBeenCalledTimes(1)
     expect(focusSpy).toHaveBeenLastCalledWith(-1)
+  })
+})
+
+
+describe("useArticleKeyboard — u key (toggle Unread/All)", () => {
+  it("invokes toggleUnreadFilter when pressed", () => {
+    const toggle = vi.fn()
+    render(
+      <Harness
+        filtered={[]}
+        initialFocus={-1}
+        goToNextFeed={() => false}
+        toggleUnreadFilter={toggle}
+      />,
+    )
+
+    const event = press("u")
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(toggle).toHaveBeenCalledTimes(1)
+  })
+
+  it("works even when the filtered list is non-empty (does not consume focus)", () => {
+    const toggle = vi.fn()
+    const focusSpy = vi.fn()
+    render(
+      <Harness
+        filtered={[makeArticle({ url: "a", read_at: null })]}
+        initialFocus={0}
+        goToNextFeed={() => false}
+        onFocus={focusSpy}
+        toggleUnreadFilter={toggle}
+      />,
+    )
+
+    press("u")
+
+    expect(toggle).toHaveBeenCalledTimes(1)
+    expect(focusSpy).toHaveBeenLastCalledWith(0)
+  })
+
+  it("is suppressed when modifier keys are held", () => {
+    const toggle = vi.fn()
+    render(
+      <Harness
+        filtered={[]}
+        initialFocus={-1}
+        goToNextFeed={() => false}
+        toggleUnreadFilter={toggle}
+      />,
+    )
+
+    const event = new KeyboardEvent("keydown", {
+      key: "u", bubbles: true, cancelable: true, metaKey: true,
+    })
+    act(() => {
+      document.body.dispatchEvent(event)
+    })
+
+    expect(toggle).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it("is suppressed while typing inside <input>", () => {
+    const toggle = vi.fn()
+    render(
+      <Harness
+        filtered={[]}
+        initialFocus={-1}
+        goToNextFeed={() => false}
+        toggleUnreadFilter={toggle}
+      />,
+    )
+
+    const input = document.createElement("input")
+    document.body.appendChild(input)
+    const event = new KeyboardEvent("keydown", {
+      key: "u", bubbles: true, cancelable: true,
+    })
+    act(() => {
+      input.dispatchEvent(event)
+    })
+
+    expect(toggle).not.toHaveBeenCalled()
   })
 })
 
