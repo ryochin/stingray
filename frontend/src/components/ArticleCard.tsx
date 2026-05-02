@@ -31,15 +31,14 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       const doc = new DOMParser().parseFromString(clean, "text/html")
       transformTwitterBlockquotes(doc)
       const seen = new Set<string>()
+      // Strip dimension/layout attrs so the CSS `max-width: 100%` clamp can
+      // win. Inline `style="width: ..."` and legacy `align="left"` (seen on
+      // AssistOn RSS) otherwise let large feed images burst out of the card.
+      const STRIP_IMG_ATTRS = ["width", "height", "style", "align", "hspace", "vspace", "border"]
       for (const img of doc.querySelectorAll("img")) {
         const src = img.getAttribute("src")
         if (!src) continue
-        // Strip dimension overrides so the CSS `max-width: 100%` clamp can win.
-        // Inline `style="width: ..."` otherwise beats class-selector rules and
-        // lets large feed images burst out of the card.
-        img.removeAttribute("width")
-        img.removeAttribute("height")
-        img.removeAttribute("style")
+        STRIP_IMG_ATTRS.forEach((a) => img.removeAttribute(a))
         if (seen.has(src)) {
           img.closest("a")?.remove() ?? img.remove()
         } else {

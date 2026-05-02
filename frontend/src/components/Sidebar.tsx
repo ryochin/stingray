@@ -11,15 +11,15 @@ interface Props {
 }
 
 export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
+  // Polling is owned by the parent Articles route; the shared TanStack Query
+  // cache means we get the latest data without running redundant timers here.
   const { data: feeds } = useQuery({
     queryKey: ["feeds"],
     queryFn: api.getFeeds,
-    refetchInterval: 15_000,
   })
   const { data: folders } = useQuery({
     queryKey: ["folders"],
     queryFn: api.getFolders,
-    refetchInterval: 15_000,
   })
 
   const [collapsed, setCollapsed] = useState<Set<number>>(() => {

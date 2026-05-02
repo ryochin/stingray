@@ -1,15 +1,15 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from "react"
+import { useState, useRef, useCallback, useMemo, useEffect, lazy, Suspense } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import Editor from "react-simple-code-editor"
-import { highlight, languages } from "prismjs/components/prism-core"
-import "prismjs/components/prism-clike"
-import "prismjs/components/prism-javascript"
-import "prismjs/components/prism-json"
 import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, FeedCreate, FeedStats, FeedCandidate } from "../api/client"
 import Header from "../components/Header"
 import { useFeedMutations } from "../hooks/useFeedMutations"
 import { useFeedDnD } from "../hooks/useFeedDnD"
+import { formatRelativeShort } from "../utils/date"
+
+// prismjs + react-simple-code-editor are only needed when a feed actually
+// has extraction rules to edit; lazy-load them so the Feeds bundle stays slim.
+const ExtractionRulesEditor = lazy(() => import("../components/ExtractionRulesEditor"))
 
 interface AddFeedFormProps {
   onAdd: (f: FeedCreate) => void
@@ -299,100 +299,6 @@ function OpmlButtons({ onError, onImported, feedCount }: { onError: (e: Error) =
   )
 }
 
-function prettifyRules(raw: string | null | undefined): string {
-  try {
-    const parsed = JSON.parse(raw || "{}")
-    return Object.keys(parsed).length > 0 ? JSON.stringify(parsed, null, 2) : ""
-  } catch { return raw || "" }
-}
-
-function ExtractionRulesEditor({ feed, onSaved }: { feed: Feed, onSaved: () => void }) {
-  const [json, setJson] = useState(() => prettifyRules(feed.extraction_rules))
-  const [saving, setSaving] = useState(false)
-  const [savedAt, setSavedAt] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  // Keep editor in sync when the feed prop changes (e.g. after invalidation)
-  useEffect(() => {
-    setJson(prettifyRules(feed.extraction_rules))
-  }, [feed.extraction_rules])
-
-  // Auto-hide the "Saved" indicator after a short delay
-  useEffect(() => {
-    if (savedAt == null) return
-    const timer = setTimeout(() => setSavedAt(null), 2000)
-    return () => clearTimeout(timer)
-  }, [savedAt])
-
-  const validate = (): Record<string, string | null> | null => {
-    try {
-      const parsed = JSON.parse(json)
-      if (typeof parsed !== "object" || Array.isArray(parsed)) {
-        setError("Must be a JSON object")
-        return null
-      }
-      if (!parsed.item || !parsed.title || !parsed.link) {
-        setError("item, title, link are required")
-        return null
-      }
-      return parsed
-    } catch {
-      setError("Invalid JSON")
-      return null
-    }
-  }
-
-  const handleSave = async () => {
-    const parsed = validate()
-    if (!parsed) return
-    setSaving(true)
-    setError(null)
-    try {
-      await api.updateFeedRules(feed.id, parsed)
-      setSavedAt(Date.now())
-      onSaved()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="mt-2 p-2 bg-bg-card rounded border border-border">
-      <div className="text-xs font-semibold text-text-heading mb-1">CSS Extraction Rules</div>
-      <div className="text-xs text-text-dim mb-1.5">{"Keys: item*, title*, link*, link_attr, date, date_attr, thumbnail, thumbnail_attr"}</div>
-      <div className="bg-bg-secondary border border-border rounded overflow-auto max-h-96 resize-y">
-        <Editor
-          value={json}
-          onValueChange={setJson}
-          highlight={(code) => highlight(code, languages.json, "json")}
-          padding={8}
-          textareaClassName="outline-none"
-          className="text-xs font-mono text-text min-h-[180px]"
-          placeholder='{"item": "p", "title": "b a", "link": "b a", "link_attr": "href"}'
-          spellCheck={false}
-        />
-      </div>
-      {error && <div className="text-xs text-red-400 mt-1">{error}</div>}
-      <div className="flex items-center justify-end gap-2 mt-1.5">
-        {savedAt != null && (
-          <span className="text-xs text-green-400 transition-opacity" aria-live="polite">
-            ✓ Saved
-          </span>
-        )}
-        <button
-          onClick={handleSave}
-          disabled={saving || !json.trim()}
-          className="px-3 py-1 rounded text-xs bg-accent text-white hover:opacity-90 transition-opacity disabled:opacity-40"
-        >
-          {saving ? "Saving..." : "Save Rules"}
-        </button>
-      </div>
-    </div>
-  )
-}
-
 function SiteUrlEditor({ feed, onSave }: {
   feed: Feed
   onSave: (siteUrl: string | null) => void
@@ -454,16 +360,16 @@ function FeedDetails({ feed, stats, onDelete, onToggleTranslate, onUpdateSiteUrl
             <span>Articles: {stats.article_count}</span>
             <span>Unread: {stats.unread_count}</span>
             {stats.latest_published && (
-              <span>Latest: {formatRelativeTime(stats.latest_published)}</span>
+              <span>Latest: {formatRelativeShort(stats.latest_published)}</span>
             )}
             {stats.oldest_published && (
-              <span>Oldest: {formatRelativeTime(stats.oldest_published)}</span>
+              <span>Oldest: {formatRelativeShort(stats.oldest_published)}</span>
             )}
           </>
         )}
-        <span>Added: {formatRelativeTime(feed.created_at)}</span>
+        <span>Added: {formatRelativeShort(feed.created_at)}</span>
         {feed.last_fetched_at && (
-          <span>Last fetched: {formatRelativeTime(feed.last_fetched_at)}</span>
+          <span>Last fetched: {formatRelativeShort(feed.last_fetched_at)}</span>
         )}
         {feed.consecutive_failures > 0 && (
           <span className="text-yellow-400">
@@ -492,21 +398,12 @@ function FeedDetails({ feed, stats, onDelete, onToggleTranslate, onUpdateSiteUrl
         </div>
       )}
       {feed.extraction_rules != null && onRulesUpdated && (
-        <ExtractionRulesEditor feed={feed} onSaved={onRulesUpdated} />
+        <Suspense fallback={<div className="mt-2 p-2 text-xs text-text-dim">Loading editor...</div>}>
+          <ExtractionRulesEditor feed={feed} onSaved={onRulesUpdated} />
+        </Suspense>
       )}
     </div>
   )
-}
-
-function formatRelativeTime(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  if (diffMins < 1) return "just now"
-  if (diffMins < 60) return `${diffMins}m ago`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  return `${diffDays}d ago`
 }
 
 type FeedItemProps = {
@@ -636,7 +533,7 @@ function FeedItem({
                 <a href={feed.url} target="_blank" rel="noopener noreferrer" className="text-text-dim hover:text-link-hover ml-1" title={feed.url}>&#8853;</a>
               )}
               {feed.last_fetched_at && (
-                <>{" "}&middot;{" "}{formatRelativeTime(feed.last_fetched_at)}</>
+                <>{" "}&middot;{" "}{formatRelativeShort(feed.last_fetched_at)}</>
               )}
             </div>
           </div>

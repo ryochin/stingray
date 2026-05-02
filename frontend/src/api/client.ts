@@ -270,7 +270,11 @@ export const api = {
 
   exportFilters: async () => {
     const resp = await fetch(`${BASE}/filters/export`)
-    if (!resp.ok) throw new Error("Export failed")
+    if (!resp.ok) {
+      let parsed: unknown = null
+      try { parsed = await resp.json() } catch {}
+      throw new ApiError(`Export failed: ${resp.status} ${resp.statusText}`, resp.status, parsed)
+    }
     const blob = await resp.blob()
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
@@ -283,9 +287,10 @@ export const api = {
   importFilters: async (file: File) => {
     const form = new FormData()
     form.append("file", file)
-    const resp = await fetch(`${BASE}/filters/import`, { method: "POST", body: form })
-    if (!resp.ok) throw new Error("Import failed")
-    return resp.json() as Promise<{ created: number, skipped: number }>
+    return fetchJson<{ created: number, skipped: number }>("/filters/import", {
+      method: "POST",
+      body: form,
+    })
   },
 
   exportOpml: async () => {

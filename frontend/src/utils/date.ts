@@ -23,6 +23,21 @@ export function formatDate(iso: string): string {
   }) + " JST"
 }
 
+// Compact relative time used by the Feeds page badges: "just now", "32m ago",
+// "5h ago", "3d ago". Always tops out at days; older timestamps still get the
+// "Nd ago" form. Different from `formatRelative` below, which is the longer
+// form used in article timestamps.
+export function formatRelativeShort(iso: string, now: Date = new Date()): string {
+  const diffMs = now.getTime() - new Date(iso).getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  if (diffMins < 1) return "just now"
+  if (diffMins < 60) return `${diffMins}m ago`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  const diffDays = Math.floor(diffHours / 24)
+  return `${diffDays}d ago`
+}
+
 // Relative time in a long-ish English form: "just now", "32 min", "5 hr",
 // "1 day 3 hr", "6 days", "3 weeks", "5 months". "min" and "hr" are
 // abbreviations and do not pluralize; day/week/month do.

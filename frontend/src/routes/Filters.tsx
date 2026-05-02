@@ -15,9 +15,21 @@ export default function Filters() {
     queryFn: api.getFilters,
   })
 
+  // Sidebar badges and per-feed counts depend on filter state too, since
+  // get_feed_stats hides filtered articles. Invalidate feed-stats here so
+  // the sidebar reflects filter changes without waiting for the next poll.
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["filters"] })
     queryClient.invalidateQueries({ queryKey: ["articles"] })
+    queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
+  }
+
+  const handleExport = async () => {
+    try {
+      await api.exportFilters()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Export failed")
+    }
   }
 
   const createFilter = useMutation({
@@ -64,7 +76,7 @@ export default function Filters() {
           <h2 className="text-lg font-semibold text-text-heading">Filters</h2>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => api.exportFilters()}
+              onClick={handleExport}
               disabled={!filters?.length}
               className="px-3 py-1.5 rounded text-sm bg-bg-card text-text-muted border border-border hover:text-text transition-colors disabled:opacity-40"
             >

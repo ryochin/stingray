@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import { formatTime } from "../utils/date"
+import { useRefreshSync } from "../hooks/useRefreshSync"
 
 export default function Header() {
   const queryClient = useQueryClient()
@@ -14,19 +14,7 @@ export default function Header() {
     refetchOnWindowFocus: true,
   })
 
-  const prevRunning = useRef(false)
-  useEffect(() => {
-    if (prevRunning.current && !status?.running) {
-      // Refresh just finished — nudge every data view so the user sees the
-      // final state without waiting for the next scheduled poll tick, no
-      // matter which page they're on.
-      queryClient.invalidateQueries({ queryKey: ["articles"] })
-      queryClient.invalidateQueries({ queryKey: ["feeds"] })
-      queryClient.invalidateQueries({ queryKey: ["folders"] })
-      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
-    }
-    prevRunning.current = status?.running ?? false
-  }, [status?.running, queryClient])
+  useRefreshSync(status?.running)
 
   const refresh = useMutation({
     mutationFn: api.refresh,

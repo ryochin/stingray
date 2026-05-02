@@ -1,4 +1,6 @@
-import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from "react"
+import { useState, useMemo, useEffect, useRef, useCallback } from "react"
+import { smoothScrollTo } from "../utils/smoothScroll"
+import { useFocusStabilizer } from "../hooks/useFocusStabilizer"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { api, faviconUrl } from "../api/client"
@@ -125,17 +127,9 @@ export default function Articles() {
     refetchInterval: activeInterval,
   })
 
-  // When a refresh begins, force an immediate refetch so the sidebar reflects
-  // the first finished feed without waiting for the next poll tick.
-  const prevRunning = useRef(false)
-  useEffect(() => {
-    if (running && !prevRunning.current) {
-      queryClient.invalidateQueries({ queryKey: ["articles"] })
-      queryClient.invalidateQueries({ queryKey: ["feeds"] })
-      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
-    }
-    prevRunning.current = running
-  }, [running, queryClient])
+  // Both transitions (idle→running, running→idle) are owned by `useRefreshSync`
+  // mounted from `Header`, which the route renders. The shared QueryClient
+  // cache means we don't need our own copy here.
 
   const { data: folders } = useQuery({
     queryKey: ["folders"],
@@ -224,7 +218,7 @@ export default function Articles() {
     } else if (selection.type === "folder" && !folders.some((f) => f.id === selection.id)) {
       updateSelection({ type: "all" })
     }
-  }, [feeds, folders])
+  }, [feeds, folders, selection, updateSelection])
 
   // Clear session reads and reset focus when selection changes. Resetting
   // `localReadCount` is what actually invalidates the `sessionReadByFeed`
@@ -313,91 +307,16 @@ export default function Articles() {
       index === ALL_CAUGHT_UP_INDEX ? "__all_caught_up__" : (filtered[index]?.url ?? index),
   })
 
-  // Preserve focus identity and visual position when `filtered` shifts
-  // (e.g. background refetch prepends new articles). Without this, the
-  // focused card slides out from under the user and the viewport appears
-  // to jump since scrollTop is preserved but cards are pushed down.
-  //
-  // Scope: only `filtered` changes caused by background data updates.
-  // `selection` / `showUnreadOnly` toggles trigger their own reset effect
-  // (focus → -1, scrollTo top); running compensation there would leak
-  // `skipFocusScroll` into an unrelated scroll pass.
-  const prevFocusSnapshot = useRef<{
-    filtered: typeof filtered
-    index: number
-    url: string
-    offset: number
-  } | null>(null)
-  const prevSelectionRef = useRef(selection)
-  const prevShowUnreadOnlyRef = useRef(showUnreadOnly)
-  const prevTimeRangeIdRef = useRef(timeRangeId)
-  // Set right before a programmatic focusIndex change whose scroll the
-  // subsequent focus-scroll effect must NOT override (the compensation
-  // below already places the card visually).
-  const skipFocusScroll = useRef(false)
-  useLayoutEffect(() => {
-    const main = mainRef.current
-    const prev = prevFocusSnapshot.current
-    const selectionChanged = prevSelectionRef.current !== selection
-    const filterToggled = prevShowUnreadOnlyRef.current !== showUnreadOnly
-    const timeRangeChanged = prevTimeRangeIdRef.current !== timeRangeId
-    prevSelectionRef.current = selection
-    prevShowUnreadOnlyRef.current = showUnreadOnly
-    prevTimeRangeIdRef.current = timeRangeId
-
-    // User-initiated list reset is handled elsewhere; drop the snapshot so
-    // the next refetch-driven change re-captures from the post-reset state.
-    if (selectionChanged || filterToggled || timeRangeChanged) {
-      prevFocusSnapshot.current = null
-      return
-    }
-
-    // Compensation only applies when the user's focus stayed put but the
-    // list shifted beneath it. If focusIndex changed from the snapshot,
-    // the focus move itself was user- or program-initiated (j/k, click,
-    // auto-focus) and no rebinding is needed — reverting to prev.url
-    // would cancel that move (e.g. j-advance whose scheduleRead forces
-    // `filtered` to re-memo into a new reference).
-    if (
-      main
-      && prev
-      && prev.filtered !== filtered
-      && focusIndex === prev.index
-      && focusIndex >= 0
-      && filtered[focusIndex]?.url !== prev.url
-    ) {
-      const newIndex = filtered.findIndex((a) => a.url === prev.url)
-      if (newIndex < 0) {
-        // Focused article vanished (server-side delete, read state changed
-        // outside this session, etc). Avoid silently inheriting whichever
-        // article slid into the old index slot; clear the snapshot and let
-        // the normal render continue with focusIndex at its numeric slot.
-        prevFocusSnapshot.current = null
-        return
-      }
-      const newOffset = virtualizer.getOffsetForIndex(newIndex, "start")?.[0]
-      if (newOffset != null) {
-        main.scrollTop += newOffset - prev.offset
-      }
-      skipFocusScroll.current = true
-      setFocusIndex(newIndex)
-      prevFocusSnapshot.current = {
-        filtered,
-        index: newIndex,
-        url: prev.url,
-        offset: newOffset ?? prev.offset,
-      }
-      return
-    }
-
-    const currentUrl = focusIndex >= 0 ? filtered[focusIndex]?.url ?? null : null
-    const currentOffset = focusIndex >= 0
-      ? virtualizer.getOffsetForIndex(focusIndex, "start")?.[0] ?? null
-      : null
-    prevFocusSnapshot.current = currentUrl != null && currentOffset != null
-      ? { filtered, index: focusIndex, url: currentUrl, offset: currentOffset }
-      : null
-  }, [filtered, focusIndex, virtualizer, selection, showUnreadOnly, timeRangeId])
+  const skipFocusScroll = useFocusStabilizer({
+    filtered,
+    focusIndex,
+    setFocusIndex,
+    virtualizer,
+    mainRef,
+    selection,
+    showUnreadOnly,
+    timeRangeId,
+  })
 
   // Scroll focused article into view (custom rAF smooth scroll for tunable duration)
   useEffect(() => {
@@ -411,9 +330,15 @@ export default function Articles() {
     const el = articleRefs.current.get(focusIndex)
     // Out-of-range (virtualized away): jump with virtualizer and let the
     // next render place the card; the rAF smooth path below handles the
-    // in-range case.
+    // in-range case. For the first article, bypass the virtualizer —
+    // its scrollMargin would land us at headerHeight instead of 0,
+    // leaving the sticky header in its stuck (small) state.
     if (!el) {
-      virtualizer.scrollToIndex(focusIndex, { align: "start" })
+      if (focusIndex === 0) {
+        main.scrollTop = 0
+      } else {
+        virtualizer.scrollToIndex(focusIndex, { align: "start" })
+      }
       return
     }
     // For the first article, scroll all the way to the top so the sticky
@@ -429,22 +354,7 @@ export default function Articles() {
         : main.getBoundingClientRect().top
       target = main.scrollTop + el.getBoundingClientRect().top - headerBottom
     }
-    const start = main.scrollTop
-    const distance = target - start
-    if (Math.abs(distance) < 1) return
-    const duration = 150
-    const t0 = performance.now()
-    const step = (now: number) => {
-      const p = Math.min(1, (now - t0) / duration)
-      const eased = 1 - Math.pow(1 - p, 3) // ease-out cubic
-      main.scrollTop = start + distance * eased
-      if (p < 1) {
-        focusScrollRafRef.current = requestAnimationFrame(step)
-      } else {
-        focusScrollRafRef.current = null
-      }
-    }
-    focusScrollRafRef.current = requestAnimationFrame(step)
+    smoothScrollTo(main, target, { rafRef: focusScrollRafRef })
     return () => {
       if (focusScrollRafRef.current != null) {
         cancelAnimationFrame(focusScrollRafRef.current)
@@ -565,18 +475,9 @@ export default function Articles() {
     const target = focusIndex === 0
       ? 0
       : main.scrollTop + cardTop - headerBottom
-    const start = main.scrollTop
-    const distance = target - start
-    if (Math.abs(distance) < 1) return true
-    const duration = 150
-    const t0 = performance.now()
-    const step = (now: number) => {
-      const p = Math.min(1, (now - t0) / duration)
-      const eased = 1 - Math.pow(1 - p, 3)
-      main.scrollTop = start + distance * eased
-      if (p < 1) requestAnimationFrame(step)
-    }
-    requestAnimationFrame(step)
+    // Shared ref means the focus-scroll effect and this realign can preempt
+    // each other safely instead of leaking concurrent rAF loops.
+    smoothScrollTo(main, target, { rafRef: focusScrollRafRef })
     return true
   }, [focusIndex, virtualizer])
 
