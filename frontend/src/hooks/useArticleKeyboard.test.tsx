@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
+import type { Mock } from "vitest"
 import { render, act } from "@testing-library/react"
 import { useState } from "react"
 import { useArticleKeyboard } from "./useArticleKeyboard"
@@ -23,8 +24,8 @@ function makeArticle(overrides: Partial<Article> & { url: string }): Article {
 
 
 function press(key: string): KeyboardEvent {
-  const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
-  act(() => {
+  const event: KeyboardEvent = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
+  act((): void => {
     document.body.dispatchEvent(event)
   })
   return event
@@ -48,18 +49,18 @@ interface HarnessProps {
 function Harness({
   filtered, initialFocus, sessionRead = new Set(), goToNextFeed,
   onFocus, onMarkRead, onJAtEnd, toggleUnreadFilter,
-}: HarnessProps) {
-  const [focusIndex, setFocusIndex] = useState(initialFocus)
+}: HarnessProps): null {
+  const [focusIndex, setFocusIndex] = useState<number>(initialFocus)
   onFocus?.(focusIndex)
 
-  const markFocusedAsRead = (i: number) => {
+  const markFocusedAsRead = (i: number): void => {
     if (i < 0 || i >= filtered.length) return
     onMarkRead?.(i)
   }
-  const nextUnreadInView = (after: number) => {
-    for (let i = after + 1; i < filtered.length; i++) {
-      const a = filtered[i]
-      if (a.read_at == null && !sessionRead.has(a.url)) return i
+  const nextUnreadInView = (after: number): number => {
+    for (let i: number = after + 1; i < filtered.length; i++) {
+      const article: Article = filtered[i]
+      if (article.read_at == null && !sessionRead.has(article.url)) return i
     }
     return -1
   }
@@ -70,34 +71,34 @@ function Harness({
     setFocusIndex,
     markFocusedAsRead,
     nextUnreadInView,
-    scheduleRead: () => {},
-    toggleRead: () => {},
-    markAllRead: () => {},
+    scheduleRead: (): void => {},
+    toggleRead: (): void => {},
+    markAllRead: (): void => {},
     goToNextFeed,
-    onJAtEnd: onJAtEnd ?? (() => {}),
-    onKBeforeMove: () => false,
-    toggleUnreadFilter: toggleUnreadFilter ?? (() => {}),
-    setShowHelp: () => {},
+    onJAtEnd: onJAtEnd ?? ((): void => {}),
+    onKBeforeMove: (): boolean => false,
+    toggleUnreadFilter: toggleUnreadFilter ?? ((): void => {}),
+    setShowHelp: (): void => {},
   })
   return null
 }
 
 
-afterEach(() => {
+afterEach((): void => {
   document.body.innerHTML = ""
 })
 
 
-describe("useArticleKeyboard — Space key (regression: feed jump while unread remain)", () => {
-  it("does NOT intercept Space when unread articles remain after focus — browser scroll wins", () => {
-    const articles = [
+describe("useArticleKeyboard — Space key (regression: feed jump while unread remain)", (): void => {
+  it("does NOT intercept Space when unread articles remain after focus — browser scroll wins", (): void => {
+    const articles: Article[] = [
       makeArticle({ url: "a", read_at: null }),
       makeArticle({ url: "b", read_at: null }),
       makeArticle({ url: "c", read_at: null }),
     ]
-    const focusSpy = vi.fn()
-    const markSpy = vi.fn()
-    const nextFeed = vi.fn(() => true)
+    const focusSpy: Mock = vi.fn()
+    const markSpy: Mock = vi.fn()
+    const nextFeed: Mock = vi.fn((): boolean => true)
     render(
       <Harness
         filtered={articles}
@@ -108,7 +109,7 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
       />,
     )
 
-    const event = press(" ")
+    const event: KeyboardEvent = press(" ")
 
     expect(event.defaultPrevented).toBe(false)
     expect(nextFeed).not.toHaveBeenCalled()
@@ -117,14 +118,14 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(focusSpy).toHaveBeenLastCalledWith(0)
   })
 
-  it("when focus is on the last unread, jumps to the next feed", () => {
-    const articles = [
+  it("when focus is on the last unread, jumps to the next feed", (): void => {
+    const articles: Article[] = [
       makeArticle({ url: "a", read_at: "2024-01-01T00:00:00Z" }),
       makeArticle({ url: "b", read_at: null }), // last unread
     ]
-    const focusSpy = vi.fn()
-    const markSpy = vi.fn()
-    const nextFeed = vi.fn(() => true)
+    const focusSpy: Mock = vi.fn()
+    const markSpy: Mock = vi.fn()
+    const nextFeed: Mock = vi.fn((): boolean => true)
     render(
       <Harness
         filtered={articles}
@@ -135,7 +136,7 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
       />,
     )
 
-    const event = press(" ")
+    const event: KeyboardEvent = press(" ")
 
     expect(event.defaultPrevented).toBe(true)
     expect(nextFeed).toHaveBeenCalledTimes(1)
@@ -144,12 +145,12 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(focusSpy).toHaveBeenLastCalledWith(-1)
   })
 
-  it("if goToNextFeed reports no further feed, focus stays put", () => {
-    const articles = [
+  it("if goToNextFeed reports no further feed, focus stays put", (): void => {
+    const articles: Article[] = [
       makeArticle({ url: "a", read_at: null }),
     ]
-    const focusSpy = vi.fn()
-    const nextFeed = vi.fn(() => false)
+    const focusSpy: Mock = vi.fn()
+    const nextFeed: Mock = vi.fn((): boolean => false)
     render(
       <Harness
         filtered={articles}
@@ -165,16 +166,16 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(focusSpy).toHaveBeenLastCalledWith(0)
   })
 
-  it("session-read items count as read when deciding whether to jump feeds", () => {
+  it("session-read items count as read when deciding whether to jump feeds", (): void => {
     // a is the focus; b is session-read; c is the only true unread remaining.
     // Because c is unread, Space must NOT be intercepted.
-    const articles = [
+    const articles: Article[] = [
       makeArticle({ url: "a", read_at: null }),
       makeArticle({ url: "b", read_at: null }),
       makeArticle({ url: "c", read_at: null }),
     ]
-    const focusSpy = vi.fn()
-    const nextFeed = vi.fn(() => true)
+    const focusSpy: Mock = vi.fn()
+    const nextFeed: Mock = vi.fn((): boolean => true)
     const { rerender } = render(
       <Harness
         filtered={articles}
@@ -185,7 +186,7 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
       />,
     )
 
-    let event = press(" ")
+    let event: KeyboardEvent = press(" ")
     expect(event.defaultPrevented).toBe(false)
     expect(nextFeed).not.toHaveBeenCalled()
 
@@ -204,14 +205,14 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(nextFeed).toHaveBeenCalledTimes(1)
   })
 
-  it("with no unread anywhere after focus, jumps to next feed", () => {
-    const articles = [
+  it("with no unread anywhere after focus, jumps to next feed", (): void => {
+    const articles: Article[] = [
       makeArticle({ url: "a", read_at: null }),
       makeArticle({ url: "b", read_at: "2024-01-01T00:00:00Z" }),
       makeArticle({ url: "c", read_at: "2024-01-01T00:00:00Z" }),
     ]
-    const focusSpy = vi.fn()
-    const nextFeed = vi.fn(() => true)
+    const focusSpy: Mock = vi.fn()
+    const nextFeed: Mock = vi.fn((): boolean => true)
     render(
       <Harness
         filtered={articles}
@@ -221,7 +222,7 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
       />,
     )
 
-    const event = press(" ")
+    const event: KeyboardEvent = press(" ")
 
     expect(event.defaultPrevented).toBe(true)
     expect(nextFeed).toHaveBeenCalledTimes(1)
@@ -230,32 +231,32 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
 })
 
 
-describe("useArticleKeyboard — u key (toggle Unread/All)", () => {
+describe("useArticleKeyboard — u key (toggle Unread/All)", (): void => {
   it("invokes toggleUnreadFilter when pressed", () => {
-    const toggle = vi.fn()
+    const toggle: Mock = vi.fn()
     render(
       <Harness
         filtered={[]}
         initialFocus={-1}
-        goToNextFeed={() => false}
+        goToNextFeed={(): boolean => false}
         toggleUnreadFilter={toggle}
       />,
     )
 
-    const event = press("u")
+    const event: KeyboardEvent = press("u")
 
     expect(event.defaultPrevented).toBe(true)
     expect(toggle).toHaveBeenCalledTimes(1)
   })
 
   it("works even when the filtered list is non-empty (does not consume focus)", () => {
-    const toggle = vi.fn()
-    const focusSpy = vi.fn()
+    const toggle: Mock = vi.fn()
+    const focusSpy: Mock = vi.fn()
     render(
       <Harness
         filtered={[makeArticle({ url: "a", read_at: null })]}
         initialFocus={0}
-        goToNextFeed={() => false}
+        goToNextFeed={(): boolean => false}
         onFocus={focusSpy}
         toggleUnreadFilter={toggle}
       />,
@@ -268,17 +269,17 @@ describe("useArticleKeyboard — u key (toggle Unread/All)", () => {
   })
 
   it("is suppressed when modifier keys are held", () => {
-    const toggle = vi.fn()
+    const toggle: Mock = vi.fn()
     render(
       <Harness
         filtered={[]}
         initialFocus={-1}
-        goToNextFeed={() => false}
+        goToNextFeed={(): boolean => false}
         toggleUnreadFilter={toggle}
       />,
     )
 
-    const event = new KeyboardEvent("keydown", {
+    const event: KeyboardEvent = new KeyboardEvent("keydown", {
       key: "u", bubbles: true, cancelable: true, metaKey: true,
     })
     act(() => {
@@ -290,19 +291,19 @@ describe("useArticleKeyboard — u key (toggle Unread/All)", () => {
   })
 
   it("is suppressed while typing inside <input>", () => {
-    const toggle = vi.fn()
+    const toggle: Mock = vi.fn()
     render(
       <Harness
         filtered={[]}
         initialFocus={-1}
-        goToNextFeed={() => false}
+        goToNextFeed={(): boolean => false}
         toggleUnreadFilter={toggle}
       />,
     )
 
-    const input = document.createElement("input")
+    const input: HTMLInputElement = document.createElement("input")
     document.body.appendChild(input)
-    const event = new KeyboardEvent("keydown", {
+    const event: KeyboardEvent = new KeyboardEvent("keydown", {
       key: "u", bubbles: true, cancelable: true,
     })
     act(() => {
@@ -314,17 +315,17 @@ describe("useArticleKeyboard — u key (toggle Unread/All)", () => {
 })
 
 
-describe("useArticleKeyboard — j key at end of list", () => {
-  it("on the last item, fires onJAtEnd, keeps focus, does NOT jump feeds", () => {
-    const articles = [
+describe("useArticleKeyboard — j key at end of list", (): void => {
+  it("on the last item, fires onJAtEnd, keeps focus, does NOT jump feeds", (): void => {
+    const articles: Article[] = [
       makeArticle({ url: "a", read_at: null }),
       makeArticle({ url: "b", read_at: null }),
       makeArticle({ url: "c", read_at: null }),
     ]
-    const focusSpy = vi.fn()
-    const markSpy = vi.fn()
-    const nextFeed = vi.fn(() => true)
-    const jAtEnd = vi.fn()
+    const focusSpy: Mock = vi.fn()
+    const markSpy: Mock = vi.fn()
+    const nextFeed: Mock = vi.fn((): boolean => true)
+    const jAtEnd: Mock = vi.fn()
     render(
       <Harness
         filtered={articles}
@@ -345,14 +346,14 @@ describe("useArticleKeyboard — j key at end of list", () => {
     expect(focusSpy).toHaveBeenLastCalledWith(2)
   })
 
-  it("not on the last item, advances focus and does NOT fire onJAtEnd", () => {
-    const articles = [
+  it("not on the last item, advances focus and does NOT fire onJAtEnd", (): void => {
+    const articles: Article[] = [
       makeArticle({ url: "a", read_at: null }),
       makeArticle({ url: "b", read_at: null }),
     ]
-    const focusSpy = vi.fn()
-    const jAtEnd = vi.fn()
-    const nextFeed = vi.fn(() => true)
+    const focusSpy: Mock = vi.fn()
+    const jAtEnd: Mock = vi.fn()
+    const nextFeed: Mock = vi.fn((): boolean => true)
     render(
       <Harness
         filtered={articles}

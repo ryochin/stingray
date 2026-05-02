@@ -25,13 +25,13 @@ export function smoothScrollTo(
     cancelAnimationFrame(rafRef.current)
     rafRef.current = null
   }
-  const start = scrollEl.scrollTop
-  const distance = target - start
+  const start: number = scrollEl.scrollTop
+  const distance: number = target - start
   if (Math.abs(distance) < 1) return
-  const t0 = performance.now()
+  const t0: number = performance.now()
   const step = (now: number): void => {
-    const p = Math.min(1, (now - t0) / duration)
-    const eased = 1 - Math.pow(1 - p, 3) // ease-out cubic
+    const p: number = Math.min(1, (now - t0) / duration)
+    const eased: number = 1 - Math.pow(1 - p, 3) // ease-out cubic
     scrollEl.scrollTop = start + distance * eased
     if (p < 1) {
       rafRef.current = requestAnimationFrame(step)

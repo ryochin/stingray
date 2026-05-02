@@ -4,13 +4,13 @@ import { useSyncExternalStore } from "react"
 // labels across hundreds of cards are all driven from one setInterval.
 
 const TICK_MS = 60_000
-const listeners = new Set<() => void>()
-let tick = Date.now()
+const listeners: Set<() => void> = new Set<() => void>()
+let tick: number = Date.now()
 let timer: ReturnType<typeof setInterval> | null = null
 
-function ensureTicking() {
+function ensureTicking(): void {
   if (timer != null) return
-  timer = setInterval(() => {
+  timer = setInterval((): void => {
     tick = Date.now()
     for (const l of listeners) l()
   }, TICK_MS)
@@ -19,7 +19,7 @@ function ensureTicking() {
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   ensureTicking()
-  return () => {
+  return (): void => {
     listeners.delete(listener)
     if (listeners.size === 0 && timer != null) {
       clearInterval(timer)
@@ -33,6 +33,6 @@ function getSnapshot(): number {
 }
 
 export function useNow(): Date {
-  const ms = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const ms: number = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   return new Date(ms)
 }

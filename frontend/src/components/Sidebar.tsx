@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import type { JSX } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, Selection } from "../api/client"
@@ -10,7 +11,7 @@ interface Props {
   unreadCounts: Map<number, number>
 }
 
-export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
+export default function Sidebar({ selection, onSelect, unreadCounts }: Props): JSX.Element {
   // Polling is owned by the parent Articles route; the shared TanStack Query
   // cache means we get the latest data without running redundant timers here.
   const { data: feeds } = useQuery({
@@ -22,9 +23,9 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     queryFn: api.getFolders,
   })
 
-  const [collapsed, setCollapsed] = useState<Set<number>>(() => {
+  const [collapsed, setCollapsed] = useState<Set<number>>((): Set<number> => {
     try {
-      const saved = sessionStorage.getItem("collapsed-folders")
+      const saved: string | null = sessionStorage.getItem("collapsed-folders")
       if (saved) return new Set(JSON.parse(saved) as number[])
     } catch {}
     return new Set()
@@ -32,56 +33,56 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
   // Folders auto-expanded by a selection change. Transient (not persisted).
   // When selection leaves an auto-expanded folder it gets re-collapsed.
   // Promoted to "sticky open" when the user clicks a feed in it or toggles the caret.
-  const [autoExpanded, setAutoExpanded] = useState<Set<number>>(new Set())
+  const [autoExpanded, setAutoExpanded] = useState<Set<number>>(new Set<number>())
 
-  const enabledFeeds = feeds?.filter((f) => f.enabled) ?? []
-  const totalUnreadCount = totalUnread(unreadCounts)
-  const feedsByFolder = groupFeedsByFolder(feeds)
+  const enabledFeeds: Feed[] = feeds?.filter((feedItem: Feed): boolean => feedItem.enabled) ?? []
+  const totalUnreadCount: number = totalUnread(unreadCounts)
+  const feedsByFolder: Map<number | null, Feed[]> = groupFeedsByFolder(feeds)
 
-  useEffect(() => {
-    const selectedFolderId =
+  useEffect((): void => {
+    const selectedFolderId: number | null =
       selection.type === "feed"
-        ? enabledFeeds.find((feed) => feed.id === selection.id)?.folder_id ?? null
+        ? enabledFeeds.find((feedItem: Feed): boolean => feedItem.id === selection.id)?.folder_id ?? null
         : null
 
     const toRecollapse: number[] = []
     for (const id of autoExpanded) {
       if (id !== selectedFolderId) toRecollapse.push(id)
     }
-    const shouldAutoExpand =
+    const shouldAutoExpand: boolean =
       selectedFolderId != null && collapsed.has(selectedFolderId) && !autoExpanded.has(selectedFolderId)
 
     if (toRecollapse.length === 0 && !shouldAutoExpand) return
 
-    const nextAuto = new Set<number>()
+    const nextAuto: Set<number> = new Set<number>()
     if (selectedFolderId != null && autoExpanded.has(selectedFolderId)) nextAuto.add(selectedFolderId)
-    if (shouldAutoExpand) nextAuto.add(selectedFolderId)
+    if (shouldAutoExpand) nextAuto.add(selectedFolderId!)
 
-    const nextCollapsed = new Set(collapsed)
+    const nextCollapsed: Set<number> = new Set(collapsed)
     for (const id of toRecollapse) nextCollapsed.add(id)
-    if (shouldAutoExpand) nextCollapsed.delete(selectedFolderId)
+    if (shouldAutoExpand) nextCollapsed.delete(selectedFolderId!)
 
     setAutoExpanded(nextAuto)
     setCollapsed(nextCollapsed)
     sessionStorage.setItem("collapsed-folders", JSON.stringify([...nextCollapsed]))
   }, [selection, enabledFeeds, collapsed, autoExpanded])
 
-  const folderUnread = (folderId: number) =>
+  const folderUnread = (folderId: number): number =>
     folderUnreadCount(feedsByFolder, unreadCounts, folderId)
 
-  const promoteToSticky = (folderId: number) => {
-    setAutoExpanded((prev) => {
+  const promoteToSticky = (folderId: number): void => {
+    setAutoExpanded((prev: Set<number>): Set<number> => {
       if (!prev.has(folderId)) return prev
-      const next = new Set(prev)
+      const next: Set<number> = new Set(prev)
       next.delete(folderId)
       return next
     })
   }
 
-  const toggleCollapse = (folderId: number) => {
+  const toggleCollapse = (folderId: number): void => {
     promoteToSticky(folderId)
-    setCollapsed((prev) => {
-      const next = new Set(prev)
+    setCollapsed((prev: Set<number>): Set<number> => {
+      const next: Set<number> = new Set(prev)
       if (next.has(folderId)) next.delete(folderId)
       else next.add(folderId)
       sessionStorage.setItem("collapsed-folders", JSON.stringify([...next]))
@@ -89,26 +90,26 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     })
   }
 
-  const isActive = (sel: Selection) => {
+  const isActive = (sel: Selection): boolean => {
     if (selection.type !== sel.type) return false
     if (sel.type === "all") return true
     return "id" in sel && "id" in selection && sel.id === selection.id
   }
 
-  const btnClass = (active: boolean) =>
+  const btnClass = (active: boolean): string =>
     `flex justify-between items-center w-full px-4 py-1.5 text-xs text-left transition-colors cursor-pointer focus:outline-none ${
       active ? "text-accent-text" : "text-text-muted hover:text-text"
     }`
 
-  const badgeClass = (active: boolean) =>
+  const badgeClass = (active: boolean): string =>
     `text-xs px-2 py-0.5 rounded-full shrink-0 ${
       active ? "bg-accent-bg text-accent-text" : "bg-bg-card text-text-muted"
     }`
 
-  const renderFeed = (feed: Feed) => {
-    const unread = unreadCounts.get(feed.id) ?? 0
-    const active = isActive({ type: "feed", id: feed.id })
-    const favicon = faviconUrl(feed)
+  const renderFeed = (feed: Feed): JSX.Element => {
+    const unread: number = unreadCounts.get(feed.id) ?? 0
+    const active: boolean = isActive({ type: "feed", id: feed.id })
+    const favicon: string | null = faviconUrl(feed)
     return (
       <button
         key={feed.id}
@@ -132,8 +133,8 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
     )
   }
 
-  const sortedFolders = (folders ?? []).slice().sort((a, b) => a.position - b.position || a.id - b.id)
-  const uncategorized = feedsByFolder.get(null) ?? []
+  const sortedFolders: Folder[] = (folders ?? []).slice().sort((a: Folder, b: Folder): number => a.position - b.position || a.id - b.id)
+  const uncategorized: Feed[] = feedsByFolder.get(null) ?? []
 
   return (
     <nav className="w-80 shrink-0 bg-bg-secondary border-r border-border overflow-y-auto py-2">
@@ -150,23 +151,23 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
       <div className="border-b border-border mx-3 my-1" />
 
       {/* Folders */}
-      {sortedFolders.map((folder: Folder) => {
-        const isOpen = !collapsed.has(folder.id)
-        const unread = folderUnread(folder.id)
-        const folderActive = isActive({ type: "folder", id: folder.id })
-        const folderFeeds = feedsByFolder.get(folder.id) ?? []
+      {sortedFolders.map((folder: Folder): JSX.Element => {
+        const isOpen: boolean = !collapsed.has(folder.id)
+        const unread: number = folderUnread(folder.id)
+        const folderActive: boolean = isActive({ type: "folder", id: folder.id })
+        const folderFeeds: Feed[] = feedsByFolder.get(folder.id) ?? []
 
         return (
           <div key={folder.id}>
             <div className="flex items-center">
               <button
-                onClick={() => toggleCollapse(folder.id)}
+                onClick={(): void => toggleCollapse(folder.id)}
                 className="pl-3 pr-1.5 py-1.5 text-text-dim text-base leading-none focus:outline-none"
               >
                 {isOpen ? "\u25BE" : "\u25B8"}
               </button>
               <button
-                onClick={() => onSelect({ type: "folder", id: folder.id })}
+                onClick={(): void => onSelect({ type: "folder", id: folder.id })}
                 className={`flex-1 flex justify-between items-center pr-4 py-1.5 text-sm text-left transition-colors cursor-pointer focus:outline-none ${
                   folderActive ? "text-accent-text font-medium" : "text-text hover:text-text-heading"
                 }`}
@@ -175,7 +176,7 @@ export default function Sidebar({ selection, onSelect, unreadCounts }: Props) {
                 {unread > 0 && <span className={badgeClass(folderActive)}>{unread}</span>}
               </button>
             </div>
-            {isOpen && folderFeeds.map((feed) => (
+            {isOpen && folderFeeds.map((feed: Feed): JSX.Element => (
               <div key={feed.id} className="pl-4">
                 {renderFeed(feed)}
               </div>

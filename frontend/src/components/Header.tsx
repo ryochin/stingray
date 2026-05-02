@@ -1,15 +1,18 @@
+import type { JSX } from "react"
 import { Link } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { Query, QueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
+import type { RefreshStatus } from "../api/client"
 import { formatTime } from "../utils/date"
 import { useRefreshSync } from "../hooks/useRefreshSync"
 
-export default function Header() {
-  const queryClient = useQueryClient()
+export default function Header(): JSX.Element {
+  const queryClient: QueryClient = useQueryClient()
   const { data: status } = useQuery({
     queryKey: ["status"],
     queryFn: api.getStatus,
-    refetchInterval: (query) =>
+    refetchInterval: (query: Query<RefreshStatus>): number =>
       query.state.data?.running ? 2000 : 30_000,
     refetchOnWindowFocus: true,
   })
@@ -18,7 +21,7 @@ export default function Header() {
 
   const refresh = useMutation({
     mutationFn: api.refresh,
-    onSuccess: () => {
+    onSuccess: (): void => {
       queryClient.invalidateQueries({ queryKey: ["status"] })
     },
   })

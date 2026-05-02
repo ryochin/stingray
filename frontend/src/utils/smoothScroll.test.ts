@@ -8,9 +8,9 @@ let rafQueue: Entry[] = []
 let nextHandle = 1
 let now = 0
 
-function tick(ms: number) {
+function tick(ms: number): void {
   now += ms
-  const queue = rafQueue
+  const queue: Entry[] = rafQueue
   rafQueue = []
   for (const { cb } of queue) cb(now)
 }
@@ -19,19 +19,19 @@ beforeEach(() => {
   rafQueue = []
   nextHandle = 1
   now = 0
-  vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => {
-    const handle = nextHandle++
+  vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void): number => {
+    const handle: number = nextHandle++
     rafQueue.push({ handle, cb })
     return handle
   })
-  vi.stubGlobal("cancelAnimationFrame", (h: number) => {
-    rafQueue = rafQueue.filter((entry) => entry.handle !== h)
+  vi.stubGlobal("cancelAnimationFrame", (h: number): void => {
+    rafQueue = rafQueue.filter((entry: Entry): boolean => entry.handle !== h)
   })
   vi.stubGlobal("performance", { now: () => now })
 })
 
-function makeScrollEl(initial = 0): HTMLElement {
-  const el = document.createElement("div")
+function makeScrollEl(initial: number = 0): HTMLElement {
+  const el: HTMLElement = document.createElement("div")
   Object.defineProperty(el, "scrollTop", {
     value: initial,
     writable: true,
@@ -42,8 +42,8 @@ function makeScrollEl(initial = 0): HTMLElement {
 
 describe("smoothScrollTo", () => {
   it("animates from start to target across rAF ticks", () => {
-    const el = makeScrollEl(0)
-    const rafRef = { current: null as number | null }
+    const el: HTMLElement = makeScrollEl(0)
+    const rafRef: { current: number | null } = { current: null as number | null }
     smoothScrollTo(el, 100, { duration: 150, rafRef })
     expect(rafRef.current).not.toBeNull()
     tick(75)  // halfway
@@ -55,10 +55,10 @@ describe("smoothScrollTo", () => {
   })
 
   it("cancels a previous in-flight animation before deciding sub-pixel no-op", () => {
-    const el = makeScrollEl(0)
-    const rafRef = { current: null as number | null }
+    const el: HTMLElement = makeScrollEl(0)
+    const rafRef: { current: number | null } = { current: null as number | null }
     smoothScrollTo(el, 100, { duration: 150, rafRef })
-    const firstHandle = rafRef.current
+    const firstHandle: number | null = rafRef.current
     expect(firstHandle).not.toBeNull()
 
     // Re-target the same point we'd reach after the half-tick. The new call
@@ -69,17 +69,17 @@ describe("smoothScrollTo", () => {
     expect(rafRef.current).toBeNull()
 
     // Drain the queue: the old rAF must NOT continue mutating scrollTop.
-    const before = el.scrollTop
+    const before: number = el.scrollTop
     tick(1000)
     expect(el.scrollTop).toBe(before)
   })
 
   it("preempts a previous animation when called with a new target", () => {
-    const el = makeScrollEl(0)
-    const rafRef = { current: null as number | null }
+    const el: HTMLElement = makeScrollEl(0)
+    const rafRef: { current: number | null } = { current: null as number | null }
     smoothScrollTo(el, 200, { duration: 150, rafRef })
     tick(50)
-    const handleAfterFirst = rafRef.current
+    const handleAfterFirst: number | null = rafRef.current
     smoothScrollTo(el, 0, { duration: 150, rafRef })
     expect(rafRef.current).not.toBe(handleAfterFirst)
     tick(150)

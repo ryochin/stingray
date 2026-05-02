@@ -7,14 +7,14 @@ import { formatTime, formatDate, formatRelative } from "./date"
 describe("formatTime", () => {
   it("renders MM/DD HH:mm in JST", () => {
     // 2024-01-02T00:00:00Z = 2024-01-02 09:00 JST
-    const out = formatTime("2024-01-02T00:00:00Z")
+    const out: string = formatTime("2024-01-02T00:00:00Z")
     expect(out).toMatch(/01\/02/)
     expect(out).toMatch(/09:00/)
   })
 
   it("wraps midnight UTC to next-day in JST", () => {
     // 2024-06-15T15:30:00Z = 2024-06-16 00:30 JST
-    const out = formatTime("2024-06-15T15:30:00Z")
+    const out: string = formatTime("2024-06-15T15:30:00Z")
     expect(out).toMatch(/06\/16/)
     expect(out).toMatch(/00:30/)
   })
@@ -22,7 +22,7 @@ describe("formatTime", () => {
 
 describe("formatDate", () => {
   it("includes year and JST suffix", () => {
-    const out = formatDate("2024-01-02T00:00:00Z")
+    const out: string = formatDate("2024-01-02T00:00:00Z")
     expect(out).toContain("2024")
     expect(out).toContain("01/02")
     expect(out.endsWith("JST")).toBe(true)
@@ -31,8 +31,8 @@ describe("formatDate", () => {
 
 
 describe("formatRelative", () => {
-  const now = new Date("2024-06-15T12:00:00Z")
-  const sec = (n: number) => new Date(now.getTime() - n * 1000).toISOString()
+  const now: Date = new Date("2024-06-15T12:00:00Z")
+  const sec = (n: number): string => new Date(now.getTime() - n * 1000).toISOString()
 
   it("returns 'just now' within 45s", () => {
     expect(formatRelative(sec(0), now)).toBe("just now")
@@ -75,7 +75,7 @@ describe("formatRelative", () => {
   })
 
   it("falls back to absolute for older than ~6 months", () => {
-    const old = new Date(now.getTime() - 200 * 86400 * 1000).toISOString()
+    const old: string = new Date(now.getTime() - 200 * 86400 * 1000).toISOString()
     expect(formatRelative(old, now)).toContain("JST")
   })
 })

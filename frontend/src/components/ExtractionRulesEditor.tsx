@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import type { JSX } from "react"
 import Editor from "react-simple-code-editor"
 import { highlight, languages } from "prismjs/components/prism-core"
 import "prismjs/components/prism-clike"
@@ -9,7 +10,7 @@ import type { Feed } from "../api/client"
 
 function prettifyRules(raw: string | null | undefined): string {
   try {
-    const parsed = JSON.parse(raw || "{}")
+    const parsed: Record<string, unknown> = JSON.parse(raw || "{}")
     return Object.keys(parsed).length > 0 ? JSON.stringify(parsed, null, 2) : ""
   } catch { return raw || "" }
 }
@@ -20,27 +21,27 @@ export default function ExtractionRulesEditor({
 }: {
   feed: Feed,
   onSaved: () => void,
-}) {
-  const [json, setJson] = useState(() => prettifyRules(feed.extraction_rules))
-  const [saving, setSaving] = useState(false)
+}): JSX.Element {
+  const [json, setJson] = useState<string>((): string => prettifyRules(feed.extraction_rules))
+  const [saving, setSaving] = useState<boolean>(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Keep editor in sync when the feed prop changes (e.g. after invalidation)
-  useEffect(() => {
+  useEffect((): void => {
     setJson(prettifyRules(feed.extraction_rules))
   }, [feed.extraction_rules])
 
   // Auto-hide the "Saved" indicator after a short delay
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     if (savedAt == null) return
-    const timer = setTimeout(() => setSavedAt(null), 2000)
-    return () => clearTimeout(timer)
+    const timer: ReturnType<typeof setTimeout> = setTimeout((): void => setSavedAt(null), 2000)
+    return (): void => clearTimeout(timer)
   }, [savedAt])
 
   const validate = (): Record<string, string | null> | null => {
     try {
-      const parsed = JSON.parse(json)
+      const parsed: Record<string, string | null> = JSON.parse(json)
       if (typeof parsed !== "object" || Array.isArray(parsed)) {
         setError("Must be a JSON object")
         return null
@@ -56,8 +57,8 @@ export default function ExtractionRulesEditor({
     }
   }
 
-  const handleSave = async () => {
-    const parsed = validate()
+  const handleSave = async (): Promise<void> => {
+    const parsed: Record<string, string | null> | null = validate()
     if (!parsed) return
     setSaving(true)
     setError(null)
@@ -65,8 +66,8 @@ export default function ExtractionRulesEditor({
       await api.updateFeedRules(feed.id, parsed)
       setSavedAt(Date.now())
       onSaved()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save")
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to save")
     } finally {
       setSaving(false)
     }
@@ -80,7 +81,7 @@ export default function ExtractionRulesEditor({
         <Editor
           value={json}
           onValueChange={setJson}
-          highlight={(code) => highlight(code, languages.json, "json")}
+          highlight={(code: string): string => highlight(code, languages.json, "json")}
           padding={8}
           textareaClassName="outline-none"
           className="text-xs font-mono text-text min-h-[180px]"

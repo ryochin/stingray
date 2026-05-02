@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import type { Mock } from "vitest"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { UserEvent } from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import Sidebar from "./Sidebar"
 import type { Feed, Folder, Selection } from "../api/client"
@@ -41,12 +43,12 @@ function renderSidebar({
   selection?: Selection
   unreadCounts?: Map<number, number>
 }) {
-  const client = new QueryClient({
+  const client: QueryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
   client.setQueryData(["feeds"], feeds)
   client.setQueryData(["folders"], folders)
-  const onSelect = vi.fn<(sel: Selection) => void>()
+  const onSelect: Mock<(sel: Selection) => void> = vi.fn<(sel: Selection) => void>()
   const utils = render(
     <QueryClientProvider client={client}>
       <Sidebar selection={selection} onSelect={onSelect} unreadCounts={unreadCounts} />
@@ -56,7 +58,7 @@ function renderSidebar({
 }
 
 
-beforeEach(() => {
+beforeEach((): void => {
   sessionStorage.clear()
 })
 
@@ -106,8 +108,8 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Hidden")).toBeNull()
   })
 
-  it("calls onSelect when a feed is clicked", async () => {
-    const user = userEvent.setup()
+  it("calls onSelect when a feed is clicked", async (): Promise<void> => {
+    const user: UserEvent = userEvent.setup()
     const { onSelect } = renderSidebar({
       feeds: [feed(1, { name: "F1" })],
       folders: [],
@@ -116,8 +118,8 @@ describe("Sidebar", () => {
     expect(onSelect).toHaveBeenCalledWith({ type: "feed", id: 1 })
   })
 
-  it("collapses a folder on chevron click, hiding child feeds", async () => {
-    const user = userEvent.setup()
+  it("collapses a folder on chevron click, hiding child feeds", async (): Promise<void> => {
+    const user: UserEvent = userEvent.setup()
     renderSidebar({
       feeds: [feed(1, { name: "ChildFeed", folder_id: 10 })],
       folders: [folder(10, "Tech")],

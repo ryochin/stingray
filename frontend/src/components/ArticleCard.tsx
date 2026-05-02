@@ -1,8 +1,11 @@
 import { forwardRef, useMemo } from "react"
+import type { JSX } from "react"
 import DOMPurify from "dompurify"
 import type { Article } from "../api/client"
 import { formatDate, formatRelative } from "../utils/date"
 import { parseSummary } from "../utils/articleContent"
+
+type ParsedSummary = { text: string, imageUrls: string[] }
 import { transformTwitterBlockquotes } from "../utils/twitterCard"
 import { useNow } from "../hooks/useNow"
 
@@ -16,29 +19,29 @@ interface Props {
 }
 
 const ArticleCard = forwardRef<HTMLDivElement, Props>(
-  ({ article, focused, pendingSummary, feedName, feedFaviconUrl, onClick }, ref) => {
-    const now = useNow()
-    const isRead = article.read_at != null
-    const hasTranslation = article.title_translated && article.title_translated !== article.title
-    const titleColor = focused ? "text-accent-text" : isRead ? "text-text-muted" : "text-text-heading"
-    const parsedSummary = useMemo(
-      () => article.summary ? parseSummary(article.summary) : null,
+  ({ article, focused, pendingSummary, feedName, feedFaviconUrl, onClick }, ref): JSX.Element => {
+    const now: Date = useNow()
+    const isRead: boolean = article.read_at != null
+    const hasTranslation: boolean = !!article.title_translated && article.title_translated !== article.title
+    const titleColor: string = focused ? "text-accent-text" : isRead ? "text-text-muted" : "text-text-heading"
+    const parsedSummary = useMemo<ParsedSummary | null>(
+      (): ParsedSummary | null => article.summary ? parseSummary(article.summary) : null,
       [article.summary],
     )
-    const sanitizedHtml = useMemo(() => {
+    const sanitizedHtml = useMemo<string | null>((): string | null => {
       if (!article.content_html) return null
-      const clean = DOMPurify.sanitize(article.content_html)
-      const doc = new DOMParser().parseFromString(clean, "text/html")
+      const clean: string = DOMPurify.sanitize(article.content_html)
+      const doc: Document = new DOMParser().parseFromString(clean, "text/html")
       transformTwitterBlockquotes(doc)
-      const seen = new Set<string>()
+      const seen: Set<string> = new Set<string>()
       // Strip dimension/layout attrs so the CSS `max-width: 100%` clamp can
       // win. Inline `style="width: ..."` and legacy `align="left"` (seen on
       // AssistOn RSS) otherwise let large feed images burst out of the card.
-      const STRIP_IMG_ATTRS = ["width", "height", "style", "align", "hspace", "vspace", "border"]
+      const STRIP_IMG_ATTRS: readonly string[] = ["width", "height", "style", "align", "hspace", "vspace", "border"]
       for (const img of doc.querySelectorAll("img")) {
-        const src = img.getAttribute("src")
+        const src: string | null = img.getAttribute("src")
         if (!src) continue
-        STRIP_IMG_ATTRS.forEach((a) => img.removeAttribute(a))
+        STRIP_IMG_ATTRS.forEach((attr: string): void => img.removeAttribute(attr))
         if (seen.has(src)) {
           img.closest("a")?.remove() ?? img.remove()
         } else {
@@ -122,9 +125,9 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
             {parsedSummary.text && <p>{parsedSummary.text}</p>}
             {!sanitizedHtml && parsedSummary.imageUrls.length > 0 && (
               <div className="mt-2 space-y-2">
-                {parsedSummary.imageUrls.map((url, i) => (
+                {parsedSummary.imageUrls.map((url: string, index: number): JSX.Element => (
                   <img
-                    key={i}
+                    key={index}
                     src={url}
                     alt=""
                     className="max-w-full h-auto rounded border border-border"

@@ -12,11 +12,11 @@ export function computeFolderFeedOrder(
   feeds: Feed[] | undefined,
 ): FolderFeedOrder | null {
   if (selection.type !== "folder" || !feeds) return null
-  const ordered = feeds
-    .filter((f) => f.folder_id === selection.id && f.enabled)
+  const ordered: Feed[] = feeds
+    .filter((f: Feed): boolean => f.folder_id === selection.id && f.enabled)
     .slice()
-    .sort((a, b) => a.position - b.position || a.id - b.id)
-  return new Map(ordered.map((f, i) => [f.id, i]))
+    .sort((a: Feed, b: Feed): number => a.position - b.position || a.id - b.id)
+  return new Map(ordered.map((f: Feed, i: number): [number, number] => [f.id, i]))
 }
 
 // Filter articles by the current selection (all / folder / feed) and group-sort
@@ -28,15 +28,15 @@ export function selectArticles(
   folderFeedOrder: FolderFeedOrder | null,
 ): Article[] {
   if (selection.type === "feed") {
-    return articles.filter((a) => a.feed_id === selection.id)
+    return articles.filter((a: Article): boolean => a.feed_id === selection.id)
   }
   if (selection.type === "folder" && folderFeedOrder) {
-    const inFolder = articles.filter(
-      (a) => a.feed_id != null && folderFeedOrder.has(a.feed_id),
+    const inFolder: Article[] = articles.filter(
+      (a: Article): boolean => a.feed_id != null && folderFeedOrder.has(a.feed_id),
     )
-    return inFolder.slice().sort((a, b) => {
-      const ai = folderFeedOrder.get(a.feed_id as number) ?? 0
-      const bi = folderFeedOrder.get(b.feed_id as number) ?? 0
+    return inFolder.slice().sort((a: Article, b: Article): number => {
+      const ai: number = folderFeedOrder.get(a.feed_id as number) ?? 0
+      const bi: number = folderFeedOrder.get(b.feed_id as number) ?? 0
       return ai - bi
     })
   }
@@ -51,7 +51,7 @@ export function applyUnreadFilter(
   sessionReadUrls: ReadonlySet<string>,
 ): Article[] {
   if (!showUnreadOnly) return articles
-  return articles.filter((a) => a.read_at == null || sessionReadUrls.has(a.url))
+  return articles.filter((a: Article): boolean => a.read_at == null || sessionReadUrls.has(a.url))
 }
 
 // Time range filter keyed by a stable string id so sessionStorage / <select>
@@ -74,7 +74,7 @@ export const TIME_RANGE_OPTIONS: readonly TimeRangeOption[] = [
 ]
 
 const TIME_RANGE_IDS: ReadonlySet<TimeRangeId> =
-  new Set(TIME_RANGE_OPTIONS.map((o) => o.id))
+  new Set(TIME_RANGE_OPTIONS.map((o: TimeRangeOption): TimeRangeId => o.id))
 
 // Coerce arbitrary input (sessionStorage, select onChange) into a known id.
 // Falls back to "all" — the widest/safest behavior — for anything unknown.
@@ -85,7 +85,7 @@ export function parseTimeRangeId(input: unknown): TimeRangeId {
 }
 
 export function timeRangeDays(id: TimeRangeId): number | null {
-  return TIME_RANGE_OPTIONS.find((o) => o.id === id)?.days ?? null
+  return TIME_RANGE_OPTIONS.find((o: TimeRangeOption): boolean => o.id === id)?.days ?? null
 }
 
 // Per-feed tally of session-local read URLs that the DB hasn't caught up
@@ -97,7 +97,7 @@ export function tallySessionReadByFeed(
   articles: readonly Article[],
   sessionReadUrls: ReadonlySet<string>,
 ): Map<number, number> {
-  const tally = new Map<number, number>()
+  const tally: Map<number, number> = new Map<number, number>()
   for (const a of articles) {
     if (
       a.feed_id != null
@@ -118,13 +118,13 @@ export function deriveUnreadCounts(
   enabledFeedIds: ReadonlySet<number> | null,
   sessionReadByFeed: ReadonlyMap<number, number>,
 ): Map<number, number> {
-  const map = new Map<number, number>()
+  const map: Map<number, number> = new Map<number, number>()
   if (!feedStats || !enabledFeedIds) return map
   for (const [fidStr, s] of Object.entries(feedStats)) {
-    const fid = Number(fidStr)
+    const fid: number = Number(fidStr)
     if (!enabledFeedIds.has(fid)) continue
-    const local = sessionReadByFeed.get(fid) ?? 0
-    const count = Math.max(0, s.unread_count - local)
+    const local: number = sessionReadByFeed.get(fid) ?? 0
+    const count: number = Math.max(0, s.unread_count - local)
     if (count > 0) map.set(fid, count)
   }
   return map
@@ -137,10 +137,10 @@ export function nextUnreadFeedId(
   currentId: number,
   unreadCounts: ReadonlyMap<number, number>,
 ): number | null {
-  const idx = orderedFeedIds.indexOf(currentId)
+  const idx: number = orderedFeedIds.indexOf(currentId)
   if (idx < 0) return null
   for (let i = idx + 1; i < orderedFeedIds.length; i++) {
-    const fid = orderedFeedIds[i]
+    const fid: number = orderedFeedIds[i]
     if ((unreadCounts.get(fid) ?? 0) > 0) return fid
   }
   return null

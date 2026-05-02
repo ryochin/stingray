@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest"
 import { faviconUrl, api, type Feed } from "./client"
 
 function makeFeed(overrides: Partial<Feed> = {}): Feed {
@@ -24,12 +24,12 @@ function makeFeed(overrides: Partial<Feed> = {}): Feed {
 
 describe("faviconUrl", () => {
   it("returns google favicon URL for site_url preference", () => {
-    const out = faviconUrl(makeFeed({ site_url: "https://site.example.com/home", url: "https://feed.example.com/rss" }))
+    const out: string | null = faviconUrl(makeFeed({ site_url: "https://site.example.com/home", url: "https://feed.example.com/rss" }))
     expect(out).toContain("domain=site.example.com")
   })
 
   it("falls back to url when site_url is null", () => {
-    const out = faviconUrl(makeFeed({ url: "https://feed.example.com/rss" }))
+    const out: string | null = faviconUrl(makeFeed({ url: "https://feed.example.com/rss" }))
     expect(out).toContain("domain=feed.example.com")
   })
 
@@ -49,18 +49,18 @@ describe("api fetchJson behavior", () => {
   })
 
   it("getFolders returns parsed JSON on success", async () => {
-    vi.stubGlobal("fetch", vi.fn(() =>
+    vi.stubGlobal("fetch", vi.fn((): Promise<Response> =>
       Promise.resolve(new Response(JSON.stringify([{ id: 1, name: "A", position: 0 }]), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })),
     ))
-    const folders = await api.getFolders()
+    const folders: Awaited<ReturnType<typeof api.getFolders>> = await api.getFolders()
     expect(folders).toEqual([{ id: 1, name: "A", position: 0 }])
   })
 
   it("surfaces server-provided detail on error", async () => {
-    vi.stubGlobal("fetch", vi.fn(() =>
+    vi.stubGlobal("fetch", vi.fn((): Promise<Response> =>
       Promise.resolve(new Response(JSON.stringify({ detail: "folder name taken" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
@@ -70,27 +70,30 @@ describe("api fetchJson behavior", () => {
   })
 
   it("falls back to status text when no JSON detail", async () => {
-    vi.stubGlobal("fetch", vi.fn(() =>
+    vi.stubGlobal("fetch", vi.fn((): Promise<Response> =>
       Promise.resolve(new Response("", { status: 500, statusText: "Internal Server Error" })),
     ))
     await expect(api.getFolders()).rejects.toThrow(/500/)
   })
 
   it("204 returns undefined without parsing body", async () => {
-    vi.stubGlobal("fetch", vi.fn(() =>
+    vi.stubGlobal("fetch", vi.fn((): Promise<Response> =>
       Promise.resolve(new Response(null, { status: 204 })),
     ))
-    const result = await api.deleteFolder(1)
+    const result: void = await api.deleteFolder(1)
     expect(result).toBeUndefined()
   })
 
   it("markRead POSTs url array as JSON", async () => {
-    const spy = vi.fn(() => Promise.resolve(new Response(null, { status: 204 })))
+    const spy: Mock<(input: string, init: RequestInit) => Promise<Response>> = vi.fn(
+      (_input: string, _init: RequestInit): Promise<Response> =>
+        Promise.resolve(new Response(null, { status: 204 })),
+    )
     vi.stubGlobal("fetch", spy)
     await api.markRead(["u1", "u2"])
     expect(spy).toHaveBeenCalledOnce()
-    const call = spy.mock.calls[0] as unknown as [string, RequestInit]
-    const init = call[1]
+    const call: [string, RequestInit] = spy.mock.calls[0] as unknown as [string, RequestInit]
+    const init: RequestInit = call[1]
     expect(init.method).toBe("POST")
     expect(init.body).toBe(JSON.stringify({ urls: ["u1", "u2"] }))
   })

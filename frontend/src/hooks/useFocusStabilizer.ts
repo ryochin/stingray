@@ -48,12 +48,12 @@ export function useFocusStabilizer({
   const prevTimeRangeIdRef = useRef(timeRangeId)
   const skipFocusScrollRef = useRef(false)
 
-  useLayoutEffect(() => {
-    const main = mainRef.current
+  useLayoutEffect((): void => {
+    const main: HTMLElement | null = mainRef.current
     const prev = prevFocusSnapshot.current
-    const selectionChanged = prevSelectionRef.current !== selection
-    const filterToggled = prevShowUnreadOnlyRef.current !== showUnreadOnly
-    const timeRangeChanged = prevTimeRangeIdRef.current !== timeRangeId
+    const selectionChanged: boolean = prevSelectionRef.current !== selection
+    const filterToggled: boolean = prevShowUnreadOnlyRef.current !== showUnreadOnly
+    const timeRangeChanged: boolean = prevTimeRangeIdRef.current !== timeRangeId
     prevSelectionRef.current = selection
     prevShowUnreadOnlyRef.current = showUnreadOnly
     prevTimeRangeIdRef.current = timeRangeId
@@ -79,7 +79,7 @@ export function useFocusStabilizer({
       && focusIndex >= 0
       && filtered[focusIndex]?.url !== prev.url
     ) {
-      const newIndex = filtered.findIndex((a) => a.url === prev.url)
+      const newIndex: number = filtered.findIndex((a: Article): boolean => a.url === prev.url)
       if (newIndex < 0) {
         // Focused article vanished (server-side delete, read state changed
         // outside this session, etc). Avoid silently inheriting whichever
@@ -88,7 +88,7 @@ export function useFocusStabilizer({
         prevFocusSnapshot.current = null
         return
       }
-      const newOffset = virtualizer.getOffsetForIndex(newIndex, "start")?.[0]
+      const newOffset: number | undefined = virtualizer.getOffsetForIndex(newIndex, "start")?.[0]
       if (newOffset != null) {
         main.scrollTop += newOffset - prev.offset
       }
@@ -103,8 +103,8 @@ export function useFocusStabilizer({
       return
     }
 
-    const currentUrl = focusIndex >= 0 ? filtered[focusIndex]?.url ?? null : null
-    const currentOffset = focusIndex >= 0
+    const currentUrl: string | null = focusIndex >= 0 ? filtered[focusIndex]?.url ?? null : null
+    const currentOffset: number | null = focusIndex >= 0
       ? virtualizer.getOffsetForIndex(focusIndex, "start")?.[0] ?? null
       : null
     prevFocusSnapshot.current = currentUrl != null && currentOffset != null

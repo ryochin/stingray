@@ -1,13 +1,14 @@
 import { useState, useRef } from "react"
+import type { JSX } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import type { FilterRule } from "../api/client"
 import Header from "../components/Header"
 
-export default function Filters() {
+export default function Filters(): JSX.Element {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
-  const [pattern, setPattern] = useState("")
+  const [pattern, setPattern] = useState<string>("")
   const [target, setTarget] = useState<"title" | "both">("title")
 
   const { data: filters } = useQuery({
@@ -18,13 +19,13 @@ export default function Filters() {
   // Sidebar badges and per-feed counts depend on filter state too, since
   // get_feed_stats hides filtered articles. Invalidate feed-stats here so
   // the sidebar reflects filter changes without waiting for the next poll.
-  const invalidate = () => {
+  const invalidate = (): void => {
     queryClient.invalidateQueries({ queryKey: ["filters"] })
     queryClient.invalidateQueries({ queryKey: ["articles"] })
     queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
   }
 
-  const handleExport = async () => {
+  const handleExport = async (): Promise<void> => {
     try {
       await api.exportFilters()
     } catch (err) {
@@ -35,25 +36,25 @@ export default function Filters() {
   const createFilter = useMutation({
     mutationFn: ({ pattern, target }: { pattern: string, target: string }) =>
       api.createFilter(pattern, target),
-    onSuccess: () => { invalidate(); setPattern("") },
-    onError: (e: Error) => setError(e.message),
+    onSuccess: (): void => { invalidate(); setPattern("") },
+    onError: (err: Error): void => setError(err.message),
   })
   const deleteFilter = useMutation({
     mutationFn: api.deleteFilter,
     onSuccess: invalidate,
-    onError: (e: Error) => setError(e.message),
+    onError: (err: Error): void => setError(err.message),
   })
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleCreate = (event: React.FormEvent): void => {
+    event.preventDefault()
     if (!pattern.trim()) return
     createFilter.mutate({ pattern: pattern.trim(), target })
   }
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file: File | undefined = event.target.files?.[0]
     if (!file) return
     try {
       const result = await api.importFilters(file)
@@ -66,7 +67,7 @@ export default function Filters() {
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  const isRegex = (p: string) => p.length > 2 && p.startsWith("/") && p.endsWith("/")
+  const isRegex = (pattern: string): boolean => pattern.length > 2 && pattern.startsWith("/") && pattern.endsWith("/")
 
   return (
     <div className="flex flex-col h-screen">
@@ -103,13 +104,13 @@ export default function Filters() {
         <form onSubmit={handleCreate} className="flex gap-2 mb-3">
           <input
             value={pattern}
-            onChange={(e) => setPattern(e.target.value)}
+            onChange={(event: React.ChangeEvent<HTMLInputElement>): void => setPattern(event.target.value)}
             className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm flex-1"
             placeholder="keyword or /regex/"
           />
           <select
             value={target}
-            onChange={(e) => setTarget(e.target.value as "title" | "both")}
+            onChange={(event: React.ChangeEvent<HTMLSelectElement>): void => setTarget(event.target.value as "title" | "both")}
             className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
           >
             <option value="title">Title</option>
@@ -134,7 +135,7 @@ export default function Filters() {
                   {filter.target}
                 </span>
                 <button
-                  onClick={() => deleteFilter.mutate(filter.id)}
+                  onClick={(): void => deleteFilter.mutate(filter.id)}
                   className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors"
                 >
                   Delete

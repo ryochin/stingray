@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest"
+import type { Mock } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { UserEvent } from "@testing-library/user-event"
 import ArticleCard from "./ArticleCard"
 import type { Article } from "../api/client"
 
@@ -113,9 +115,9 @@ describe("ArticleCard", () => {
     expect(link.getAttribute("rel")).toContain("noopener")
   })
 
-  it("fires onClick when the card is clicked", async () => {
-    const user = userEvent.setup()
-    const onClick = vi.fn()
+  it("fires onClick when the card is clicked", async (): Promise<void> => {
+    const user: UserEvent = userEvent.setup()
+    const onClick: Mock = vi.fn()
     const { container } = render(<ArticleCard article={article()} onClick={onClick} />)
     await user.click(container.firstElementChild as HTMLElement)
     expect(onClick).toHaveBeenCalled()

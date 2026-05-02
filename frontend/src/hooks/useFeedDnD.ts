@@ -13,40 +13,53 @@ interface Options {
  * `onReorder` receives the new ordered id list for the affected folder,
  * which the caller hands to the reorder mutation.
  */
-export function useFeedDnD({ feeds, onReorder }: Options) {
+interface DragHandlers {
+  onDragStart: (feed: Feed) => void
+  onDragOver: (feed: Feed) => void
+  onDragLeave: (feed: Feed) => void
+  onDragEnd: () => void
+  onDrop: (target: Feed) => void
+}
+
+interface UseFeedDnDResult {
+  dragOverId: number | null
+  handlers: DragHandlers
+}
+
+export function useFeedDnD({ feeds, onReorder }: Options): UseFeedDnDResult {
   const dragSrc = useRef<{ id: number, folderId: number | null } | null>(null)
   const [dragOverId, setDragOverId] = useState<number | null>(null)
 
-  const onDragStart = useCallback((feed: Feed) => {
+  const onDragStart = useCallback((feed: Feed): void => {
     dragSrc.current = { id: feed.id, folderId: feed.folder_id }
   }, [])
 
-  const onDragOver = useCallback((feed: Feed) => {
+  const onDragOver = useCallback((feed: Feed): void => {
     const src = dragSrc.current
     if (!src || src.id === feed.id) return
     if (src.folderId !== feed.folder_id) return
     setDragOverId(feed.id)
   }, [])
 
-  const onDragLeave = useCallback((feed: Feed) => {
-    setDragOverId((prev) => (prev === feed.id ? null : prev))
+  const onDragLeave = useCallback((feed: Feed): void => {
+    setDragOverId((prev: number | null): number | null => (prev === feed.id ? null : prev))
   }, [])
 
-  const onDragEnd = useCallback(() => {
+  const onDragEnd = useCallback((): void => {
     dragSrc.current = null
     setDragOverId(null)
   }, [])
 
-  const onDrop = useCallback((target: Feed) => {
+  const onDrop = useCallback((target: Feed): void => {
     const src = dragSrc.current
     dragSrc.current = null
     setDragOverId(null)
     if (!src || src.id === target.id) return
     if (src.folderId !== target.folder_id) return
-    const group = (feeds ?? []).filter((f) => f.folder_id === target.folder_id)
-    const ids = group.map((f) => f.id)
-    const fromIdx = ids.indexOf(src.id)
-    const toIdx = ids.indexOf(target.id)
+    const group: Feed[] = (feeds ?? []).filter((f: Feed): boolean => f.folder_id === target.folder_id)
+    const ids: number[] = group.map((f: Feed): number => f.id)
+    const fromIdx: number = ids.indexOf(src.id)
+    const toIdx: number = ids.indexOf(target.id)
     if (fromIdx < 0 || toIdx < 0) return
     ids.splice(fromIdx, 1)
     ids.splice(toIdx, 0, src.id)

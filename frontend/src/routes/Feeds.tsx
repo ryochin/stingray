@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect, lazy, Suspense } from "react"
+import type { JSX } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api, faviconUrl } from "../api/client"
 import type { Feed, Folder, FeedCreate, FeedStats, FeedCandidate } from "../api/client"
@@ -21,26 +22,26 @@ interface AddFeedFormProps {
   onDismissCandidates: () => void
 }
 
-function AddFeedForm({ onAdd, isAdding, folders, candidates, candidatesFor, onPickCandidate, onDismissCandidates }: AddFeedFormProps) {
-  const [name, setName] = useState("")
-  const [url, setUrl] = useState("")
+function AddFeedForm({ onAdd, isAdding, folders, candidates, candidatesFor, onPickCandidate, onDismissCandidates }: AddFeedFormProps): JSX.Element {
+  const [name, setName] = useState<string>("")
+  const [url, setUrl] = useState<string>("")
   const [folderId, setFolderId] = useState<number | undefined>(undefined)
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault()
+  const submit = (event: React.FormEvent): void => {
+    event.preventDefault()
     const body: FeedCreate = { name, url }
     if (folderId != null) body.folder_id = folderId
     onAdd(body)
   }
 
-  const reset = () => {
+  const reset = (): void => {
     setName("")
     setUrl("")
     setFolderId(undefined)
     onDismissCandidates()
   }
 
-  const pick = (href: string) => {
+  const pick = (href: string): void => {
     setUrl(href)
     onPickCandidate(href)
   }
@@ -50,22 +51,22 @@ function AddFeedForm({ onAdd, isAdding, folders, candidates, candidatesFor, onPi
       <form onSubmit={submit} onReset={reset} className="flex flex-wrap gap-3 items-end p-4 bg-bg-secondary rounded-lg border border-border">
         <div className="flex flex-col gap-1 flex-1 min-w-48">
           <label className="text-xs text-text-muted">URL</label>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} required
+          <input value={url} onChange={(event: React.ChangeEvent<HTMLInputElement>): void => setUrl(event.target.value)} required
             className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
             placeholder="https://example.com/feed" />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs text-text-muted">Name</label>
-          <input value={name} onChange={(e) => setName(e.target.value)}
+          <input value={name} onChange={(event: React.ChangeEvent<HTMLInputElement>): void => setName(event.target.value)}
             className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm w-40"
             placeholder="Auto-detect" />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs text-text-muted">Folder</label>
-          <select value={folderId ?? ""} onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : undefined)}
+          <select value={folderId ?? ""} onChange={(event: React.ChangeEvent<HTMLSelectElement>): void => setFolderId(event.target.value ? Number(event.target.value) : undefined)}
             className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm">
             <option value="">--</option>
-            {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            {folders.map((folder: Folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
           </select>
         </div>
         <button type="submit" disabled={isAdding}
@@ -85,16 +86,16 @@ function AddFeedForm({ onAdd, isAdding, folders, candidates, candidatesFor, onPi
               className="text-xs text-text-dim hover:text-text">Dismiss</button>
           </div>
           <ul className="space-y-1">
-            {candidates.map((c) => (
-              <li key={c.href} className="flex items-center gap-2">
-                <button type="button" onClick={() => pick(c.href)}
+            {candidates.map((candidate: FeedCandidate) => (
+              <li key={candidate.href} className="flex items-center gap-2">
+                <button type="button" onClick={(): void => pick(candidate.href)}
                   className="text-xs px-2 py-1 rounded bg-accent text-white hover:opacity-90">
                   Use
                 </button>
                 <div className="flex flex-col text-sm min-w-0">
-                  {c.title && <span className="text-text-heading truncate">{c.title}</span>}
+                  {candidate.title && <span className="text-text-heading truncate">{candidate.title}</span>}
                   <span className="text-text-dim text-xs truncate">
-                    {c.type ? `[${c.type.replace("application/", "")}] ` : ""}{c.href}
+                    {candidate.type ? `[${candidate.type.replace("application/", "")}] ` : ""}{candidate.href}
                   </span>
                 </div>
               </li>
@@ -106,15 +107,15 @@ function AddFeedForm({ onAdd, isAdding, folders, candidates, candidatesFor, onPi
   )
 }
 
-function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: Error) => void }) {
+function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: Error) => void }): JSX.Element {
   const queryClient = useQueryClient()
-  const [newName, setNewName] = useState("")
+  const [newName, setNewName] = useState<string>("")
   const [editingId, setEditingId] = useState<number | null>(null)
-  const [editName, setEditName] = useState("")
+  const [editName, setEditName] = useState<string>("")
   const dragSrcId = useRef<number | null>(null)
   const [dragOverId, setDragOverId] = useState<number | null>(null)
 
-  const invalidate = () => {
+  const invalidate = (): void => {
     queryClient.invalidateQueries({ queryKey: ["folders"] })
     queryClient.invalidateQueries({ queryKey: ["feeds"] })
   }
@@ -135,34 +136,34 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
     onError,
   })
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleCreate = (event: React.FormEvent): void => {
+    event.preventDefault()
     if (!newName.trim()) return
     createFolder.mutate(newName.trim())
   }
 
-  const startEdit = (folder: Folder) => {
+  const startEdit = (folder: Folder): void => {
     setEditingId(folder.id)
     setEditName(folder.name)
   }
 
-  const commitEdit = () => {
+  const commitEdit = (): void => {
     if (editingId == null || !editName.trim()) return
     renameFolder.mutate({ id: editingId, name: editName.trim() })
   }
 
-  const handleDrop = useCallback((targetId: number) => {
-    const srcId = dragSrcId.current
+  const handleDrop = useCallback((targetId: number): void => {
+    const srcId: number | null = dragSrcId.current
     dragSrcId.current = null
     setDragOverId(null)
     if (srcId == null || srcId === targetId) return
-    const ids = folders.map((f) => f.id)
-    const fromIdx = ids.indexOf(srcId)
-    const toIdx = ids.indexOf(targetId)
+    const ids: number[] = folders.map((folder: Folder): number => folder.id)
+    const fromIdx: number = ids.indexOf(srcId)
+    const toIdx: number = ids.indexOf(targetId)
     if (fromIdx < 0 || toIdx < 0) return
     ids.splice(fromIdx, 1)
     ids.splice(toIdx, 0, srcId)
-    api.reorderFolders(ids).then(() => {
+    api.reorderFolders(ids).then((): void => {
       queryClient.invalidateQueries({ queryKey: ["folders"] })
     })
   }, [folders, queryClient])
@@ -173,7 +174,7 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
       <form onSubmit={handleCreate} className="flex gap-2 mb-3">
         <input
           value={newName}
-          onChange={(e) => setNewName(e.target.value)}
+          onChange={(event: React.ChangeEvent<HTMLInputElement>): void => setNewName(event.target.value)}
           className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm flex-1"
           placeholder="New folder name"
         />
@@ -187,26 +188,26 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
       </form>
       {folders.length > 0 && (
         <div className="space-y-1">
-          {folders.map((folder) => (
+          {folders.map((folder: Folder) => (
             <div
               key={folder.id}
               className={`flex items-center gap-2 p-2 bg-bg-secondary rounded border transition-colors ${
                 dragOverId === folder.id ? "border-accent border-solid" : "border-border"
               }`}
               draggable={editingId !== folder.id}
-              onDragStart={() => { dragSrcId.current = folder.id }}
-              onDragOver={(e) => { e.preventDefault(); setDragOverId(folder.id) }}
-              onDragLeave={() => setDragOverId((prev) => prev === folder.id ? null : prev)}
-              onDragEnd={() => { dragSrcId.current = null; setDragOverId(null) }}
-              onDrop={() => handleDrop(folder.id)}
+              onDragStart={(): void => { dragSrcId.current = folder.id }}
+              onDragOver={(event: React.DragEvent<HTMLDivElement>): void => { event.preventDefault(); setDragOverId(folder.id) }}
+              onDragLeave={(): void => setDragOverId((prev: number | null): number | null => prev === folder.id ? null : prev)}
+              onDragEnd={(): void => { dragSrcId.current = null; setDragOverId(null) }}
+              onDrop={(): void => handleDrop(folder.id)}
             >
               <span className="text-text-dim cursor-grab active:cursor-grabbing select-none" title="Drag to reorder">⠿</span>
               {editingId === folder.id ? (
                 <>
                   <input
                     value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditingId(null) }}
+                    onChange={(event: React.ChangeEvent<HTMLInputElement>): void => setEditName(event.target.value)}
+                    onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>): void => { if (event.key === "Enter") commitEdit(); if (event.key === "Escape") setEditingId(null) }}
                     autoFocus
                     className="bg-bg-card text-text border border-border rounded px-2 py-1 text-sm flex-1"
                   />
@@ -222,11 +223,11 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
               ) : (
                 <>
                   <span className="flex-1 text-sm text-text">{folder.name}</span>
-                  <button onClick={() => startEdit(folder)}
+                  <button onClick={(): void => startEdit(folder)}
                     className="px-2 py-1 rounded text-xs bg-bg-card text-text-muted hover:text-text transition-colors">
                     Rename
                   </button>
-                  <button onClick={() => { if (confirm(`Delete folder "${folder.name}"? Feeds will be moved to uncategorized.`)) deleteFolder.mutate(folder.id) }}
+                  <button onClick={(): void => { if (confirm(`Delete folder "${folder.name}"? Feeds will be moved to uncategorized.`)) deleteFolder.mutate(folder.id) }}
                     className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors">
                     Delete
                   </button>
@@ -240,31 +241,35 @@ function FolderManager({ folders, onError }: { folders: Folder[], onError: (e: E
   )
 }
 
-function OpmlButtons({ onError, onImported, feedCount }: { onError: (e: Error) => void, onImported: () => void, feedCount: number }) {
+function OpmlButtons({ onError, onImported, feedCount }: { onError: (e: Error) => void, onImported: () => void, feedCount: number }): JSX.Element {
   const [importResult, setImportResult] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const handleExport = async () => {
+  const handleExport = async (): Promise<void> => {
     try {
-      const blob = await api.exportOpml()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = "subscriptions.opml"
-      a.click()
+      const blob: Blob = await api.exportOpml()
+      const url: string = URL.createObjectURL(blob)
+      const anchor: HTMLAnchorElement = document.createElement("a")
+      anchor.href = url
+      // Local-time date stamp keeps "today's backup" matching the user's
+      // calendar regardless of UTC offset.
+      const now: Date = new Date()
+      const stamp: string = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`
+      anchor.download = `news_reader_subscriptions_${stamp}.opml`
+      anchor.click()
       URL.revokeObjectURL(url)
     } catch (e) {
       onError(e as Error)
     }
   }
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file: File | undefined = event.target.files?.[0]
     if (!file) return
     try {
       const result = await api.importOpml(file)
       setImportResult(
-        `Imported: ${result.folders_created} folders, ${result.feeds_created} feeds (${result.feeds_skipped} skipped)`
+        `Imported: ${result.folders_created} folders, ${result.feeds_created} feeds (${result.feeds_skipped} skipped)`,
       )
       onImported()
     } catch (err) {
@@ -302,19 +307,19 @@ function OpmlButtons({ onError, onImported, feedCount }: { onError: (e: Error) =
 function SiteUrlEditor({ feed, onSave }: {
   feed: Feed
   onSave: (siteUrl: string | null) => void
-}) {
-  const [value, setValue] = useState(feed.site_url ?? "")
+}): JSX.Element {
+  const [value, setValue] = useState<string>(feed.site_url ?? "")
   // Absorb server-side updates (e.g. after refetch) without clobbering an
   // in-progress edit: only reset when the persisted value actually changes.
-  useEffect(() => {
+  useEffect((): void => {
     setValue(feed.site_url ?? "")
   }, [feed.site_url])
 
-  const trimmed = value.trim()
-  const next = trimmed === "" ? null : trimmed
-  const dirty = next !== (feed.site_url ?? null)
+  const trimmed: string = value.trim()
+  const next: string | null = trimmed === "" ? null : trimmed
+  const dirty: boolean = next !== (feed.site_url ?? null)
 
-  const commit = () => {
+  const commit = (): void => {
     if (dirty) onSave(next)
   }
 
@@ -324,10 +329,10 @@ function SiteUrlEditor({ feed, onSave }: {
       <input
         type="url"
         value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit()
-          if (e.key === "Escape") setValue(feed.site_url ?? "")
+        onChange={(event: React.ChangeEvent<HTMLInputElement>): void => setValue(event.target.value)}
+        onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>): void => {
+          if (event.key === "Enter") commit()
+          if (event.key === "Escape") setValue(feed.site_url ?? "")
         }}
         placeholder="https://example.com/"
         className="flex-1 bg-bg-card text-text border border-border rounded px-2 py-0.5 focus:outline-none focus:border-accent"
@@ -350,7 +355,7 @@ function FeedDetails({ feed, stats, onDelete, onToggleTranslate, onUpdateSiteUrl
   onToggleTranslate: () => void
   onUpdateSiteUrl: (siteUrl: string | null) => void
   onRulesUpdated?: () => void
-}) {
+}): JSX.Element {
   return (
     <div className="px-3 pb-3 border-t border-border ml-7">
       <SiteUrlEditor feed={feed} onSave={onUpdateSiteUrl} />
@@ -441,20 +446,20 @@ function FeedItem({
   onDelete, onFetch, onToggleEnabled, onToggleSummarize, onMoveToFolder,
   onToggleTranslate, onUpdateSiteUrl, onRulesUpdated,
   onDragStart, onDragOver, onDragLeave, onDragEnd, onDrop,
-}: FeedItemProps) {
-  const isUnhealthy = feed.consecutive_failures >= 3
-  const favicon = faviconUrl(feed)
-  const hasRules = feed.extraction_rules !== "{}"
-  const isWebFeed = feed.extraction_rules != null
+}: FeedItemProps): JSX.Element {
+  const isUnhealthy: boolean = feed.consecutive_failures >= 3
+  const favicon: string | null = faviconUrl(feed)
+  const hasRules: boolean = feed.extraction_rules !== "{}"
+  const isWebFeed: boolean = feed.extraction_rules != null
 
   return (
     <div
       draggable={!editing}
-      onDragStart={() => onDragStart(feed)}
-      onDragOver={(e) => { e.preventDefault(); onDragOver(feed) }}
-      onDragLeave={() => onDragLeave(feed)}
+      onDragStart={(): void => onDragStart(feed)}
+      onDragOver={(event: React.DragEvent<HTMLDivElement>): void => { event.preventDefault(); onDragOver(feed) }}
+      onDragLeave={(): void => onDragLeave(feed)}
       onDragEnd={onDragEnd}
-      onDrop={(e) => { e.preventDefault(); onDrop(feed) }}
+      onDrop={(event: React.DragEvent<HTMLDivElement>): void => { event.preventDefault(); onDrop(feed) }}
       className={`bg-bg-secondary rounded-lg border transition-colors ${
         dragOver ? "border-accent border-solid" : "border-border"
       }`}
@@ -472,14 +477,14 @@ function FeedItem({
             {editing ? (
               <input
                 value={editName}
-                onChange={(e) => onChangeEditName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && editName.trim()) {
+                onChange={(event: React.ChangeEvent<HTMLInputElement>): void => onChangeEditName(event.target.value)}
+                onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>): void => {
+                  if (event.key === "Enter" && editName.trim()) {
                     onCommitEdit(feed, editName.trim())
                   }
-                  if (e.key === "Escape") onCancelEdit()
+                  if (event.key === "Escape") onCancelEdit()
                 }}
-                onBlur={() => {
+                onBlur={(): void => {
                   if (editName.trim() && editName.trim() !== feed.name) {
                     onCommitEdit(feed, editName.trim())
                   } else {
@@ -492,7 +497,7 @@ function FeedItem({
             ) : (
               <div
                 className="flex items-center gap-1.5 cursor-pointer"
-                onClick={() => onToggleExpand(feed.id)}
+                onClick={(): void => onToggleExpand(feed.id)}
               >
                 <span className="text-text-dim text-xs shrink-0">{expanded ? "\u25BE" : "\u25B8"}</span>
                 {isWebFeed && (
@@ -519,7 +524,7 @@ function FeedItem({
                   {feed.name}
                 </span>
                 <button
-                  onClick={(e) => { e.stopPropagation(); onStartEdit(feed) }}
+                  onClick={(event: React.MouseEvent<HTMLButtonElement>): void => { event.stopPropagation(); onStartEdit(feed) }}
                   className="text-text-dim hover:text-text transition-colors text-xs"
                   title="Rename"
                 >
@@ -539,7 +544,7 @@ function FeedItem({
           </div>
         </div>
         <div className="flex items-center gap-2 ml-4 shrink-0">
-          <button onClick={() => onToggleSummarize(feed.id)}
+          <button onClick={(): void => onToggleSummarize(feed.id)}
             className={`px-2 py-1 rounded text-xs border transition-colors ${
               feed.summarize
                 ? "bg-accent-bg text-accent-text border-accent-bg"
@@ -551,19 +556,19 @@ function FeedItem({
           </button>
           <select
             value={feed.folder_id ?? ""}
-            onChange={(e) => onMoveToFolder(feed.id, e.target.value ? Number(e.target.value) : null)}
+            onChange={(event: React.ChangeEvent<HTMLSelectElement>): void => onMoveToFolder(feed.id, event.target.value ? Number(event.target.value) : null)}
             className="bg-bg-card text-text-muted border border-border rounded px-1.5 py-1 text-xs"
           >
             <option value="">--</option>
-            {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            {folders.map((folder: Folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
           </select>
-          <button onClick={() => onFetch(feed.id)}
+          <button onClick={(): void => onFetch(feed.id)}
             disabled={fetching}
             title="Fetch now"
             className="px-2 py-1 rounded text-xs bg-bg-card text-text-muted hover:text-text transition-colors disabled:opacity-40">
             <span className={`inline-block ${fetching ? "animate-spin" : ""}`}>↻</span>
           </button>
-          <button onClick={() => onToggleEnabled(feed.id)}
+          <button onClick={(): void => onToggleEnabled(feed.id)}
             className={`px-2 py-1 rounded text-xs transition-colors ${
               feed.enabled
                 ? "bg-green-900 text-green-300"
@@ -576,9 +581,9 @@ function FeedItem({
 
       {expanded && (
         <FeedDetails feed={feed} stats={stats}
-          onDelete={() => onDelete(feed)}
-          onToggleTranslate={() => onToggleTranslate(feed.id, !feed.translate)}
-          onUpdateSiteUrl={(siteUrl) => onUpdateSiteUrl(feed.id, siteUrl)}
+          onDelete={(): void => onDelete(feed)}
+          onToggleTranslate={(): void => onToggleTranslate(feed.id, !feed.translate)}
+          onUpdateSiteUrl={(siteUrl: string | null): void => onUpdateSiteUrl(feed.id, siteUrl)}
           onRulesUpdated={isWebFeed ? onRulesUpdated : undefined}
         />
       )}
@@ -587,13 +592,13 @@ function FeedItem({
 }
 
 
-export default function Feeds() {
+export default function Feeds(): JSX.Element {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [editingFeedId, setEditingFeedId] = useState<number | null>(null)
-  const [editFeedName, setEditFeedName] = useState("")
+  const [editFeedName, setEditFeedName] = useState<string>("")
   const [expandedFeeds, setExpandedFeeds] = useState<Set<number>>(new Set())
-  const [filter, setFilter] = useState("")
+  const [filter, setFilter] = useState<string>("")
   const [errorFilter, setErrorFilter] = useState<"all" | "with" | "without">("all")
 
   // While a refresh is running, poll faster so per-feed stats (Unread,
@@ -604,7 +609,7 @@ export default function Feeds() {
     queryFn: api.getStatus,
     refetchInterval: (query) => (query.state.data?.running ? 2_000 : 30_000),
   })
-  const activeInterval = status?.running ? 3_000 : 15_000
+  const activeInterval: number = status?.running ? 3_000 : 15_000
 
   const { data: feeds, isLoading, isError } = useQuery({
     queryKey: ["feeds"],
@@ -623,11 +628,11 @@ export default function Feeds() {
   })
 
   const sortedFolders = useMemo(
-    () => (folders ?? []).slice().sort((a, b) => a.position - b.position || a.id - b.id),
+    (): Folder[] => (folders ?? []).slice().sort((folderA: Folder, folderB: Folder): number => folderA.position - folderB.position || folderA.id - folderB.id),
     [folders],
   )
 
-  const reportError = useCallback((e: Error) => setError(e.message), [])
+  const reportError = useCallback((err: Error): void => setError(err.message), [])
   const mutations = useFeedMutations({ onError: setError })
   const {
     invalidate, fetchingFeeds,
@@ -638,68 +643,68 @@ export default function Feeds() {
 
   const { dragOverId, handlers: dndHandlers } = useFeedDnD({
     feeds,
-    onReorder: (ids) => reorderFeeds.mutate(ids),
+    onReorder: (ids: number[]): void => reorderFeeds.mutate(ids),
   })
 
   // Filter by name/URL substring (case-insensitive) AND fetch-error status.
   // The drag reorder hook still sees the unfiltered list, so dragging preserves
   // global ordering even when the user has narrowed the view.
   // "with errors" matches Sidebar's !!! warning threshold (consecutive_failures >= 3).
-  const visibleFeeds = useMemo(() => {
-    const q = filter.trim().toLowerCase()
-    return (feeds ?? []).filter((f) => {
-      if (q && !f.name.toLowerCase().includes(q) && !(f.url?.toLowerCase().includes(q) ?? false)) {
+  const visibleFeeds = useMemo((): Feed[] => {
+    const query: string = filter.trim().toLowerCase()
+    return (feeds ?? []).filter((feed: Feed): boolean => {
+      if (query && !feed.name.toLowerCase().includes(query) && !(feed.url?.toLowerCase().includes(query) ?? false)) {
         return false
       }
-      if (errorFilter === "with" && f.consecutive_failures < 3) return false
-      if (errorFilter === "without" && f.consecutive_failures >= 3) return false
+      if (errorFilter === "with" && feed.consecutive_failures < 3) return false
+      if (errorFilter === "without" && feed.consecutive_failures >= 3) return false
       return true
     })
   }, [feeds, filter, errorFilter])
 
   // Group feeds by folder
-  const feedsByFolder = useMemo(() => {
-    const map = new Map<number | null, Feed[]>()
+  const feedsByFolder = useMemo((): Map<number | null, Feed[]> => {
+    const map: Map<number | null, Feed[]> = new Map<number | null, Feed[]>()
     for (const feed of visibleFeeds) {
-      const key = feed.folder_id
+      const key: number | null = feed.folder_id
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(feed)
     }
     return map
   }, [visibleFeeds])
 
-  const toggleExpand = useCallback((feedId: number) => {
-    setExpandedFeeds((prev) => {
-      const next = new Set(prev)
+  const toggleExpand = useCallback((feedId: number): void => {
+    setExpandedFeeds((prev: Set<number>): Set<number> => {
+      const next: Set<number> = new Set(prev)
       if (next.has(feedId)) next.delete(feedId)
       else next.add(feedId)
       return next
     })
   }, [])
 
-  const handleStartEdit = useCallback((feed: Feed) => {
+  const handleStartEdit = useCallback((feed: Feed): void => {
     setEditingFeedId(feed.id)
     setEditFeedName(feed.name)
   }, [])
-  const handleCancelEdit = useCallback(() => setEditingFeedId(null), [])
-  const handleCommitEdit = useCallback((feed: Feed, name: string) => {
+  const handleCancelEdit = useCallback((): void => setEditingFeedId(null), [])
+  const handleCommitEdit = useCallback((feed: Feed, name: string): void => {
     renameFeed.mutate({ feedId: feed.id, name })
     setEditingFeedId(null)
   }, [renameFeed])
-  const handleDelete = useCallback((feed: Feed) => {
+  const handleDelete = useCallback((feed: Feed): void => {
     if (confirm(`Delete "${feed.name}"?`)) deleteFeed.mutate(feed.id)
   }, [deleteFeed])
-  const handleFetch = useCallback((feedId: number) => fetchFeed.mutate(feedId), [fetchFeed])
-  const handleToggleEnabled = useCallback((feedId: number) => toggleFeed.mutate(feedId), [toggleFeed])
-  const handleToggleSummarize = useCallback((feedId: number) => toggleSummarize.mutate(feedId), [toggleSummarize])
-  const handleMove = useCallback((feedId: number, folderId: number | null) =>
+  const handleFetch = useCallback((feedId: number): void => fetchFeed.mutate(feedId), [fetchFeed])
+  const handleToggleEnabled = useCallback((feedId: number): void => toggleFeed.mutate(feedId), [toggleFeed])
+  const handleToggleSummarize = useCallback((feedId: number): void => toggleSummarize.mutate(feedId), [toggleSummarize])
+  const handleMove = useCallback((feedId: number, folderId: number | null): void =>
     moveFeed.mutate({ feedId, folderId }), [moveFeed])
-  const handleToggleTranslate = useCallback((feedId: number, translate: boolean) =>
+  const handleToggleTranslate = useCallback((feedId: number, translate: boolean): void =>
     updateTranslate.mutate({ feedId, translate }), [updateTranslate])
-  const handleUpdateSiteUrl = useCallback((feedId: number, siteUrl: string | null) =>
+  const handleUpdateSiteUrl = useCallback((feedId: number, siteUrl: string | null): void =>
     updateSiteUrl.mutate({ feedId, siteUrl }), [updateSiteUrl])
 
-  const renderFeed = (feed: Feed) => (
+  const renderFeed = (feed: Feed): JSX.Element => (
     <FeedItem
       key={feed.id}
       feed={feed}
@@ -727,7 +732,7 @@ export default function Feeds() {
     />
   )
 
-  const uncategorized = feedsByFolder.get(null) ?? []
+  const uncategorized: Feed[] = feedsByFolder.get(null) ?? []
 
   return (
     <div className="flex flex-col h-screen">
@@ -738,7 +743,7 @@ export default function Feeds() {
           <div className="flex items-center gap-2">
             <OpmlButtons
               onError={reportError}
-              onImported={() => {
+              onImported={(): void => {
                 invalidate()
                 // OPML import auto-triggers a refresh on the backend. Nudge the
                 // status query so the Header shows "Fetching..." immediately
@@ -748,7 +753,7 @@ export default function Feeds() {
               feedCount={feeds?.length ?? 0}
             />
             <button
-              onClick={() => {
+              onClick={(): void => {
                 if (confirm("Delete ALL feeds, folders, and articles? This cannot be undone.")) {
                   api.deleteAllFeeds().then(invalidate).catch(reportError)
                 }
@@ -764,12 +769,12 @@ export default function Feeds() {
         <FolderManager folders={sortedFolders} onError={reportError} />
 
         <AddFeedForm
-          onAdd={(f) => addFeed.mutate(f)}
+          onAdd={(feedCreate: FeedCreate): void => addFeed.mutate(feedCreate)}
           isAdding={addFeed.isPending}
           folders={sortedFolders}
           candidates={feedCandidates}
           candidatesFor={candidatesFor}
-          onPickCandidate={(href) => addFeed.mutate({ url: href, name: "" })}
+          onPickCandidate={(href: string): void => addFeed.mutate({ url: href, name: "" })}
           onDismissCandidates={dismissCandidates}
         />
 
@@ -778,13 +783,13 @@ export default function Feeds() {
             <input
               type="search"
               value={filter}
-              onChange={(e) => setFilter(e.target.value)}
+              onChange={(event: React.ChangeEvent<HTMLInputElement>): void => setFilter(event.target.value)}
               placeholder="Filter by name or URL..."
               className="flex-1 bg-bg-card text-text border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-accent"
             />
             <select
               value={errorFilter}
-              onChange={(e) => setErrorFilter(e.target.value as "all" | "with" | "without")}
+              onChange={(event: React.ChangeEvent<HTMLSelectElement>): void => setErrorFilter(event.target.value as "all" | "with" | "without")}
               className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm focus:outline-none focus:border-accent"
             >
               <option value="all">All feeds</option>
@@ -809,8 +814,8 @@ export default function Feeds() {
           <div className="text-text-muted">Loading...</div>
         ) : (
           <div className="space-y-4">
-            {sortedFolders.map((folder) => {
-              const folderFeeds = feedsByFolder.get(folder.id) ?? []
+            {sortedFolders.map((folder: Folder) => {
+              const folderFeeds: Feed[] = feedsByFolder.get(folder.id) ?? []
               if (folderFeeds.length === 0) return null
               return (
                 <div key={folder.id}>

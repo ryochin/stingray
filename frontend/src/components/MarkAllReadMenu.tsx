@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import type { JSX } from "react"
 
 interface Props {
   disabled?: boolean
@@ -6,29 +7,32 @@ interface Props {
   onChooseUnread: () => void
 }
 
-const OPTIONS: readonly { label: string, hours: number | null }[] = [
+type Option = { label: string, hours: number | null }
+
+const OPTIONS: readonly Option[] = [
   { label: "All", hours: null },
+  { label: "Older than 12 hours", hours: 12 },
   { label: "Older than 48 hours", hours: 48 },
   { label: "Older than 1 week", hours: 24 * 7 },
   { label: "Older than 1 month", hours: 24 * 30 },
 ]
 
 /** "Mark all as read" split into ALL / age-based cutoffs via a dropdown. */
-export default function MarkAllReadMenu({ disabled, onChoose, onChooseUnread }: Props) {
-  const [open, setOpen] = useState(false)
+export default function MarkAllReadMenu({ disabled, onChoose, onChooseUnread }: Props): JSX.Element {
+  const [open, setOpen] = useState<boolean>(false)
   const wrapRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     if (!open) return
-    const handleClick = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    const handleClick = (event: MouseEvent): void => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false)
     }
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false)
+    const handleKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setOpen(false)
     }
     window.addEventListener("mousedown", handleClick)
     window.addEventListener("keydown", handleKey)
-    return () => {
+    return (): void => {
       window.removeEventListener("mousedown", handleClick)
       window.removeEventListener("keydown", handleKey)
     }
@@ -37,7 +41,7 @@ export default function MarkAllReadMenu({ disabled, onChoose, onChooseUnread }: 
   return (
     <div ref={wrapRef} className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={(): void => setOpen((value: boolean): boolean => !value)}
         disabled={disabled}
         className="text-sm px-3 py-1 rounded bg-bg-card text-text-muted hover:text-text transition-colors disabled:opacity-40"
       >
@@ -45,7 +49,7 @@ export default function MarkAllReadMenu({ disabled, onChoose, onChooseUnread }: 
       </button>
       {open && (
         <div className="absolute right-0 mt-1 z-20 min-w-[12rem] bg-bg-secondary border border-border rounded shadow-lg py-1">
-          {OPTIONS.map((opt) => (
+          {OPTIONS.map((opt: Option): JSX.Element => (
             <button
               key={opt.label}
               onClick={() => {

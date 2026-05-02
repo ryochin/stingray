@@ -39,15 +39,15 @@ export function useArticleKeyboard({
   filtered, focusIndex, setFocusIndex, markFocusedAsRead, nextUnreadInView,
   scheduleRead, toggleRead, markAllRead, goToNextFeed, onJAtEnd, onKBeforeMove,
   toggleUnreadFilter, setShowHelp,
-}: Options) {
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+}: Options): void {
+  const handleKeyDown = useCallback((e: KeyboardEvent): void => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
-    const tag = (e.target as HTMLElement).tagName
+    const tag: string = (e.target as HTMLElement).tagName
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
 
     if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
       e.preventDefault()
-      setShowHelp((v) => !v)
+      setShowHelp((v: boolean): boolean => !v)
       return
     }
     if (e.key === "Escape") {
@@ -64,8 +64,8 @@ export function useArticleKeyboard({
       // Call goToNextFeed OUTSIDE the setFocusIndex updater so its side
       // effect (setSelection) fires exactly once even under Strict Mode,
       // and so React can batch it atomically with the focus change below.
-      const moved = goToNextFeed()
-      setFocusIndex((prev) => {
+      const moved: boolean = goToNextFeed()
+      setFocusIndex((prev: number): number => {
         markFocusedAsRead(prev)
         // Only clear focus if the jump succeeded; otherwise stay put so
         // the auto-focus effect doesn't yank the user back to index 0.
@@ -83,12 +83,12 @@ export function useArticleKeyboard({
       return
     }
 
-    const len = filtered.length
+    const len: number = filtered.length
 
     if (e.key === "j") {
       if (len === 0) return
       e.preventDefault()
-      setFocusIndex((prev) => {
+      setFocusIndex((prev: number): number => {
         markFocusedAsRead(prev)
         if (prev === len - 1) {
           onJAtEnd()
@@ -105,12 +105,12 @@ export function useArticleKeyboard({
       // j is the forward/read motion; k should stay purely navigational so
       // users can re-visit an article they just skimmed past without having
       // their focus target silently marked behind them.
-      setFocusIndex((prev) => Math.max(prev - 1, 0))
+      setFocusIndex((prev: number): number => Math.max(prev - 1, 0))
     } else if (e.key === "v" || e.key === "o" || e.key === "Enter") {
       e.preventDefault()
-      setFocusIndex((i) => {
+      setFocusIndex((i: number): number => {
         if (i >= 0 && i < len) {
-          const article = filtered[i]
+          const article: Article = filtered[i]
           window.open(article.url, "_blank", "noopener")
           if (article.read_at == null) scheduleRead(article.url)
         }
@@ -118,9 +118,9 @@ export function useArticleKeyboard({
       })
     } else if (e.key === "m") {
       e.preventDefault()
-      setFocusIndex((i) => {
+      setFocusIndex((i: number): number => {
         if (i >= 0 && i < len) {
-          const article = filtered[i]
+          const article: Article = filtered[i]
           toggleRead(article.url, article.read_at != null)
         }
         return i
@@ -135,8 +135,8 @@ export function useArticleKeyboard({
     toggleUnreadFilter, setShowHelp,
   ])
 
-  useEffect(() => {
+  useEffect((): () => void => {
     window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
+    return (): void => window.removeEventListener("keydown", handleKeyDown)
   }, [handleKeyDown])
 }

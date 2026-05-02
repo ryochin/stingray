@@ -71,10 +71,10 @@ export interface FilterRule {
 }
 
 export function faviconUrl(feed: Feed): string | null {
-  const url = feed.site_url ?? feed.url
+  const url: string | null = feed.site_url ?? feed.url
   if (!url) return null
   try {
-    const domain = new URL(url).hostname
+    const domain: string = new URL(url).hostname
     return `https://www.google.com/s2/favicons?sz=16&domain=${domain}`
   } catch {
     return null
@@ -106,12 +106,12 @@ export interface FeedCandidate {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, init)
+  const res: Response = await fetch(`${BASE}${path}`, init)
   if (!res.ok) {
     let parsed: unknown = null
     try { parsed = await res.json() } catch {}
-    const detail = (parsed as { detail?: unknown } | null)?.detail
-    const message =
+    const detail: unknown = (parsed as { detail?: unknown } | null)?.detail
+    const message: string =
       typeof detail === "string" ? detail :
       (detail as { message?: string } | undefined)?.message ??
       `API error: ${res.status} ${res.statusText}`
@@ -122,11 +122,11 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getArticles: (opts?: { feedId?: number, sinceDays?: number | null }) => {
-    const params = new URLSearchParams()
+  getArticles: (opts?: { feedId?: number, sinceDays?: number | null }): Promise<Article[]> => {
+    const params: URLSearchParams = new URLSearchParams()
     if (opts?.feedId != null) params.set("feed_id", String(opts.feedId))
     if (opts?.sinceDays != null) params.set("since_days", String(opts.sinceDays))
-    const qs = params.toString()
+    const qs: string = params.toString()
     return fetchJson<Article[]>(qs ? `/articles?${qs}` : "/articles")
   },
 
@@ -236,15 +236,15 @@ export const api = {
       body: JSON.stringify({ urls }),
     }),
 
-  markAllRead: (feedId?: number, olderThanHours?: number) => {
-    const params = new URLSearchParams()
+  markAllRead: (feedId?: number, olderThanHours?: number): Promise<{ marked: number }> => {
+    const params: URLSearchParams = new URLSearchParams()
     if (feedId != null) params.set("feed_id", String(feedId))
     if (olderThanHours != null) params.set("older_than_hours", String(olderThanHours))
     return fetchJson<{ marked: number }>(`/articles/read-all?${params}`, { method: "POST" })
   },
 
-  markAllUnread: (feedId?: number) => {
-    const params = new URLSearchParams()
+  markAllUnread: (feedId?: number): Promise<{ unmarked: number }> => {
+    const params: URLSearchParams = new URLSearchParams()
     if (feedId != null) params.set("feed_id", String(feedId))
     return fetchJson<{ unmarked: number }>(`/articles/unread-all?${params}`, { method: "POST" })
   },
@@ -268,24 +268,24 @@ export const api = {
       body: JSON.stringify(rules),
     }),
 
-  exportFilters: async () => {
-    const resp = await fetch(`${BASE}/filters/export`)
+  exportFilters: async (): Promise<void> => {
+    const resp: Response = await fetch(`${BASE}/filters/export`)
     if (!resp.ok) {
       let parsed: unknown = null
       try { parsed = await resp.json() } catch {}
       throw new ApiError(`Export failed: ${resp.status} ${resp.statusText}`, resp.status, parsed)
     }
-    const blob = await resp.blob()
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement("a")
+    const blob: Blob = await resp.blob()
+    const url: string = URL.createObjectURL(blob)
+    const anchor: HTMLAnchorElement = document.createElement("a")
     anchor.href = url
     anchor.download = "filters.json"
     anchor.click()
     URL.revokeObjectURL(url)
   },
 
-  importFilters: async (file: File) => {
-    const form = new FormData()
+  importFilters: async (file: File): Promise<{ created: number, skipped: number }> => {
+    const form: FormData = new FormData()
     form.append("file", file)
     return fetchJson<{ created: number, skipped: number }>("/filters/import", {
       method: "POST",
@@ -293,14 +293,14 @@ export const api = {
     })
   },
 
-  exportOpml: async () => {
-    const res = await fetch(`${BASE}/opml/export`)
+  exportOpml: async (): Promise<Blob> => {
+    const res: Response = await fetch(`${BASE}/opml/export`)
     if (!res.ok) throw new Error(`API error: ${res.status}`)
     return res.blob()
   },
 
-  importOpml: (file: File) => {
-    const form = new FormData()
+  importOpml: (file: File): Promise<{ folders_created: number, feeds_created: number, feeds_skipped: number }> => {
+    const form: FormData = new FormData()
     form.append("file", file)
     return fetchJson<{ folders_created: number, feeds_created: number, feeds_skipped: number }>(
       "/opml/import",

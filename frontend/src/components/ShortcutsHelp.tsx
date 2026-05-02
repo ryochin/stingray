@@ -1,3 +1,5 @@
+import type { JSX, MouseEvent } from "react"
+
 interface Props {
   onClose: () => void
 }
@@ -16,14 +18,14 @@ const SHORTCUTS: readonly (readonly [string, string])[] = [
 ]
 
 /** Keyboard shortcut cheatsheet shown when the user presses `?`. */
-export default function ShortcutsHelp({ onClose }: Props) {
+export default function ShortcutsHelp({ onClose }: Props): JSX.Element {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-bg-secondary border border-border rounded-lg p-6 max-w-sm" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-bg-secondary border border-border rounded-lg p-6 max-w-sm" onClick={(event: MouseEvent<HTMLDivElement>): void => event.stopPropagation()}>
         <h3 className="text-text-heading font-semibold mb-4">Keyboard Shortcuts</h3>
         <table className="text-sm w-full">
           <tbody>
-            {SHORTCUTS.map(([key, desc]) => (
+            {SHORTCUTS.map(([key, desc]: readonly [string, string]): JSX.Element => (
               <tr key={key}>
                 <td className="pr-4 py-1">
                   <kbd className="px-1.5 py-0.5 rounded bg-bg-card text-accent-text text-xs font-mono">{key}</kbd>

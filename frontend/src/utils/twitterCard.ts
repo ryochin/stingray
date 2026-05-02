@@ -7,13 +7,13 @@ const META_RE = /[—–-]\s*(.+?)\s*\(@([A-Za-z0-9_]+)\)/
 
 export function transformTwitterBlockquotes(doc: Document): void {
   for (const bq of Array.from(doc.querySelectorAll("blockquote.twitter-tweet"))) {
-    const card = buildTweetCard(doc, bq)
+    const card: Element | null = buildTweetCard(doc, bq)
     if (card) bq.replaceWith(card)
   }
 }
 
 function buildTweetCard(doc: Document, bq: Element): Element | null {
-  const p = bq.querySelector("p")
+  const p: HTMLParagraphElement | null = bq.querySelector("p")
   if (!p) return null
 
   // Pick the last anchor whose href looks like a tweet status URL — that's
@@ -23,39 +23,39 @@ function buildTweetCard(doc: Document, bq: Element): Element | null {
     if (TWEET_URL_RE.test(a.getAttribute("href") ?? "")) dateLink = a
   }
   if (!dateLink) return null
-  const tweetUrl = (dateLink.getAttribute("href") ?? "").split("?")[0]
-  const dateText = dateLink.textContent?.trim() ?? ""
+  const tweetUrl: string = (dateLink.getAttribute("href") ?? "").split("?")[0]
+  const dateText: string = dateLink.textContent?.trim() ?? ""
 
-  let metaText = ""
+  let metaText: string = ""
   let node: Node | null = p.nextSibling
   while (node && node !== dateLink) {
     metaText += node.textContent ?? ""
     node = node.nextSibling
   }
-  const match = metaText.match(META_RE)
-  const author = match?.[1]?.trim() ?? ""
-  const handle = match?.[2] ?? ""
+  const match: RegExpMatchArray | null = metaText.match(META_RE)
+  const author: string = match?.[1]?.trim() ?? ""
+  const handle: string = match?.[2] ?? ""
 
-  const card = doc.createElement("div")
+  const card: HTMLDivElement = doc.createElement("div")
   card.className = "tweet-card"
 
-  const header = doc.createElement("div")
+  const header: HTMLDivElement = doc.createElement("div")
   header.className = "tweet-card-header"
 
-  const icon = doc.createElement("span")
+  const icon: HTMLSpanElement = doc.createElement("span")
   icon.className = "tweet-card-icon"
   icon.textContent = "𝕏"
   header.appendChild(icon)
 
   if (author) {
-    const authorEl = doc.createElement("span")
+    const authorEl: HTMLSpanElement = doc.createElement("span")
     authorEl.className = "tweet-card-author"
     authorEl.textContent = author
     header.appendChild(authorEl)
   }
 
   if (handle) {
-    const handleEl = doc.createElement("a")
+    const handleEl: HTMLAnchorElement = doc.createElement("a")
     handleEl.className = "tweet-card-handle"
     handleEl.setAttribute("href", `https://x.com/${handle}`)
     handleEl.setAttribute("target", "_blank")
@@ -66,13 +66,13 @@ function buildTweetCard(doc: Document, bq: Element): Element | null {
 
   card.appendChild(header)
 
-  const body = doc.createElement("div")
+  const body: HTMLDivElement = doc.createElement("div")
   body.className = "tweet-card-body"
   body.innerHTML = p.innerHTML
   card.appendChild(body)
 
   if (dateText) {
-    const dateEl = doc.createElement("a")
+    const dateEl: HTMLAnchorElement = doc.createElement("a")
     dateEl.className = "tweet-card-date"
     dateEl.setAttribute("href", tweetUrl)
     dateEl.setAttribute("target", "_blank")

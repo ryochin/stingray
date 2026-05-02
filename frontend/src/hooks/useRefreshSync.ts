@@ -6,11 +6,11 @@ import { useQueryClient } from "@tanstack/react-query"
 // waiting for the next scheduled poll tick. Mounted from any page that has
 // the latest `running` flag — the shared QueryClient cache means a single
 // caller per route is enough.
-export function useRefreshSync(running: boolean | undefined) {
+export function useRefreshSync(running: boolean | undefined): void {
   const queryClient = useQueryClient()
-  const prevRunning = useRef(false)
-  useEffect(() => {
-    const current = running ?? false
+  const prevRunning = useRef<boolean>(false)
+  useEffect((): void => {
+    const current: boolean = running ?? false
     if (prevRunning.current !== current) {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
       queryClient.invalidateQueries({ queryKey: ["feeds"] })

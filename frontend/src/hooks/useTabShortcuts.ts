@@ -1,13 +1,13 @@
 import { useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 
-export function useTabShortcuts() {
+export function useTabShortcuts(): void {
   const navigate = useNavigate()
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+  useEffect((): () => void => {
+    const handler = (e: KeyboardEvent): void => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      const tag = (e.target as HTMLElement).tagName
+      const tag: string = (e.target as HTMLElement).tagName
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
 
       if (e.key === "a") {
@@ -20,6 +20,6 @@ export function useTabShortcuts() {
     }
 
     window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
+    return (): void => window.removeEventListener("keydown", handler)
   }, [navigate])
 }

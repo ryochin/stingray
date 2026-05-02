@@ -60,12 +60,12 @@ describe("computeFolderFeedOrder", () => {
   })
 
   it("orders feeds by position then id and indexes them", () => {
-    const feeds = [
+    const feeds: Feed[] = [
       feed(10, { folder_id: 1, position: 2 }),
       feed(20, { folder_id: 1, position: 0 }),
       feed(30, { folder_id: 1, position: 0 }),
     ]
-    const order = computeFolderFeedOrder({ type: "folder", id: 1 }, feeds)
+    const order: Map<number, number> | null = computeFolderFeedOrder({ type: "folder", id: 1 }, feeds)
     expect(order).not.toBeNull()
     // Expected sidebar order: position asc (0,0,2), id asc on tie → 20, 30, 10.
     expect(order!.get(20)).toBe(0)
@@ -74,64 +74,64 @@ describe("computeFolderFeedOrder", () => {
   })
 
   it("excludes feeds from other folders and disabled feeds", () => {
-    const feeds = [
+    const feeds: Feed[] = [
       feed(1, { folder_id: 1, enabled: true }),
       feed(2, { folder_id: 2, enabled: true }),
       feed(3, { folder_id: 1, enabled: false }),
     ]
-    const order = computeFolderFeedOrder({ type: "folder", id: 1 }, feeds)
+    const order: Map<number, number> | null = computeFolderFeedOrder({ type: "folder", id: 1 }, feeds)
     expect(Array.from(order!.keys())).toEqual([1])
   })
 })
 
 
 describe("selectArticles", () => {
-  const articles = [
+  const articles: Article[] = [
     article({ url: "a1", feed_id: 1 }),
     article({ url: "a2", feed_id: 2 }),
     article({ url: "a3", feed_id: 3 }),
   ]
 
   it("filters by feed_id for feed selection", () => {
-    const out = selectArticles(articles, { type: "feed", id: 2 }, null)
-    expect(out.map((a) => a.url)).toEqual(["a2"])
+    const out: Article[] = selectArticles(articles, { type: "feed", id: 2 }, null)
+    expect(out.map((a: Article): string => a.url)).toEqual(["a2"])
   })
 
   it("returns all articles for 'all' selection", () => {
-    const out = selectArticles(articles, { type: "all" }, null)
+    const out: Article[] = selectArticles(articles, { type: "all" }, null)
     expect(out.length).toBe(3)
   })
 
   it("folder selection sorts by feed index, preserving published order within a feed (stable sort)", () => {
     // Feed index: 1→0, 2→1
-    const order = new Map([[1, 0], [2, 1]])
-    const list = [
+    const order: Map<number, number> = new Map([[1, 0], [2, 1]])
+    const list: Article[] = [
       article({ url: "f2-early", feed_id: 2 }),
       article({ url: "f1-a", feed_id: 1 }),
       article({ url: "f2-late", feed_id: 2 }),
       article({ url: "f1-b", feed_id: 1 }),
       article({ url: "f3-other", feed_id: 3 }),  // excluded
     ]
-    const out = selectArticles(list, { type: "folder", id: 1 }, order)
+    const out: Article[] = selectArticles(list, { type: "folder", id: 1 }, order)
     // f1 group first (preserving input order: f1-a, f1-b), then f2 group (f2-early, f2-late).
-    expect(out.map((a) => a.url)).toEqual(["f1-a", "f1-b", "f2-early", "f2-late"])
+    expect(out.map((a: Article): string => a.url)).toEqual(["f1-a", "f1-b", "f2-early", "f2-late"])
   })
 
   it("folder selection drops articles whose feed is not in the folder", () => {
-    const order = new Map([[1, 0]])
-    const out = selectArticles(articles, { type: "folder", id: 99 }, order)
-    expect(out.map((a) => a.url)).toEqual(["a1"])
+    const order: Map<number, number> = new Map([[1, 0]])
+    const out: Article[] = selectArticles(articles, { type: "folder", id: 99 }, order)
+    expect(out.map((a: Article): string => a.url)).toEqual(["a1"])
   })
 
   it("folder with null folderFeedOrder returns all (defensive)", () => {
-    const out = selectArticles(articles, { type: "folder", id: 1 }, null)
+    const out: Article[] = selectArticles(articles, { type: "folder", id: 1 }, null)
     expect(out.length).toBe(3)
   })
 })
 
 
 describe("applyUnreadFilter", () => {
-  const list = [
+  const list: Article[] = [
     article({ url: "unread", read_at: null }),
     article({ url: "read", read_at: "2024-01-01T00:00:00Z" }),
     article({ url: "just-read", read_at: "2024-01-01T00:00:00Z" }),
@@ -142,13 +142,13 @@ describe("applyUnreadFilter", () => {
   })
 
   it("drops already-read articles not in session set", () => {
-    const out = applyUnreadFilter(list, true, new Set())
-    expect(out.map((a) => a.url)).toEqual(["unread"])
+    const out: Article[] = applyUnreadFilter(list, true, new Set())
+    expect(out.map((a: Article): string => a.url)).toEqual(["unread"])
   })
 
   it("keeps session-read URLs so users still see what they just dismissed", () => {
-    const out = applyUnreadFilter(list, true, new Set(["just-read"]))
-    expect(out.map((a) => a.url).sort()).toEqual(["just-read", "unread"])
+    const out: Article[] = applyUnreadFilter(list, true, new Set(["just-read"]))
+    expect(out.map((a: Article): string => a.url).sort()).toEqual(["just-read", "unread"])
   })
 })
 
@@ -194,21 +194,21 @@ describe("tallySessionReadByFeed", () => {
       article({ url: "a2", feed_id: 1 }),
       article({ url: "b1", feed_id: 2 }),
     ]
-    const tally = tallySessionReadByFeed(articles, new Set(["a1", "a2", "b1"]))
+    const tally: Map<number, number> = tallySessionReadByFeed(articles, new Set(["a1", "a2", "b1"]))
     expect(tally.get(1)).toBe(2)
     expect(tally.get(2)).toBe(1)
   })
 
   it("ignores URLs not present in the article list", () => {
     const articles: Article[] = [article({ url: "a1", feed_id: 1 })]
-    const tally = tallySessionReadByFeed(articles, new Set(["a1", "ghost"]))
+    const tally: Map<number, number> = tallySessionReadByFeed(articles, new Set(["a1", "ghost"]))
     expect(tally.get(1)).toBe(1)
     expect(tally.size).toBe(1)
   })
 
   it("ignores articles with null feed_id", () => {
     const articles: Article[] = [article({ url: "a1", feed_id: null })]
-    const tally = tallySessionReadByFeed(articles, new Set(["a1"]))
+    const tally: Map<number, number> = tallySessionReadByFeed(articles, new Set(["a1"]))
     expect(tally.size).toBe(0)
   })
 
@@ -219,7 +219,7 @@ describe("tallySessionReadByFeed", () => {
       article({ url: "fresh", feed_id: 1, read_at: null }),
       article({ url: "synced", feed_id: 1, read_at: "2026-04-30T00:00:00Z" }),
     ]
-    const tally = tallySessionReadByFeed(articles, new Set(["fresh", "synced"]))
+    const tally: Map<number, number> = tallySessionReadByFeed(articles, new Set(["fresh", "synced"]))
     expect(tally.get(1)).toBe(1)
   })
 })
@@ -242,7 +242,7 @@ describe("deriveUnreadCounts", () => {
   })
 
   it("excludes disabled feeds even when stats lists them", () => {
-    const out = deriveUnreadCounts(
+    const out: Map<number, number> = deriveUnreadCounts(
       { "1": stats(3), "2": stats(5) },
       new Set([1]),
       new Map(),
@@ -252,7 +252,7 @@ describe("deriveUnreadCounts", () => {
   })
 
   it("subtracts session-local reads", () => {
-    const out = deriveUnreadCounts(
+    const out: Map<number, number> = deriveUnreadCounts(
       { "1": stats(10) },
       new Set([1]),
       new Map([[1, 4]]),
@@ -261,7 +261,7 @@ describe("deriveUnreadCounts", () => {
   })
 
   it("clamps at zero when local reads outpace stats", () => {
-    const out = deriveUnreadCounts(
+    const out: Map<number, number> = deriveUnreadCounts(
       { "1": stats(2) },
       new Set([1]),
       new Map([[1, 5]]),
@@ -270,7 +270,7 @@ describe("deriveUnreadCounts", () => {
   })
 
   it("omits feeds whose effective count is zero", () => {
-    const out = deriveUnreadCounts(
+    const out: Map<number, number> = deriveUnreadCounts(
       { "1": stats(0), "2": stats(3) },
       new Set([1, 2]),
       new Map(),
@@ -283,20 +283,20 @@ describe("deriveUnreadCounts", () => {
 
 describe("nextUnreadFeedId", () => {
   it("returns the next feed id with unread > 0", () => {
-    const ordered = [1, 2, 3, 4]
-    const unread = new Map([[1, 0], [2, 0], [3, 5], [4, 2]])
+    const ordered: number[] = [1, 2, 3, 4]
+    const unread: Map<number, number> = new Map([[1, 0], [2, 0], [3, 5], [4, 2]])
     expect(nextUnreadFeedId(ordered, 1, unread)).toBe(3)
   })
 
   it("skips feeds with zero unread", () => {
-    const ordered = [1, 2, 3, 4]
-    const unread = new Map([[1, 3], [2, 0], [3, 0], [4, 1]])
+    const ordered: number[] = [1, 2, 3, 4]
+    const unread: Map<number, number> = new Map([[1, 3], [2, 0], [3, 0], [4, 1]])
     expect(nextUnreadFeedId(ordered, 1, unread)).toBe(4)
   })
 
   it("returns null when no subsequent feed has unread", () => {
-    const ordered = [1, 2, 3]
-    const unread = new Map([[1, 0], [2, 0], [3, 0]])
+    const ordered: number[] = [1, 2, 3]
+    const unread: Map<number, number> = new Map([[1, 0], [2, 0], [3, 0]])
     expect(nextUnreadFeedId(ordered, 1, unread)).toBeNull()
   })
 
@@ -310,8 +310,8 @@ describe("nextUnreadFeedId", () => {
 
   it("treats missing map entries as zero unread", () => {
     // Feed 2 is absent from unread map → treated as 0 and skipped.
-    const ordered = [1, 2, 3]
-    const unread = new Map([[3, 1]])
+    const ordered: number[] = [1, 2, 3]
+    const unread: Map<number, number> = new Map([[3, 1]])
     expect(nextUnreadFeedId(ordered, 1, unread)).toBe(3)
   })
 })

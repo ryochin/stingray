@@ -23,24 +23,24 @@ export function useFeedMutations({ onError }: Options) {
   const [candidatesFor, setCandidatesFor] = useState<string | null>(null)
   const [fetchingFeeds, setFetchingFeeds] = useState<Set<number>>(new Set())
 
-  const invalidate = () => {
+  const invalidate = (): void => {
     queryClient.invalidateQueries({ queryKey: ["feeds"] })
     queryClient.invalidateQueries({ queryKey: ["folders"] })
     queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
   }
-  const reportError = (e: Error) => onError(e.message)
+  const reportError = (e: Error): void => onError(e.message)
 
   const addFeed = useMutation({
     mutationFn: api.createFeed,
-    onMutate: (body: FeedCreate) => {
+    onMutate: (body: FeedCreate): void => {
       setCandidatesFor(body.url)
     },
-    onSuccess: () => {
+    onSuccess: (): void => {
       invalidate()
       setFeedCandidates(null)
       setCandidatesFor(null)
     },
-    onError: (e: Error) => {
+    onError: (e: Error): void => {
       if (e instanceof ApiError && e.status === 422) {
         const detail = (e.body as { detail?: { candidates?: FeedCandidate[] } } | null)?.detail
         if (detail?.candidates && detail.candidates.length > 0) {
@@ -62,13 +62,13 @@ export function useFeedMutations({ onError }: Options) {
   // clearing + invalidating gives the backend time to persist fetched articles.
   const fetchFeed = useMutation({
     mutationFn: api.fetchFeed,
-    onMutate: (feedId: number) => {
-      setFetchingFeeds((prev) => new Set(prev).add(feedId))
+    onMutate: (feedId: number): void => {
+      setFetchingFeeds((prev: Set<number>): Set<number> => new Set(prev).add(feedId))
     },
-    onSettled: (_data, _error, feedId) => {
-      setTimeout(() => {
-        setFetchingFeeds((prev) => {
-          const next = new Set(prev)
+    onSettled: (_data, _error, feedId: number): void => {
+      setTimeout((): void => {
+        setFetchingFeeds((prev: Set<number>): Set<number> => {
+          const next: Set<number> = new Set(prev)
           next.delete(feedId)
           return next
         })
@@ -108,17 +108,17 @@ export function useFeedMutations({ onError }: Options) {
   // pre-mutation snapshot captured in onMutate.
   const reorderFeeds = useMutation({
     mutationFn: (ids: number[]) => api.reorderFeeds(ids),
-    onMutate: async (ids) => {
+    onMutate: async (ids: number[]): Promise<{ prev: Feed[] | undefined }> => {
       await queryClient.cancelQueries({ queryKey: ["feeds"] })
-      const prev = queryClient.getQueryData<Feed[]>(["feeds"])
+      const prev: Feed[] | undefined = queryClient.getQueryData<Feed[]>(["feeds"])
       if (prev) {
-        const idSet = new Set(ids)
-        const byId = new Map(prev.map((f) => [f.id, f]))
+        const idSet: Set<number> = new Set(ids)
+        const byId: Map<number, Feed> = new Map(prev.map((f: Feed): [number, Feed] => [f.id, f]))
         const reordered: Feed[] = []
-        let cursor = 0
+        let cursor: number = 0
         for (const f of prev) {
           if (idSet.has(f.id)) {
-            const next = byId.get(ids[cursor++])
+            const next: Feed | undefined = byId.get(ids[cursor++])
             if (next) reordered.push(next)
           } else {
             reordered.push(f)
@@ -128,11 +128,11 @@ export function useFeedMutations({ onError }: Options) {
       }
       return { prev }
     },
-    onError: (err, _ids, ctx) => {
+    onError: (err: Error, _ids, ctx): void => {
       if (ctx?.prev) queryClient.setQueryData(["feeds"], ctx.prev)
       reportError(err as Error)
     },
-    onSettled: () => {
+    onSettled: (): void => {
       queryClient.invalidateQueries({ queryKey: ["feeds"] })
     },
   })
@@ -141,7 +141,7 @@ export function useFeedMutations({ onError }: Options) {
     invalidate,
     feedCandidates,
     candidatesFor,
-    dismissCandidates: () => {
+    dismissCandidates: (): void => {
       setFeedCandidates(null)
       setCandidatesFor(null)
     },

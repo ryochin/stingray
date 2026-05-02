@@ -1,3 +1,5 @@
+import type { JSX } from "react"
+
 interface Props {
   label: string
   className?: string
@@ -5,7 +7,7 @@ interface Props {
 
 /** Sparkle icon + label, used by both the end-of-list sentinel and the
  *  empty-state message when no unread items remain. */
-export default function CaughtUpIndicator({ label, className }: Props) {
+export default function CaughtUpIndicator({ label, className }: Props): JSX.Element {
   return (
     <div className={`flex flex-col items-center gap-2 py-10 ${className ?? "text-text-dim/60"}`}>
       <svg
