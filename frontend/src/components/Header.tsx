@@ -30,7 +30,7 @@ export default function Header(): JSX.Element {
     <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-bg-secondary shrink-0">
       <div className="flex items-center gap-6">
         <Link to="/" className="text-xl font-semibold text-text-heading no-underline">
-          News Reader
+          Stingray
         </Link>
         <nav className="flex gap-4 text-sm">
           <Link to="/" className="text-text-muted hover:text-text no-underline">Articles</Link>

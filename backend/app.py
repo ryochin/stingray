@@ -138,7 +138,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     db.close()
 
 
-app = FastAPI(title="News Reader", lifespan=lifespan)
+app = FastAPI(title="Stingray", lifespan=lifespan)
 
 
 # -- Articles --
@@ -605,7 +605,7 @@ def opml_export() -> Response:
   folders = repo.list_folders()
   feeds = repo.list_feeds()
   xml = export_opml(folders, feeds)
-  filename = f"news_reader_subscriptions_{date.today().strftime('%Y%m%d')}.opml"
+  filename = f"stingray_subscriptions_{date.today().strftime('%Y%m%d')}.opml"
   return Response(
     content=xml,
     media_type="text/xml",

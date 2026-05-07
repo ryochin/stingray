@@ -1,4 +1,4 @@
-"""CLI entry point for the news feed aggregator."""
+"""CLI entry point for Stingray (background fetcher)."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ async def run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-  parser = argparse.ArgumentParser(description="News feed aggregator")
+  parser = argparse.ArgumentParser(description="Stingray feed fetcher")
   parser.add_argument(
     "--config", type=Path, default=Path("config.yml"),
     help="Path to config file",

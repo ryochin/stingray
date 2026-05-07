@@ -255,7 +255,7 @@ function OpmlButtons({ onError, onImported, feedCount }: { onError: (e: Error) =
       // calendar regardless of UTC offset.
       const now: Date = new Date()
       const stamp: string = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`
-      anchor.download = `news_reader_subscriptions_${stamp}.opml`
+      anchor.download = `stingray_subscriptions_${stamp}.opml`
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (e) {

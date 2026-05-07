@@ -93,7 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_feeds_next_fetch
   ON feeds(next_fetch_at) WHERE enabled;
 """
 
-_DEFAULT_URL = "postgresql://news:news@localhost:25432/news"
+_DEFAULT_URL = "postgresql://stingray:stingray@postgres:5432/stingray"
 _pool: ConnectionPool | None = None
 
 

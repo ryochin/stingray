@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: news-reader-postgres
+    container_name: stingray-postgres
     environment:
       TZ: Asia/Tokyo
       POSTGRES_USER: news
@@ -22,8 +22,8 @@ services:
     build:
       context: .
       pull: false
-    image: news-reader:latest
-    container_name: news-reader-web
+    image: stingray:latest
+    container_name: stingray-web
     command: ["/app/.venv/bin/uvicorn", "app:app", "--host", "0.0.0.0", "--port", "20080"]
     working_dir: /app
     environment:
@@ -52,8 +52,8 @@ services:
     build:
       context: .
       pull: false
-    image: news-reader:latest
-    container_name: news-reader-fetcher
+    image: stingray:latest
+    container_name: stingray-fetcher
     command: ["/usr/local/bin/supercronic", "-passthrough-logs", "/app/crontab"]
     environment:
       TZ: Asia/Tokyo

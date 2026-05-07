@@ -32,7 +32,7 @@ class ImportFolder:
 def export_opml(folders: list[FolderRow], feeds: list[FeedRow]) -> str:
   root = ET.Element("opml", version="2.0")
   head = ET.SubElement(root, "head")
-  ET.SubElement(head, "title").text = "News Reader Subscriptions"
+  ET.SubElement(head, "title").text = "Stingray Subscriptions"
   body = ET.SubElement(root, "body")
 
   feeds_by_folder: dict[int | None, list[FeedRow]] = {}

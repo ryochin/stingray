@@ -1,7 +1,7 @@
 [project]
-name = "news-aggregator"
+name = "stingray"
 version = "0.2.0"
-description = "RSS reader web app with Japanese translation and summarization"
+description = "Self-hosted RSS reader web app with Japanese translation and summarization"
 requires-python = ">=3.12"
 dependencies = [
   "feedparser>=6.0",
