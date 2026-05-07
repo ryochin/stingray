@@ -1,20 +1,14 @@
 version: "3"
 
-vars:
-  CONFIG: config.yml
-
 tasks:
-  serve:
-    desc: "Start API server and frontend dev server"
-    deps: [serve:api, serve:web]
-
-  serve:api:
-    desc: "Start FastAPI dev server with hot reload"
+  install:
+    desc: "Install all dependencies"
     cmds:
-      - PYTHONPATH=backend uv run uvicorn app:app --host 127.0.0.1 --port 20080 --reload
+      - uv sync
+      - cd frontend && npm install
 
-  serve:web:
-    desc: "Start Vite dev server (proxies /api to :20080)"
+  dev:
+    desc: "Start Vite dev server (proxies /api to backend at :20080)"
     dir: frontend
     cmds:
       - npm run dev
@@ -25,30 +19,25 @@ tasks:
     cmds:
       - npm run build
 
-  fetch:
-    desc: "Fetch feeds and summarize"
-    aliases: [f]
+  test:
+    desc: "Run backend and frontend tests"
     cmds:
-      - uv run python backend/main.py --config {{.CONFIG}}
+      - task: test:backend
+      - task: test:frontend
 
-  fetch:no-summary:
-    desc: "Fetch feeds without LLM summarization"
+  test:backend:
+    desc: "Run backend tests inside the web container"
     cmds:
-      - uv run python backend/main.py --config {{.CONFIG}} --no-summary
+      - docker compose up -d
+      - docker compose exec web uv run pytest backend
 
-  fetch:fresh:
-    desc: "Clear feed cache and re-fetch everything"
+  test:frontend:
+    desc: "Run frontend tests"
+    dir: frontend
     cmds:
-      - rm -rf cache/
-      - uv run python backend/main.py --config {{.CONFIG}}
+      - npm test
 
   clean:
-    desc: "Remove all cached data"
+    desc: "Remove all cached feed data"
     cmds:
       - rm -rf cache/
-
-  install:
-    desc: "Install all dependencies"
-    cmds:
-      - uv sync
-      - cd frontend && npm install

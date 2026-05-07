@@ -320,4 +320,7 @@ dist
 
 /.serena/
 /cache/
-/data/postgres/
+/data/
+/debug-feeds/*.xml
+.env
+.env.local
