@@ -1,13 +1,14 @@
-import { forwardRef, useMemo } from "react"
-import type { JSX } from "react"
 import DOMPurify from "dompurify"
+import type { JSX, KeyboardEvent } from "react"
+import { forwardRef, useMemo } from "react"
 import type { Article } from "../api/client"
-import { formatDate, formatRelative } from "../utils/date"
 import { parseSummary } from "../utils/articleContent"
+import { formatDate, formatRelative } from "../utils/date"
 
-type ParsedSummary = { text: string, imageUrls: string[] }
-import { transformTwitterBlockquotes } from "../utils/twitterCard"
+type ParsedSummary = { text: string; imageUrls: string[] }
+
 import { useNow } from "../hooks/useNow"
+import { transformTwitterBlockquotes } from "../utils/twitterCard"
 
 interface Props {
   article: Article
@@ -19,13 +20,22 @@ interface Props {
 }
 
 const ArticleCard = forwardRef<HTMLDivElement, Props>(
-  ({ article, focused, pendingSummary, feedName, feedFaviconUrl, onClick }, ref): JSX.Element => {
+  (
+    { article, focused, pendingSummary, feedName, feedFaviconUrl, onClick },
+    ref,
+  ): JSX.Element => {
     const now: Date = useNow()
     const isRead: boolean = article.read_at != null
-    const hasTranslation: boolean = !!article.title_translated && article.title_translated !== article.title
-    const titleColor: string = focused ? "text-accent-text" : isRead ? "text-text-muted" : "text-text-heading"
+    const hasTranslation: boolean =
+      !!article.title_translated && article.title_translated !== article.title
+    const titleColor: string = focused
+      ? "text-accent-text"
+      : isRead
+        ? "text-text-muted"
+        : "text-text-heading"
     const parsedSummary = useMemo<ParsedSummary | null>(
-      (): ParsedSummary | null => article.summary ? parseSummary(article.summary) : null,
+      (): ParsedSummary | null =>
+        article.summary ? parseSummary(article.summary) : null,
       [article.summary],
     )
     const sanitizedHtml = useMemo<string | null>((): string | null => {
@@ -37,11 +47,19 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       // Strip dimension/layout attrs so the CSS `max-width: 100%` clamp can
       // win. Inline `style="width: ..."` and legacy `align="left"` (seen on
       // AssistOn RSS) otherwise let large feed images burst out of the card.
-      const STRIP_IMG_ATTRS: readonly string[] = ["width", "height", "style", "align", "hspace", "vspace", "border"]
+      const STRIP_IMG_ATTRS: readonly string[] = [
+        "width",
+        "height",
+        "style",
+        "align",
+        "hspace",
+        "vspace",
+        "border",
+      ]
       for (const img of doc.querySelectorAll("img")) {
         const src: string | null = img.getAttribute("src")
         if (!src) continue
-        STRIP_IMG_ATTRS.forEach((attr: string): void => img.removeAttribute(attr))
+        for (const attr of STRIP_IMG_ATTRS) img.removeAttribute(attr)
         if (seen.has(src)) {
           img.closest("a")?.remove() ?? img.remove()
         } else {
@@ -52,9 +70,18 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
     }, [article.content_html])
 
     return (
+      // biome-ignore lint/a11y/useSemanticElements: cannot use <button> because the card contains nested <a> links (interactive content cannot nest per HTML spec)
       <div
         ref={ref}
+        role="button"
+        tabIndex={0}
         onClick={onClick}
+        onKeyDown={(event: KeyboardEvent<HTMLDivElement>): void => {
+          if (onClick && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault()
+            onClick()
+          }
+        }}
         className={`py-5 px-6 rounded-lg border cursor-pointer transition-all duration-500 ${
           focused
             ? "bg-bg-hover border-accent-bg"
@@ -65,7 +92,9 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       >
         {hasTranslation ? (
           <>
-            <div className={`${titleColor} font-medium text-[16pt] leading-snug`}>
+            <div
+              className={`${titleColor} font-medium text-[16pt] leading-snug`}
+            >
               <a
                 href={article.url}
                 target="_blank"
@@ -104,56 +133,79 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
             {feedName && (
               <span className="flex items-center gap-1">
                 {feedFaviconUrl && (
-                  <img src={feedFaviconUrl} alt="" className="w-3.5 h-3.5" loading="lazy" />
+                  <img
+                    src={feedFaviconUrl}
+                    alt=""
+                    className="w-3.5 h-3.5"
+                    loading="lazy"
+                  />
                 )}
                 <span>{feedName}</span>
               </span>
             )}
-            {feedName && article.published && <span className="text-text-dim">·</span>}
+            {feedName && article.published && (
+              <span className="text-text-dim">·</span>
+            )}
             {article.published && (
-              <span title={formatDate(article.published)}>{formatRelative(article.published, now)}</span>
+              <span title={formatDate(article.published)}>
+                {formatRelative(article.published, now)}
+              </span>
             )}
           </div>
         )}
 
         {!parsedSummary && !article.content_translated && pendingSummary && (
-          <div className="mt-1 text-sm text-text-dim italic">Awaiting summary...</div>
+          <div className="mt-1 text-sm text-text-dim italic">
+            Awaiting summary...
+          </div>
         )}
 
         {parsedSummary && (
-          <div className={`mt-2 pl-3 border-l-2 border-solid border-accent-bg ${isRead ? "text-text-muted" : "text-text"}`}>
+          <div
+            className={`mt-2 pl-3 border-l-2 border-solid border-accent-bg ${isRead ? "text-text-muted" : "text-text"}`}
+          >
             {parsedSummary.text && <p>{parsedSummary.text}</p>}
             {!sanitizedHtml && parsedSummary.imageUrls.length > 0 && (
               <div className="mt-2 space-y-2">
-                {parsedSummary.imageUrls.map((url: string, index: number): JSX.Element => (
-                  <img
-                    key={index}
-                    src={url}
-                    alt=""
-                    className="max-w-full h-auto rounded border border-border"
-                    loading="lazy"
-                  />
-                ))}
+                {parsedSummary.imageUrls.map(
+                  (url: string): JSX.Element => (
+                    <img
+                      key={url}
+                      src={url}
+                      alt=""
+                      className="max-w-full h-auto rounded border border-border"
+                      loading="lazy"
+                    />
+                  ),
+                )}
               </div>
             )}
           </div>
         )}
 
         {article.content_translated && (
-          <div className={`mt-2 pl-3 border-l-2 border-solid border-accent-bg ${isRead ? "text-text-muted" : "text-text"}`}>
+          <div
+            className={`mt-2 pl-3 border-l-2 border-solid border-accent-bg ${isRead ? "text-text-muted" : "text-text"}`}
+          >
             <p>{article.content_translated}</p>
           </div>
         )}
 
-        {!parsedSummary && !article.content_translated && !sanitizedHtml && article.content_snippet && (
-          <p className={`mt-2 text-sm ${isRead ? "text-text-dim" : "text-text-muted"}`}>
-            {article.content_snippet}
-          </p>
-        )}
+        {!parsedSummary &&
+          !article.content_translated &&
+          !sanitizedHtml &&
+          article.content_snippet && (
+            <p
+              className={`mt-2 text-sm ${isRead ? "text-text-dim" : "text-text-muted"}`}
+            >
+              {article.content_snippet}
+            </p>
+          )}
 
         {sanitizedHtml && (
           <div
             className="mt-2 text-base text-text article-html max-w-none"
+            // biome-ignore lint/security/noDangerouslySetInnerHtml: content is sanitized via DOMPurify before rendering (see useMemo above)
             dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />
         )}

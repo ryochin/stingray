@@ -6,7 +6,9 @@ const TWEET_URL_RE = /https?:\/\/(?:twitter\.com|x\.com)\/[^/?#]+\/status\/\d+/
 const META_RE = /[—–-]\s*(.+?)\s*\(@([A-Za-z0-9_]+)\)/
 
 export function transformTwitterBlockquotes(doc: Document): void {
-  for (const bq of Array.from(doc.querySelectorAll("blockquote.twitter-tweet"))) {
+  for (const bq of Array.from(
+    doc.querySelectorAll("blockquote.twitter-tweet"),
+  )) {
     const card: Element | null = buildTweetCard(doc, bq)
     if (card) bq.replaceWith(card)
   }

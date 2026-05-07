@@ -1,8 +1,8 @@
-import { useState, useRef } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { JSX } from "react"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { api } from "../api/client"
+import { useRef, useState } from "react"
 import type { FilterRule } from "../api/client"
+import { api } from "../api/client"
 import Header from "../components/Header"
 
 export default function Filters(): JSX.Element {
@@ -34,9 +34,12 @@ export default function Filters(): JSX.Element {
   }
 
   const createFilter = useMutation({
-    mutationFn: ({ pattern, target }: { pattern: string, target: string }) =>
+    mutationFn: ({ pattern, target }: { pattern: string; target: string }) =>
       api.createFilter(pattern, target),
-    onSuccess: (): void => { invalidate(); setPattern("") },
+    onSuccess: (): void => {
+      invalidate()
+      setPattern("")
+    },
     onError: (err: Error): void => setError(err.message),
   })
   const deleteFilter = useMutation({
@@ -53,7 +56,9 @@ export default function Filters(): JSX.Element {
     createFilter.mutate({ pattern: pattern.trim(), target })
   }
 
-  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+  const handleImport = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ): Promise<void> => {
     const file: File | undefined = event.target.files?.[0]
     if (!file) return
     try {
@@ -67,7 +72,8 @@ export default function Filters(): JSX.Element {
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  const isRegex = (pattern: string): boolean => pattern.length > 2 && pattern.startsWith("/") && pattern.endsWith("/")
+  const isRegex = (pattern: string): boolean =>
+    pattern.length > 2 && pattern.startsWith("/") && pattern.endsWith("/")
 
   return (
     <div className="flex flex-col h-screen">
@@ -77,6 +83,7 @@ export default function Filters(): JSX.Element {
           <h2 className="text-lg font-semibold text-text-heading">Filters</h2>
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleExport}
               disabled={!filters?.length}
               className="px-3 py-1.5 rounded text-sm bg-bg-card text-text-muted border border-border hover:text-text transition-colors disabled:opacity-40"
@@ -96,21 +103,25 @@ export default function Filters(): JSX.Element {
           </div>
         </div>
 
-        {error && (
-          <div className="text-red-400 text-sm mb-4">{error}</div>
-        )}
+        {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
 
-        <h3 className="text-sm font-semibold text-text-heading mb-3">Filter Rules</h3>
+        <h3 className="text-sm font-semibold text-text-heading mb-3">
+          Filter Rules
+        </h3>
         <form onSubmit={handleCreate} className="flex gap-2 mb-3">
           <input
             value={pattern}
-            onChange={(event: React.ChangeEvent<HTMLInputElement>): void => setPattern(event.target.value)}
+            onChange={(event: React.ChangeEvent<HTMLInputElement>): void =>
+              setPattern(event.target.value)
+            }
             className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm flex-1"
             placeholder="keyword or /regex/"
           />
           <select
             value={target}
-            onChange={(event: React.ChangeEvent<HTMLSelectElement>): void => setTarget(event.target.value as "title" | "both")}
+            onChange={(event: React.ChangeEvent<HTMLSelectElement>): void =>
+              setTarget(event.target.value as "title" | "both")
+            }
             className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
           >
             <option value="title">Title</option>
@@ -127,14 +138,20 @@ export default function Filters(): JSX.Element {
         {(filters ?? []).length > 0 && (
           <div className="space-y-1">
             {(filters ?? []).map((filter: FilterRule) => (
-              <div key={filter.id} className="flex items-center gap-2 p-2 bg-bg-secondary rounded border border-border">
-                <span className={`flex-1 text-sm ${isRegex(filter.pattern) ? "font-mono text-amber-400" : "text-text"}`}>
+              <div
+                key={filter.id}
+                className="flex items-center gap-2 p-2 bg-bg-secondary rounded border border-border"
+              >
+                <span
+                  className={`flex-1 text-sm ${isRegex(filter.pattern) ? "font-mono text-amber-400" : "text-text"}`}
+                >
                   {filter.pattern}
                 </span>
                 <span className="text-xs text-text-dim px-1.5 py-0.5 bg-bg-card rounded">
                   {filter.target}
                 </span>
                 <button
+                  type="button"
                   onClick={(): void => deleteFilter.mutate(filter.id)}
                   className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors"
                 >

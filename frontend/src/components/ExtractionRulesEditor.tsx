@@ -1,28 +1,32 @@
-import { useState, useEffect } from "react"
-import type { JSX } from "react"
-import Editor from "react-simple-code-editor"
 import { highlight, languages } from "prismjs/components/prism-core"
+import type { JSX } from "react"
+import { useEffect, useState } from "react"
+import Editor from "react-simple-code-editor"
 import "prismjs/components/prism-clike"
 import "prismjs/components/prism-javascript"
 import "prismjs/components/prism-json"
-import { api } from "../api/client"
 import type { Feed } from "../api/client"
+import { api } from "../api/client"
 
 function prettifyRules(raw: string | null | undefined): string {
   try {
     const parsed: Record<string, unknown> = JSON.parse(raw || "{}")
     return Object.keys(parsed).length > 0 ? JSON.stringify(parsed, null, 2) : ""
-  } catch { return raw || "" }
+  } catch {
+    return raw || ""
+  }
 }
 
 export default function ExtractionRulesEditor({
   feed,
   onSaved,
 }: {
-  feed: Feed,
-  onSaved: () => void,
+  feed: Feed
+  onSaved: () => void
 }): JSX.Element {
-  const [json, setJson] = useState<string>((): string => prettifyRules(feed.extraction_rules))
+  const [json, setJson] = useState<string>((): string =>
+    prettifyRules(feed.extraction_rules),
+  )
   const [saving, setSaving] = useState<boolean>(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -35,7 +39,10 @@ export default function ExtractionRulesEditor({
   // Auto-hide the "Saved" indicator after a short delay
   useEffect((): (() => void) | undefined => {
     if (savedAt == null) return
-    const timer: ReturnType<typeof setTimeout> = setTimeout((): void => setSavedAt(null), 2000)
+    const timer: ReturnType<typeof setTimeout> = setTimeout(
+      (): void => setSavedAt(null),
+      2000,
+    )
     return (): void => clearTimeout(timer)
   }, [savedAt])
 
@@ -75,13 +82,21 @@ export default function ExtractionRulesEditor({
 
   return (
     <div className="mt-2 p-2 bg-bg-card rounded border border-border">
-      <div className="text-xs font-semibold text-text-heading mb-1">CSS Extraction Rules</div>
-      <div className="text-xs text-text-dim mb-1.5">{"Keys: item*, title*, link*, link_attr, date, date_attr, thumbnail, thumbnail_attr"}</div>
+      <div className="text-xs font-semibold text-text-heading mb-1">
+        CSS Extraction Rules
+      </div>
+      <div className="text-xs text-text-dim mb-1.5">
+        {
+          "Keys: item*, title*, link*, link_attr, date, date_attr, thumbnail, thumbnail_attr"
+        }
+      </div>
       <div className="bg-bg-secondary border border-border rounded overflow-auto max-h-96 resize-y">
         <Editor
           value={json}
           onValueChange={setJson}
-          highlight={(code: string): string => highlight(code, languages.json, "json")}
+          highlight={(code: string): string =>
+            highlight(code, languages.json, "json")
+          }
           padding={8}
           textareaClassName="outline-none"
           className="text-xs font-mono text-text min-h-[180px]"
@@ -92,11 +107,15 @@ export default function ExtractionRulesEditor({
       {error && <div className="text-xs text-red-400 mt-1">{error}</div>}
       <div className="flex items-center justify-end gap-2 mt-1.5">
         {savedAt != null && (
-          <span className="text-xs text-green-400 transition-opacity" aria-live="polite">
+          <span
+            className="text-xs text-green-400 transition-opacity"
+            aria-live="polite"
+          >
             ✓ Saved
           </span>
         )}
         <button
+          type="button"
           onClick={handleSave}
           disabled={saving || !json.trim()}
           className="px-3 py-1 rounded text-xs bg-accent text-white hover:opacity-90 transition-opacity disabled:opacity-40"

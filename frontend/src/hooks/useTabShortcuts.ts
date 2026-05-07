@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom"
 export function useTabShortcuts(): void {
   const navigate = useNavigate()
 
-  useEffect((): () => void => {
+  useEffect((): (() => void) => {
     const handler = (e: KeyboardEvent): void => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
       const tag: string = (e.target as HTMLElement).tagName

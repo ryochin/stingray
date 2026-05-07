@@ -37,6 +37,18 @@ tasks:
     cmds:
       - npm test
 
+  lint:
+    desc: "Lint the frontend with Biome"
+    dir: frontend
+    cmds:
+      - npm run lint
+
+  lint:fix:
+    desc: "Lint and auto-fix the frontend with Biome"
+    dir: frontend
+    cmds:
+      - npm run lint:fix
+
   clean:
     desc: "Remove all cached feed data"
     cmds:

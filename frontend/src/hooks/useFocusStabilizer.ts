@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, type RefObject } from "react"
 import type { Virtualizer } from "@tanstack/react-virtual"
+import { type RefObject, useLayoutEffect, useRef } from "react"
 import type { Article, Selection } from "../api/client"
 import type { TimeRangeId } from "../utils/articleView"
 
@@ -52,7 +52,8 @@ export function useFocusStabilizer({
     const main: HTMLElement | null = mainRef.current
     const prev = prevFocusSnapshot.current
     const selectionChanged: boolean = prevSelectionRef.current !== selection
-    const filterToggled: boolean = prevShowUnreadOnlyRef.current !== showUnreadOnly
+    const filterToggled: boolean =
+      prevShowUnreadOnlyRef.current !== showUnreadOnly
     const timeRangeChanged: boolean = prevTimeRangeIdRef.current !== timeRangeId
     prevSelectionRef.current = selection
     prevShowUnreadOnlyRef.current = showUnreadOnly
@@ -72,14 +73,16 @@ export function useFocusStabilizer({
     // would cancel that move (e.g. j-advance whose scheduleRead forces
     // `filtered` to re-memo into a new reference).
     if (
-      main
-      && prev
-      && prev.filtered !== filtered
-      && focusIndex === prev.index
-      && focusIndex >= 0
-      && filtered[focusIndex]?.url !== prev.url
+      main &&
+      prev &&
+      prev.filtered !== filtered &&
+      focusIndex === prev.index &&
+      focusIndex >= 0 &&
+      filtered[focusIndex]?.url !== prev.url
     ) {
-      const newIndex: number = filtered.findIndex((a: Article): boolean => a.url === prev.url)
+      const newIndex: number = filtered.findIndex(
+        (a: Article): boolean => a.url === prev.url,
+      )
       if (newIndex < 0) {
         // Focused article vanished (server-side delete, read state changed
         // outside this session, etc). Avoid silently inheriting whichever
@@ -88,7 +91,10 @@ export function useFocusStabilizer({
         prevFocusSnapshot.current = null
         return
       }
-      const newOffset: number | undefined = virtualizer.getOffsetForIndex(newIndex, "start")?.[0]
+      const newOffset: number | undefined = virtualizer.getOffsetForIndex(
+        newIndex,
+        "start",
+      )?.[0]
       if (newOffset != null) {
         main.scrollTop += newOffset - prev.offset
       }
@@ -103,14 +109,31 @@ export function useFocusStabilizer({
       return
     }
 
-    const currentUrl: string | null = focusIndex >= 0 ? filtered[focusIndex]?.url ?? null : null
-    const currentOffset: number | null = focusIndex >= 0
-      ? virtualizer.getOffsetForIndex(focusIndex, "start")?.[0] ?? null
-      : null
-    prevFocusSnapshot.current = currentUrl != null && currentOffset != null
-      ? { filtered, index: focusIndex, url: currentUrl, offset: currentOffset }
-      : null
-  }, [filtered, focusIndex, setFocusIndex, virtualizer, mainRef, selection, showUnreadOnly, timeRangeId])
+    const currentUrl: string | null =
+      focusIndex >= 0 ? (filtered[focusIndex]?.url ?? null) : null
+    const currentOffset: number | null =
+      focusIndex >= 0
+        ? (virtualizer.getOffsetForIndex(focusIndex, "start")?.[0] ?? null)
+        : null
+    prevFocusSnapshot.current =
+      currentUrl != null && currentOffset != null
+        ? {
+            filtered,
+            index: focusIndex,
+            url: currentUrl,
+            offset: currentOffset,
+          }
+        : null
+  }, [
+    filtered,
+    focusIndex,
+    setFocusIndex,
+    virtualizer,
+    mainRef,
+    selection,
+    showUnreadOnly,
+    timeRangeId,
+  ])
 
   return skipFocusScrollRef
 }

@@ -1,11 +1,14 @@
 /// <reference types="vitest" />
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { defineConfig, loadEnv } from "vite"
-import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
+import react from "@vitejs/plugin-react"
+import { defineConfig, loadEnv } from "vite"
 
-const repoRoot: string = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const repoRoot: string = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+)
 
 export default defineConfig(({ mode }) => {
   const env: Record<string, string> = loadEnv(mode, repoRoot, "")

@@ -1,11 +1,9 @@
-import { describe, it, expect } from "vitest"
+import { describe, expect, it } from "vitest"
 import { transformTwitterBlockquotes } from "./twitterCard"
-
 
 function parse(html: string): Document {
   return new DOMParser().parseFromString(`<body>${html}</body>`, "text/html")
 }
-
 
 const sample = `
 <blockquote class="twitter-tweet">
@@ -13,7 +11,6 @@ const sample = `
 — 𩸽食うクマ (@Bear_eat_Hokke) <a href="https://twitter.com/Bear_eat_Hokke/status/2044912402618274135?ref_src=twsrc%5Etfw">April 16, 2026</a>
 </blockquote>
 `
-
 
 describe("transformTwitterBlockquotes", () => {
   it("replaces a twitter-tweet blockquote with a .tweet-card", () => {
@@ -26,7 +23,9 @@ describe("transformTwitterBlockquotes", () => {
   it("extracts author name and handle from the meta text", () => {
     const doc: Document = parse(sample)
     transformTwitterBlockquotes(doc)
-    expect(doc.querySelector(".tweet-card-author")?.textContent).toBe("𩸽食うクマ")
+    expect(doc.querySelector(".tweet-card-author")?.textContent).toBe(
+      "𩸽食うクマ",
+    )
     const handle: Element = doc.querySelector(".tweet-card-handle")!
     expect(handle.textContent).toBe("@Bear_eat_Hokke")
     expect(handle.getAttribute("href")).toBe("https://x.com/Bear_eat_Hokke")
@@ -35,7 +34,8 @@ describe("transformTwitterBlockquotes", () => {
   it("uses the status link as the card date link (strips query params)", () => {
     const doc: Document = parse(sample)
     transformTwitterBlockquotes(doc)
-    const date: HTMLAnchorElement = doc.querySelector<HTMLAnchorElement>(".tweet-card-date")!
+    const date: HTMLAnchorElement =
+      doc.querySelector<HTMLAnchorElement>(".tweet-card-date")!
     expect(date.textContent).toBe("April 16, 2026")
     expect(date.getAttribute("href")).toBe(
       "https://twitter.com/Bear_eat_Hokke/status/2044912402618274135",
@@ -60,8 +60,9 @@ describe("transformTwitterBlockquotes", () => {
       </blockquote>
     `)
     transformTwitterBlockquotes(doc)
-    expect(doc.querySelector(".tweet-card-date")?.getAttribute("href"))
-      .toBe("https://x.com/handle/status/123")
+    expect(doc.querySelector(".tweet-card-date")?.getAttribute("href")).toBe(
+      "https://x.com/handle/status/123",
+    )
   })
 
   it("leaves non-twitter blockquotes untouched", () => {
@@ -72,7 +73,9 @@ describe("transformTwitterBlockquotes", () => {
   })
 
   it("skips when no <p> element is present", () => {
-    const doc: Document = parse(`<blockquote class="twitter-tweet">just text</blockquote>`)
+    const doc: Document = parse(
+      `<blockquote class="twitter-tweet">just text</blockquote>`,
+    )
     transformTwitterBlockquotes(doc)
     expect(doc.querySelector("blockquote.twitter-tweet")).not.toBeNull()
     expect(doc.querySelector(".tweet-card")).toBeNull()

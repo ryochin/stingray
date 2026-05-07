@@ -31,7 +31,7 @@ export function smoothScrollTo(
   const t0: number = performance.now()
   const step = (now: number): void => {
     const p: number = Math.min(1, (now - t0) / duration)
-    const eased: number = 1 - Math.pow(1 - p, 3) // ease-out cubic
+    const eased: number = 1 - (1 - p) ** 3 // ease-out cubic
     scrollEl.scrollTop = start + distance * eased
     if (p < 1) {
       rafRef.current = requestAnimationFrame(step)

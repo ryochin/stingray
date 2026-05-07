@@ -16,7 +16,9 @@ export function computeFolderFeedOrder(
     .filter((f: Feed): boolean => f.folder_id === selection.id && f.enabled)
     .slice()
     .sort((a: Feed, b: Feed): number => a.position - b.position || a.id - b.id)
-  return new Map(ordered.map((f: Feed, i: number): [number, number] => [f.id, i]))
+  return new Map(
+    ordered.map((f: Feed, i: number): [number, number] => [f.id, i]),
+  )
 }
 
 // Filter articles by the current selection (all / folder / feed) and group-sort
@@ -32,7 +34,8 @@ export function selectArticles(
   }
   if (selection.type === "folder" && folderFeedOrder) {
     const inFolder: Article[] = articles.filter(
-      (a: Article): boolean => a.feed_id != null && folderFeedOrder.has(a.feed_id),
+      (a: Article): boolean =>
+        a.feed_id != null && folderFeedOrder.has(a.feed_id),
     )
     return inFolder.slice().sort((a: Article, b: Article): number => {
       const ai: number = folderFeedOrder.get(a.feed_id as number) ?? 0
@@ -51,7 +54,9 @@ export function applyUnreadFilter(
   sessionReadUrls: ReadonlySet<string>,
 ): Article[] {
   if (!showUnreadOnly) return articles
-  return articles.filter((a: Article): boolean => a.read_at == null || sessionReadUrls.has(a.url))
+  return articles.filter(
+    (a: Article): boolean => a.read_at == null || sessionReadUrls.has(a.url),
+  )
 }
 
 // Time range filter keyed by a stable string id so sessionStorage / <select>
@@ -65,16 +70,17 @@ export interface TimeRangeOption {
 }
 
 export const TIME_RANGE_OPTIONS: readonly TimeRangeOption[] = [
-  { id: "1d",  label: "24 hours", days: 1 },
-  { id: "3d",  label: "3 days",   days: 3 },
-  { id: "7d",  label: "1 week",   days: 7 },
-  { id: "14d", label: "2 weeks",  days: 14 },
-  { id: "30d", label: "30 days",  days: 30 },
-  { id: "all", label: "All",      days: null },
+  { id: "1d", label: "24 hours", days: 1 },
+  { id: "3d", label: "3 days", days: 3 },
+  { id: "7d", label: "1 week", days: 7 },
+  { id: "14d", label: "2 weeks", days: 14 },
+  { id: "30d", label: "30 days", days: 30 },
+  { id: "all", label: "All", days: null },
 ]
 
-const TIME_RANGE_IDS: ReadonlySet<TimeRangeId> =
-  new Set(TIME_RANGE_OPTIONS.map((o: TimeRangeOption): TimeRangeId => o.id))
+const TIME_RANGE_IDS: ReadonlySet<TimeRangeId> = new Set(
+  TIME_RANGE_OPTIONS.map((o: TimeRangeOption): TimeRangeId => o.id),
+)
 
 // Coerce arbitrary input (sessionStorage, select onChange) into a known id.
 // Falls back to "all" — the widest/safest behavior — for anything unknown.
@@ -85,7 +91,10 @@ export function parseTimeRangeId(input: unknown): TimeRangeId {
 }
 
 export function timeRangeDays(id: TimeRangeId): number | null {
-  return TIME_RANGE_OPTIONS.find((o: TimeRangeOption): boolean => o.id === id)?.days ?? null
+  return (
+    TIME_RANGE_OPTIONS.find((o: TimeRangeOption): boolean => o.id === id)
+      ?.days ?? null
+  )
 }
 
 // Per-feed tally of session-local read URLs that the DB hasn't caught up
@@ -99,11 +108,7 @@ export function tallySessionReadByFeed(
 ): Map<number, number> {
   const tally: Map<number, number> = new Map<number, number>()
   for (const a of articles) {
-    if (
-      a.feed_id != null
-      && a.read_at == null
-      && sessionReadUrls.has(a.url)
-    ) {
+    if (a.feed_id != null && a.read_at == null && sessionReadUrls.has(a.url)) {
       tally.set(a.feed_id, (tally.get(a.feed_id) ?? 0) + 1)
     }
   }

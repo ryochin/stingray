@@ -27,7 +27,7 @@ interface UseFeedDnDResult {
 }
 
 export function useFeedDnD({ feeds, onReorder }: Options): UseFeedDnDResult {
-  const dragSrc = useRef<{ id: number, folderId: number | null } | null>(null)
+  const dragSrc = useRef<{ id: number; folderId: number | null } | null>(null)
   const [dragOverId, setDragOverId] = useState<number | null>(null)
 
   const onDragStart = useCallback((feed: Feed): void => {
@@ -42,7 +42,9 @@ export function useFeedDnD({ feeds, onReorder }: Options): UseFeedDnDResult {
   }, [])
 
   const onDragLeave = useCallback((feed: Feed): void => {
-    setDragOverId((prev: number | null): number | null => (prev === feed.id ? null : prev))
+    setDragOverId((prev: number | null): number | null =>
+      prev === feed.id ? null : prev,
+    )
   }, [])
 
   const onDragEnd = useCallback((): void => {
@@ -50,21 +52,26 @@ export function useFeedDnD({ feeds, onReorder }: Options): UseFeedDnDResult {
     setDragOverId(null)
   }, [])
 
-  const onDrop = useCallback((target: Feed): void => {
-    const src = dragSrc.current
-    dragSrc.current = null
-    setDragOverId(null)
-    if (!src || src.id === target.id) return
-    if (src.folderId !== target.folder_id) return
-    const group: Feed[] = (feeds ?? []).filter((f: Feed): boolean => f.folder_id === target.folder_id)
-    const ids: number[] = group.map((f: Feed): number => f.id)
-    const fromIdx: number = ids.indexOf(src.id)
-    const toIdx: number = ids.indexOf(target.id)
-    if (fromIdx < 0 || toIdx < 0) return
-    ids.splice(fromIdx, 1)
-    ids.splice(toIdx, 0, src.id)
-    onReorder(ids)
-  }, [feeds, onReorder])
+  const onDrop = useCallback(
+    (target: Feed): void => {
+      const src = dragSrc.current
+      dragSrc.current = null
+      setDragOverId(null)
+      if (!src || src.id === target.id) return
+      if (src.folderId !== target.folder_id) return
+      const group: Feed[] = (feeds ?? []).filter(
+        (f: Feed): boolean => f.folder_id === target.folder_id,
+      )
+      const ids: number[] = group.map((f: Feed): number => f.id)
+      const fromIdx: number = ids.indexOf(src.id)
+      const toIdx: number = ids.indexOf(target.id)
+      if (fromIdx < 0 || toIdx < 0) return
+      ids.splice(fromIdx, 1)
+      ids.splice(toIdx, 0, src.id)
+      onReorder(ids)
+    },
+    [feeds, onReorder],
+  )
 
   return {
     dragOverId,

@@ -1,10 +1,9 @@
-import { describe, it, expect, vi, afterEach } from "vitest"
-import type { Mock } from "vitest"
-import { render, act } from "@testing-library/react"
+import { act, render } from "@testing-library/react"
 import { useState } from "react"
-import { useArticleKeyboard } from "./useArticleKeyboard"
+import type { Mock } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Article } from "../api/client"
-
+import { useArticleKeyboard } from "./useArticleKeyboard"
 
 function makeArticle(overrides: Partial<Article> & { url: string }): Article {
   return {
@@ -22,15 +21,17 @@ function makeArticle(overrides: Partial<Article> & { url: string }): Article {
   }
 }
 
-
 function press(key: string): KeyboardEvent {
-  const event: KeyboardEvent = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
+  const event: KeyboardEvent = new KeyboardEvent("keydown", {
+    key,
+    bubbles: true,
+    cancelable: true,
+  })
   act((): void => {
     document.body.dispatchEvent(event)
   })
   return event
 }
-
 
 // Drive the hook from a harness that exposes focusIndex via a closure-bound
 // state so we can assert focus changes after key presses.
@@ -45,10 +46,15 @@ interface HarnessProps {
   toggleUnreadFilter?: () => void
 }
 
-
 function Harness({
-  filtered, initialFocus, sessionRead = new Set(), goToNextFeed,
-  onFocus, onMarkRead, onJAtEnd, toggleUnreadFilter,
+  filtered,
+  initialFocus,
+  sessionRead = new Set(),
+  goToNextFeed,
+  onFocus,
+  onMarkRead,
+  onJAtEnd,
+  toggleUnreadFilter,
 }: HarnessProps): null {
   const [focusIndex, setFocusIndex] = useState<number>(initialFocus)
   onFocus?.(focusIndex)
@@ -83,11 +89,9 @@ function Harness({
   return null
 }
 
-
 afterEach((): void => {
   document.body.innerHTML = ""
 })
-
 
 describe("useArticleKeyboard — Space key (regression: feed jump while unread remain)", (): void => {
   it("does NOT intercept Space when unread articles remain after focus — browser scroll wins", (): void => {
@@ -146,9 +150,7 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
   })
 
   it("if goToNextFeed reports no further feed, focus stays put", (): void => {
-    const articles: Article[] = [
-      makeArticle({ url: "a", read_at: null }),
-    ]
+    const articles: Article[] = [makeArticle({ url: "a", read_at: null })]
     const focusSpy: Mock = vi.fn()
     const nextFeed: Mock = vi.fn((): boolean => false)
     render(
@@ -230,7 +232,6 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
   })
 })
 
-
 describe("useArticleKeyboard — u key (toggle Unread/All)", (): void => {
   it("invokes toggleUnreadFilter when pressed", () => {
     const toggle: Mock = vi.fn()
@@ -280,7 +281,10 @@ describe("useArticleKeyboard — u key (toggle Unread/All)", (): void => {
     )
 
     const event: KeyboardEvent = new KeyboardEvent("keydown", {
-      key: "u", bubbles: true, cancelable: true, metaKey: true,
+      key: "u",
+      bubbles: true,
+      cancelable: true,
+      metaKey: true,
     })
     act(() => {
       document.body.dispatchEvent(event)
@@ -304,7 +308,9 @@ describe("useArticleKeyboard — u key (toggle Unread/All)", (): void => {
     const input: HTMLInputElement = document.createElement("input")
     document.body.appendChild(input)
     const event: KeyboardEvent = new KeyboardEvent("keydown", {
-      key: "u", bubbles: true, cancelable: true,
+      key: "u",
+      bubbles: true,
+      cancelable: true,
     })
     act(() => {
       input.dispatchEvent(event)
@@ -313,7 +319,6 @@ describe("useArticleKeyboard — u key (toggle Unread/All)", (): void => {
     expect(toggle).not.toHaveBeenCalled()
   })
 })
-
 
 describe("useArticleKeyboard — j key at end of list", (): void => {
   it("on the last item, fires onJAtEnd, keeps focus, does NOT jump feeds", (): void => {

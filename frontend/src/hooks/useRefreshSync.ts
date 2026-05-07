@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react"
 import { useQueryClient } from "@tanstack/react-query"
+import { useEffect, useRef } from "react"
 
 // Watch the global refresh status and invalidate cache views on the
 // running↔idle transitions so every page sees the final state without

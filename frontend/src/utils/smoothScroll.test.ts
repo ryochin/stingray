@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { smoothScrollTo } from "./smoothScroll"
 
 // Drive rAF synchronously so we can assert intermediate scroll positions
 // without leaning on real timing.
-type Entry = { handle: number, cb: (t: number) => void }
+type Entry = { handle: number; cb: (t: number) => void }
 let rafQueue: Entry[] = []
 let nextHandle = 1
 let now = 0
@@ -43,20 +43,24 @@ function makeScrollEl(initial: number = 0): HTMLElement {
 describe("smoothScrollTo", () => {
   it("animates from start to target across rAF ticks", () => {
     const el: HTMLElement = makeScrollEl(0)
-    const rafRef: { current: number | null } = { current: null as number | null }
+    const rafRef: { current: number | null } = {
+      current: null as number | null,
+    }
     smoothScrollTo(el, 100, { duration: 150, rafRef })
     expect(rafRef.current).not.toBeNull()
-    tick(75)  // halfway
+    tick(75) // halfway
     expect(el.scrollTop).toBeGreaterThan(0)
     expect(el.scrollTop).toBeLessThan(100)
-    tick(75)  // finish
+    tick(75) // finish
     expect(el.scrollTop).toBe(100)
     expect(rafRef.current).toBeNull()
   })
 
   it("cancels a previous in-flight animation before deciding sub-pixel no-op", () => {
     const el: HTMLElement = makeScrollEl(0)
-    const rafRef: { current: number | null } = { current: null as number | null }
+    const rafRef: { current: number | null } = {
+      current: null as number | null,
+    }
     smoothScrollTo(el, 100, { duration: 150, rafRef })
     const firstHandle: number | null = rafRef.current
     expect(firstHandle).not.toBeNull()
@@ -76,7 +80,9 @@ describe("smoothScrollTo", () => {
 
   it("preempts a previous animation when called with a new target", () => {
     const el: HTMLElement = makeScrollEl(0)
-    const rafRef: { current: number | null } = { current: null as number | null }
+    const rafRef: { current: number | null } = {
+      current: null as number | null,
+    }
     smoothScrollTo(el, 200, { duration: 150, rafRef })
     tick(50)
     const handleAfterFirst: number | null = rafRef.current

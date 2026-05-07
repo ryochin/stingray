@@ -1,7 +1,7 @@
-import { useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { api, ApiError } from "../api/client"
-import type { Feed, FeedCreate, FeedCandidate } from "../api/client"
+import { useState } from "react"
+import type { Feed, FeedCandidate, FeedCreate } from "../api/client"
+import { ApiError, api } from "../api/client"
 
 interface Options {
   /** Called with the user-facing error message whenever a mutation fails. */
@@ -19,7 +19,9 @@ interface Options {
  */
 export function useFeedMutations({ onError }: Options) {
   const queryClient = useQueryClient()
-  const [feedCandidates, setFeedCandidates] = useState<FeedCandidate[] | null>(null)
+  const [feedCandidates, setFeedCandidates] = useState<FeedCandidate[] | null>(
+    null,
+  )
   const [candidatesFor, setCandidatesFor] = useState<string | null>(null)
   const [fetchingFeeds, setFetchingFeeds] = useState<Set<number>>(new Set())
 
@@ -42,7 +44,9 @@ export function useFeedMutations({ onError }: Options) {
     },
     onError: (e: Error): void => {
       if (e instanceof ApiError && e.status === 422) {
-        const detail = (e.body as { detail?: { candidates?: FeedCandidate[] } } | null)?.detail
+        const detail = (
+          e.body as { detail?: { candidates?: FeedCandidate[] } } | null
+        )?.detail
         if (detail?.candidates && detail.candidates.length > 0) {
           setFeedCandidates(detail.candidates)
           return
@@ -54,16 +58,30 @@ export function useFeedMutations({ onError }: Options) {
     },
   })
 
-  const toggleFeed = useMutation({ mutationFn: api.toggleFeed, onSuccess: invalidate, onError: reportError })
-  const toggleSummarize = useMutation({ mutationFn: api.toggleSummarize, onSuccess: invalidate, onError: reportError })
-  const deleteFeed = useMutation({ mutationFn: api.deleteFeed, onSuccess: invalidate, onError: reportError })
+  const toggleFeed = useMutation({
+    mutationFn: api.toggleFeed,
+    onSuccess: invalidate,
+    onError: reportError,
+  })
+  const toggleSummarize = useMutation({
+    mutationFn: api.toggleSummarize,
+    onSuccess: invalidate,
+    onError: reportError,
+  })
+  const deleteFeed = useMutation({
+    mutationFn: api.deleteFeed,
+    onSuccess: invalidate,
+    onError: reportError,
+  })
 
   // fetchFeed shows a local "fetching" indicator per feed; the 5s delay before
   // clearing + invalidating gives the backend time to persist fetched articles.
   const fetchFeed = useMutation({
     mutationFn: api.fetchFeed,
     onMutate: (feedId: number): void => {
-      setFetchingFeeds((prev: Set<number>): Set<number> => new Set(prev).add(feedId))
+      setFetchingFeeds(
+        (prev: Set<number>): Set<number> => new Set(prev).add(feedId),
+      )
     },
     onSettled: (_data, _error, feedId: number): void => {
       setTimeout((): void => {
@@ -79,26 +97,41 @@ export function useFeedMutations({ onError }: Options) {
   })
 
   const renameFeed = useMutation({
-    mutationFn: ({ feedId, name }: { feedId: number, name: string }) =>
+    mutationFn: ({ feedId, name }: { feedId: number; name: string }) =>
       api.renameFeed(feedId, name),
     onSuccess: invalidate,
     onError: reportError,
   })
   const updateTranslate = useMutation({
-    mutationFn: ({ feedId, translate }: { feedId: number, translate: boolean }) =>
-      api.updateFeedTranslate(feedId, translate),
+    mutationFn: ({
+      feedId,
+      translate,
+    }: {
+      feedId: number
+      translate: boolean
+    }) => api.updateFeedTranslate(feedId, translate),
     onSuccess: invalidate,
     onError: reportError,
   })
   const updateSiteUrl = useMutation({
-    mutationFn: ({ feedId, siteUrl }: { feedId: number, siteUrl: string | null }) =>
-      api.updateFeedSiteUrl(feedId, siteUrl),
+    mutationFn: ({
+      feedId,
+      siteUrl,
+    }: {
+      feedId: number
+      siteUrl: string | null
+    }) => api.updateFeedSiteUrl(feedId, siteUrl),
     onSuccess: invalidate,
     onError: reportError,
   })
   const moveFeed = useMutation({
-    mutationFn: ({ feedId, folderId }: { feedId: number, folderId: number | null }) =>
-      api.moveFeedToFolder(feedId, folderId),
+    mutationFn: ({
+      feedId,
+      folderId,
+    }: {
+      feedId: number
+      folderId: number | null
+    }) => api.moveFeedToFolder(feedId, folderId),
     onSuccess: invalidate,
     onError: reportError,
   })
@@ -110,10 +143,14 @@ export function useFeedMutations({ onError }: Options) {
     mutationFn: (ids: number[]) => api.reorderFeeds(ids),
     onMutate: async (ids: number[]): Promise<{ prev: Feed[] | undefined }> => {
       await queryClient.cancelQueries({ queryKey: ["feeds"] })
-      const prev: Feed[] | undefined = queryClient.getQueryData<Feed[]>(["feeds"])
+      const prev: Feed[] | undefined = queryClient.getQueryData<Feed[]>([
+        "feeds",
+      ])
       if (prev) {
         const idSet: Set<number> = new Set(ids)
-        const byId: Map<number, Feed> = new Map(prev.map((f: Feed): [number, Feed] => [f.id, f]))
+        const byId: Map<number, Feed> = new Map(
+          prev.map((f: Feed): [number, Feed] => [f.id, f]),
+        )
         const reordered: Feed[] = []
         let cursor: number = 0
         for (const f of prev) {

@@ -7,7 +7,10 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "format": "biome format --write"
   },
   "dependencies": {
     "@tanstack/react-query": "^5",
@@ -20,6 +23,7 @@
     "react-simple-code-editor": "^0.14.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.14",
     "@tailwindcss/vite": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

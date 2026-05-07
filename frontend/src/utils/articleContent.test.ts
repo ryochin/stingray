@@ -1,6 +1,5 @@
-import { describe, it, expect } from "vitest"
+import { describe, expect, it } from "vitest"
 import { parseSummary } from "./articleContent"
-
 
 describe("parseSummary", () => {
   it("returns plain text and empty image list when no markers", () => {

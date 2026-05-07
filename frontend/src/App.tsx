@@ -1,9 +1,9 @@
 import type { JSX } from "react"
-import { Routes, Route } from "react-router-dom"
+import { Route, Routes } from "react-router-dom"
+import { useTabShortcuts } from "./hooks/useTabShortcuts"
 import Articles from "./routes/Articles"
 import Feeds from "./routes/Feeds"
 import Filters from "./routes/Filters"
-import { useTabShortcuts } from "./hooks/useTabShortcuts"
 
 export default function App(): JSX.Element {
   useTabShortcuts()

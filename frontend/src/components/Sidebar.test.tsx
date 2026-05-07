@@ -1,12 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { Mock } from "vitest"
-import { render, screen, within } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
-import type { UserEvent } from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import Sidebar from "./Sidebar"
+import { render, screen, within } from "@testing-library/react"
+import type { UserEvent } from "@testing-library/user-event"
+import userEvent from "@testing-library/user-event"
+import type { Mock } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Feed, Folder, Selection } from "../api/client"
-
+import Sidebar from "./Sidebar"
 
 function folder(id: number, name: string, position = 0): Folder {
   return { id, name, position }
@@ -48,20 +47,23 @@ function renderSidebar({
   })
   client.setQueryData(["feeds"], feeds)
   client.setQueryData(["folders"], folders)
-  const onSelect: Mock<(sel: Selection) => void> = vi.fn<(sel: Selection) => void>()
+  const onSelect: Mock<(sel: Selection) => void> =
+    vi.fn<(sel: Selection) => void>()
   const utils = render(
     <QueryClientProvider client={client}>
-      <Sidebar selection={selection} onSelect={onSelect} unreadCounts={unreadCounts} />
+      <Sidebar
+        selection={selection}
+        onSelect={onSelect}
+        unreadCounts={unreadCounts}
+      />
     </QueryClientProvider>,
   )
   return { ...utils, onSelect }
 }
 
-
 beforeEach((): void => {
   sessionStorage.clear()
 })
-
 
 describe("Sidebar", () => {
   it("renders All Feeds and total unread badge", () => {
@@ -133,12 +135,12 @@ describe("Sidebar", () => {
 
   it("folder badge shows sum of unread in its feeds", () => {
     renderSidebar({
-      feeds: [
-        feed(1, { folder_id: 10 }),
-        feed(2, { folder_id: 10 }),
-      ],
+      feeds: [feed(1, { folder_id: 10 }), feed(2, { folder_id: 10 })],
       folders: [folder(10, "Tech")],
-      unreadCounts: new Map([[1, 4], [2, 3]]),
+      unreadCounts: new Map([
+        [1, 4],
+        [2, 3],
+      ]),
     })
     const folderButton = screen.getByText("Tech").closest("button")!
     expect(within(folderButton).getByText("7")).toBeInTheDocument()

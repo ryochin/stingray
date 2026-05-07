@@ -1,6 +1,10 @@
-import { describe, it, expect } from "vitest"
-import { folderUnreadCount, groupFeedsByFolder, totalUnread } from "./sidebarView"
+import { describe, expect, it } from "vitest"
 import type { Feed } from "../api/client"
+import {
+  folderUnreadCount,
+  groupFeedsByFolder,
+  totalUnread,
+} from "./sidebarView"
 
 function feed(id: number, overrides: Partial<Feed> = {}): Feed {
   return {
@@ -22,7 +26,6 @@ function feed(id: number, overrides: Partial<Feed> = {}): Feed {
   }
 }
 
-
 describe("groupFeedsByFolder", () => {
   it("buckets by folder_id with null as its own key", () => {
     const feeds: Feed[] = [
@@ -32,9 +35,9 @@ describe("groupFeedsByFolder", () => {
       feed(4, { folder_id: null }),
     ]
     const grouped: Map<number | null, Feed[]> = groupFeedsByFolder(feeds)
-    expect(grouped.get(10)!.map((f: Feed): number => f.id)).toEqual([1, 2])
-    expect(grouped.get(20)!.map((f: Feed): number => f.id)).toEqual([3])
-    expect(grouped.get(null)!.map((f: Feed): number => f.id)).toEqual([4])
+    expect(grouped.get(10)?.map((f: Feed): number => f.id)).toEqual([1, 2])
+    expect(grouped.get(20)?.map((f: Feed): number => f.id)).toEqual([3])
+    expect(grouped.get(null)?.map((f: Feed): number => f.id)).toEqual([4])
   })
 
   it("excludes disabled feeds", () => {
@@ -43,7 +46,7 @@ describe("groupFeedsByFolder", () => {
       feed(2, { folder_id: 10, enabled: false }),
     ]
     const grouped: Map<number | null, Feed[]> = groupFeedsByFolder(feeds)
-    expect(grouped.get(10)!.map((f: Feed): number => f.id)).toEqual([1])
+    expect(grouped.get(10)?.map((f: Feed): number => f.id)).toEqual([1])
   })
 
   it("handles undefined feeds list gracefully", () => {
@@ -58,17 +61,20 @@ describe("groupFeedsByFolder", () => {
     ]
     const grouped: Map<number | null, Feed[]> = groupFeedsByFolder(feeds)
     // Grouping does not sort — that's the caller's responsibility.
-    expect(grouped.get(1)!.map((f: Feed): number => f.id)).toEqual([3, 1, 2])
+    expect(grouped.get(1)?.map((f: Feed): number => f.id)).toEqual([3, 1, 2])
   })
 })
-
 
 describe("folderUnreadCount", () => {
   it("sums unread across all feeds in a folder", () => {
     const grouped: Map<number, Feed[]> = new Map([
       [1, [feed(10, { folder_id: 1 }), feed(20, { folder_id: 1 })]],
     ])
-    const unread: Map<number, number> = new Map([[10, 3], [20, 5], [99, 7]])
+    const unread: Map<number, number> = new Map([
+      [10, 3],
+      [20, 5],
+      [99, 7],
+    ])
     expect(folderUnreadCount(grouped, unread, 1)).toBe(8)
   })
 
@@ -82,10 +88,17 @@ describe("folderUnreadCount", () => {
   })
 })
 
-
 describe("totalUnread", () => {
   it("sums all values in the map", () => {
-    expect(totalUnread(new Map([[1, 2], [2, 3], [3, 0]]))).toBe(5)
+    expect(
+      totalUnread(
+        new Map([
+          [1, 2],
+          [2, 3],
+          [3, 0],
+        ]),
+      ),
+    ).toBe(5)
   })
 
   it("returns 0 for an empty map", () => {

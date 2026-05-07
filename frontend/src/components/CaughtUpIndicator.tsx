@@ -7,9 +7,14 @@ interface Props {
 
 /** Sparkle icon + label, used by both the end-of-list sentinel and the
  *  empty-state message when no unread items remain. */
-export default function CaughtUpIndicator({ label, className }: Props): JSX.Element {
+export default function CaughtUpIndicator({
+  label,
+  className,
+}: Props): JSX.Element {
   return (
-    <div className={`flex flex-col items-center gap-2 py-10 ${className ?? "text-text-dim/60"}`}>
+    <div
+      className={`flex flex-col items-center gap-2 py-10 ${className ?? "text-text-dim/60"}`}
+    >
       <svg
         className="w-7 h-7 text-accent-text/70"
         viewBox="0 0 24 24"
@@ -18,8 +23,9 @@ export default function CaughtUpIndicator({ label, className }: Props): JSX.Elem
         strokeWidth="1.75"
         strokeLinecap="round"
         strokeLinejoin="round"
-        aria-hidden
+        aria-hidden="true"
       >
+        <title>Caught up</title>
         <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
         <path d="M5 3v4" />
         <path d="M19 17v4" />

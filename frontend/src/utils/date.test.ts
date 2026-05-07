@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest"
-import { formatTime, formatDate, formatRelative } from "./date"
+import { describe, expect, it } from "vitest"
+import { formatDate, formatRelative, formatTime } from "./date"
 
 // These formatters always render in Asia/Tokyo, independent of the host TZ.
 // ICU zone data must be present (Node 18+).
@@ -29,10 +29,10 @@ describe("formatDate", () => {
   })
 })
 
-
 describe("formatRelative", () => {
   const now: Date = new Date("2024-06-15T12:00:00Z")
-  const sec = (n: number): string => new Date(now.getTime() - n * 1000).toISOString()
+  const sec = (n: number): string =>
+    new Date(now.getTime() - n * 1000).toISOString()
 
   it("returns 'just now' within 45s", () => {
     expect(formatRelative(sec(0), now)).toBe("just now")
@@ -75,7 +75,9 @@ describe("formatRelative", () => {
   })
 
   it("falls back to absolute for older than ~6 months", () => {
-    const old: string = new Date(now.getTime() - 200 * 86400 * 1000).toISOString()
+    const old: string = new Date(
+      now.getTime() - 200 * 86400 * 1000,
+    ).toISOString()
     expect(formatRelative(old, now)).toContain("JST")
   })
 })

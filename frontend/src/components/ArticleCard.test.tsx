@@ -1,11 +1,10 @@
-import { describe, it, expect, vi } from "vitest"
-import type { Mock } from "vitest"
 import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import type { UserEvent } from "@testing-library/user-event"
-import ArticleCard from "./ArticleCard"
+import userEvent from "@testing-library/user-event"
+import type { Mock } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { Article } from "../api/client"
-
+import ArticleCard from "./ArticleCard"
 
 function article(overrides: Partial<Article> = {}): Article {
   return {
@@ -24,7 +23,6 @@ function article(overrides: Partial<Article> = {}): Article {
   }
 }
 
-
 describe("ArticleCard", () => {
   it("shows original title only when no translation", () => {
     render(<ArticleCard article={article()} />)
@@ -32,13 +30,17 @@ describe("ArticleCard", () => {
   })
 
   it("shows translated title prominently and original as subtext when translation differs", () => {
-    render(<ArticleCard article={article({ title_translated: "翻訳タイトル" })} />)
+    render(
+      <ArticleCard article={article({ title_translated: "翻訳タイトル" })} />,
+    )
     expect(screen.getByText("翻訳タイトル")).toBeInTheDocument()
     expect(screen.getByText("Original Title")).toBeInTheDocument()
   })
 
   it("does not duplicate title when translation equals original", () => {
-    render(<ArticleCard article={article({ title_translated: "Original Title" })} />)
+    render(
+      <ArticleCard article={article({ title_translated: "Original Title" })} />,
+    )
     expect(screen.getAllByText("Original Title")).toHaveLength(1)
   })
 
@@ -48,7 +50,9 @@ describe("ArticleCard", () => {
     })
     const { container } = render(<ArticleCard article={a} />)
     expect(screen.getByText("要約本文")).toBeInTheDocument()
-    const img = container.querySelector("img[src='https://img.example.com/x.png']")
+    const img = container.querySelector(
+      "img[src='https://img.example.com/x.png']",
+    )
     expect(img).not.toBeNull()
   })
 
@@ -60,7 +64,9 @@ describe("ArticleCard", () => {
     const { container } = render(<ArticleCard article={a} />)
     // The explicit image markup from summary should be suppressed because
     // content_html renders images already.
-    expect(container.querySelector("img[src='https://img.example.com/x.png']")).toBeNull()
+    expect(
+      container.querySelector("img[src='https://img.example.com/x.png']"),
+    ).toBeNull()
   })
 
   it("shows 'Awaiting summary...' only when pendingSummary and no existing content", () => {
@@ -70,7 +76,10 @@ describe("ArticleCard", () => {
 
   it("hides 'Awaiting summary...' when summary already exists", () => {
     render(
-      <ArticleCard article={article({ summary: "既要約" })} pendingSummary={true} />,
+      <ArticleCard
+        article={article({ summary: "既要約" })}
+        pendingSummary={true}
+      />,
     )
     expect(screen.queryByText("Awaiting summary...")).toBeNull()
   })
@@ -118,7 +127,9 @@ describe("ArticleCard", () => {
   it("fires onClick when the card is clicked", async (): Promise<void> => {
     const user: UserEvent = userEvent.setup()
     const onClick: Mock = vi.fn()
-    const { container } = render(<ArticleCard article={article()} onClick={onClick} />)
+    const { container } = render(
+      <ArticleCard article={article()} onClick={onClick} />,
+    )
     await user.click(container.firstElementChild as HTMLElement)
     expect(onClick).toHaveBeenCalled()
   })

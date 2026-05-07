@@ -1,19 +1,18 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react"
-import type { JSX } from "react"
-import { smoothScrollTo } from "../utils/smoothScroll"
-import { useFocusStabilizer } from "../hooks/useFocusStabilizer"
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { VirtualItem } from "@tanstack/react-virtual"
-import { api, faviconUrl } from "../api/client"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import type { JSX } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Feed, Selection } from "../api/client"
-import Header from "../components/Header"
-import Sidebar from "../components/Sidebar"
+import { api, faviconUrl } from "../api/client"
 import ArticleCard from "../components/ArticleCard"
 import CaughtUpIndicator from "../components/CaughtUpIndicator"
+import Header from "../components/Header"
 import MarkAllReadMenu from "../components/MarkAllReadMenu"
 import ShortcutsHelp from "../components/ShortcutsHelp"
+import Sidebar from "../components/Sidebar"
 import { useArticleKeyboard } from "../hooks/useArticleKeyboard"
+import { useFocusStabilizer } from "../hooks/useFocusStabilizer"
 import {
   applyUnreadFilter,
   computeFolderFeedOrder,
@@ -21,11 +20,12 @@ import {
   nextUnreadFeedId,
   parseTimeRangeId,
   selectArticles,
-  tallySessionReadByFeed,
-  timeRangeDays,
   TIME_RANGE_OPTIONS,
   type TimeRangeId,
+  tallySessionReadByFeed,
+  timeRangeDays,
 } from "../utils/articleView"
+import { smoothScrollTo } from "../utils/smoothScroll"
 
 export default function Articles(): JSX.Element {
   const queryClient = useQueryClient()
@@ -41,13 +41,15 @@ export default function Articles(): JSX.Element {
     sessionStorage.setItem("feed-selection", JSON.stringify(sel))
   }, [])
   const [showUnreadOnly, setShowUnreadOnly] = useState<boolean>(true)
-  const [timeRangeId, setTimeRangeId] = useState<TimeRangeId>((): TimeRangeId => {
-    try {
-      return parseTimeRangeId(sessionStorage.getItem("time-range"))
-    } catch {
-      return "all"
-    }
-  })
+  const [timeRangeId, setTimeRangeId] = useState<TimeRangeId>(
+    (): TimeRangeId => {
+      try {
+        return parseTimeRangeId(sessionStorage.getItem("time-range"))
+      } catch {
+        return "all"
+      }
+    },
+  )
   const updateTimeRangeId = useCallback((id: TimeRangeId): void => {
     setTimeRangeId(id)
     sessionStorage.setItem("time-range", id)
@@ -82,21 +84,27 @@ export default function Articles(): JSX.Element {
     })
   }, [queryClient])
 
-  const scheduleRead = useCallback((url: string): void => {
-    if (!sessionReadUrls.current.has(url)) {
-      pendingReadUrls.current.add(url)
-      sessionReadUrls.current.add(url)
-      setLocalReadCount((count: number): number => count + 1)
-    }
-    if (flushTimer.current) clearTimeout(flushTimer.current)
-    flushTimer.current = setTimeout(flushReads, 500)
-  }, [flushReads])
+  const scheduleRead = useCallback(
+    (url: string): void => {
+      if (!sessionReadUrls.current.has(url)) {
+        pendingReadUrls.current.add(url)
+        sessionReadUrls.current.add(url)
+        setLocalReadCount((count: number): number => count + 1)
+      }
+      if (flushTimer.current) clearTimeout(flushTimer.current)
+      flushTimer.current = setTimeout(flushReads, 500)
+    },
+    [flushReads],
+  )
 
   // Flush on unmount
-  useEffect((): (() => void) => (): void => {
-    if (flushTimer.current) clearTimeout(flushTimer.current)
-    flushReads()
-  }, [flushReads])
+  useEffect(
+    (): (() => void) => (): void => {
+      if (flushTimer.current) clearTimeout(flushTimer.current)
+      flushReads()
+    },
+    [flushReads],
+  )
 
   // Subscribe to status so refetchInterval reacts immediately when a refresh
   // starts/ends, instead of waiting for the next scheduled tick. Header also
@@ -115,11 +123,18 @@ export default function Articles(): JSX.Element {
   // Unread mode bypasses the time filter: the user wants every still-unread
   // item to be reachable regardless of age. Otherwise the backend trims to
   // the selected window so the response naturally matches the visible list.
-  const sinceDays: number | null = showUnreadOnly ? null : timeRangeDays(timeRangeId)
+  const sinceDays: number | null = showUnreadOnly
+    ? null
+    : timeRangeDays(timeRangeId)
 
-  const { data: allArticles, isLoading, isError } = useQuery({
+  const {
+    data: allArticles,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["articles", { sinceDays }],
-    queryFn: (): ReturnType<typeof api.getArticles> => api.getArticles({ sinceDays }),
+    queryFn: (): ReturnType<typeof api.getArticles> =>
+      api.getArticles({ sinceDays }),
     refetchInterval: activeInterval,
   })
 
@@ -157,7 +172,12 @@ export default function Articles(): JSX.Element {
   const orderedFeedIds = useMemo((): number[] => {
     if (!feeds || !folders) return []
     const enabled: Feed[] = feeds.filter((feed: Feed): boolean => feed.enabled)
-    const sortedFolders = folders.slice().sort((folderA, folderB): number => folderA.position - folderB.position || folderA.id - folderB.id)
+    const sortedFolders = folders
+      .slice()
+      .sort(
+        (folderA, folderB): number =>
+          folderA.position - folderB.position || folderA.id - folderB.id,
+      )
     const ids: number[] = []
     for (const folder of sortedFolders) {
       for (const feed of enabled) {
@@ -172,18 +192,27 @@ export default function Articles(): JSX.Element {
 
   const enabledFeedIds = useMemo((): Set<number> | null => {
     if (!feeds) return null
-    return new Set(feeds.filter((feed: Feed): boolean => feed.enabled).map((feed: Feed): number => feed.id))
+    return new Set(
+      feeds
+        .filter((feed: Feed): boolean => feed.enabled)
+        .map((feed: Feed): number => feed.id),
+    )
   }, [feeds])
 
   const summarizeFeedIds = useMemo((): Set<number> => {
     if (!feeds) return new Set<number>()
-    return new Set(feeds.filter((feed: Feed): boolean => feed.summarize).map((feed: Feed): number => feed.id))
+    return new Set(
+      feeds
+        .filter((feed: Feed): boolean => feed.summarize)
+        .map((feed: Feed): number => feed.id),
+    )
   }, [feeds])
 
   const enabledArticles = useMemo(() => {
     if (!enabledFeedIds) return allArticles ?? []
     return (allArticles ?? []).filter(
-      (article): boolean => article.feed_id != null && enabledFeedIds.has(article.feed_id),
+      (article): boolean =>
+        article.feed_id != null && enabledFeedIds.has(article.feed_id),
     )
   }, [allArticles, enabledFeedIds])
 
@@ -210,14 +239,26 @@ export default function Articles(): JSX.Element {
     // Time-range filtering happens at the API layer (sinceDays). The list we
     // got is already bounded; here we only layer the unread toggle on top.
     return applyUnreadFilter(selected, showUnreadOnly, sessionReadUrls.current)
-  }, [enabledArticles, selection, folderFeedOrder, showUnreadOnly, localReadCount])
+  }, [
+    enabledArticles,
+    selection,
+    folderFeedOrder,
+    showUnreadOnly,
+    localReadCount,
+  ])
 
   // Validate restored selection against current data
   useEffect((): void => {
     if (!feeds || !folders) return
-    if (selection.type === "feed" && !feeds.some((feed: Feed): boolean => feed.id === selection.id)) {
+    if (
+      selection.type === "feed" &&
+      !feeds.some((feed: Feed): boolean => feed.id === selection.id)
+    ) {
       updateSelection({ type: "all" })
-    } else if (selection.type === "folder" && !folders.some((folder): boolean => folder.id === selection.id)) {
+    } else if (
+      selection.type === "folder" &&
+      !folders.some((folder): boolean => folder.id === selection.id)
+    ) {
       updateSelection({ type: "all" })
     }
   }, [feeds, folders, selection, updateSelection])
@@ -229,7 +270,7 @@ export default function Articles(): JSX.Element {
   useEffect((): void => {
     sessionReadUrls.current.clear()
     setLocalReadCount(0)
-  }, [selection])
+  }, [])
 
   // Clear focus when feed/filter changes and scroll back to the top.
   // A separate effect below picks up from -1 and focuses the first article
@@ -238,7 +279,7 @@ export default function Articles(): JSX.Element {
   useEffect((): void => {
     setFocusIndex(-1)
     mainRef.current?.scrollTo({ top: 0 })
-  }, [selection, showUnreadOnly, timeRangeId])
+  }, [])
 
   // Auto-focus the first article whenever focus is cleared and there is
   // something to focus. This makes opening the articles view land on the
@@ -252,12 +293,13 @@ export default function Articles(): JSX.Element {
   // Detect when the header block becomes "stuck" to the top so we can shrink
   // the title. A zero-height sentinel placed just above the sticky wrapper
   // stops intersecting the scroll root the moment the header sticks.
-  useEffect((): (() => void) | void => {
+  useEffect((): (() => void) | undefined => {
     const sentinel: HTMLDivElement | null = stickySentinelRef.current
     const main: HTMLElement | null = mainRef.current
     if (!sentinel || !main) return
     const observer: IntersectionObserver = new IntersectionObserver(
-      ([entry]: IntersectionObserverEntry[]): void => setIsHeaderStuck(!entry.isIntersecting),
+      ([entry]: IntersectionObserverEntry[]): void =>
+        setIsHeaderStuck(!entry.isIntersecting),
       { root: main, threshold: 0 },
     )
     observer.observe(sentinel)
@@ -268,10 +310,11 @@ export default function Articles(): JSX.Element {
   // origin by exactly that amount (scrollMargin). Re-measured via
   // ResizeObserver to cover stuck transitions, wrap changes, font load, etc.
   const [headerHeight, setHeaderHeight] = useState<number>(0)
-  useEffect((): (() => void) | void => {
+  useEffect((): (() => void) | undefined => {
     const el: HTMLDivElement | null = stickyHeaderRef.current
     if (!el) return
-    const update = (): void => setHeaderHeight(el.getBoundingClientRect().height)
+    const update = (): void =>
+      setHeaderHeight(el.getBoundingClientRect().height)
     update()
     const observer: ResizeObserver = new ResizeObserver(update)
     observer.observe(el)
@@ -297,7 +340,8 @@ export default function Articles(): JSX.Element {
     // the delta applied when an overscan item is first measured, which
     // in turn dampens the jitter of totalSize-driven layout shifts.
     // The sentinel row is shorter (~100px icon+text+padding).
-    estimateSize: (index: number): number => index === ALL_CAUGHT_UP_INDEX ? 100 : 200 + CARD_GAP,
+    estimateSize: (index: number): number =>
+      index === ALL_CAUGHT_UP_INDEX ? 100 : 200 + CARD_GAP,
     // Wider overscan keeps more items measured before they reach the
     // viewport edge, further reducing first-measure churn.
     overscan: 12,
@@ -306,7 +350,9 @@ export default function Articles(): JSX.Element {
     // measurements (e.g. images loading across several visible cards).
     useAnimationFrameWithResizeObserver: true,
     getItemKey: (index: number): string | number =>
-      index === ALL_CAUGHT_UP_INDEX ? "__all_caught_up__" : (filtered[index]?.url ?? index),
+      index === ALL_CAUGHT_UP_INDEX
+        ? "__all_caught_up__"
+        : (filtered[index]?.url ?? index),
   })
 
   const skipFocusScroll = useFocusStabilizer({
@@ -321,7 +367,7 @@ export default function Articles(): JSX.Element {
   })
 
   // Scroll focused article into view (custom rAF smooth scroll for tunable duration)
-  useEffect((): (() => void) | void => {
+  useEffect((): (() => void) | undefined => {
     if (focusIndex < 0) return
     if (skipFocusScroll.current) {
       skipFocusScroll.current = false
@@ -363,30 +409,41 @@ export default function Articles(): JSX.Element {
         focusScrollRafRef.current = null
       }
     }
-  }, [focusIndex, virtualizer])
+  }, [focusIndex, virtualizer, skipFocusScroll.current, skipFocusScroll])
 
   // Mark article as read when focus leaves it
-  const markFocusedAsRead = useCallback((index: number): void => {
-    if (index < 0 || index >= filtered.length) return
-    const article = filtered[index]
-    if (article && article.read_at == null) {
-      scheduleRead(article.url)
-    }
-  }, [filtered, scheduleRead])
+  const markFocusedAsRead = useCallback(
+    (index: number): void => {
+      if (index < 0 || index >= filtered.length) return
+      const article = filtered[index]
+      if (article && article.read_at == null) {
+        scheduleRead(article.url)
+      }
+    },
+    [filtered, scheduleRead],
+  )
 
   // Find the next still-unread article after `after` in the current view.
   // Session-read items count as read so the user is not redirected to an
   // article they just dismissed via j/m.
-  const nextUnreadInView = useCallback((after: number): number => {
-    for (let index = after + 1; index < filtered.length; index++) {
-      const article = filtered[index]
-      if (article.read_at == null && !sessionReadUrls.current.has(article.url)) return index
-    }
-    return -1
-  }, [filtered])
+  const nextUnreadInView = useCallback(
+    (after: number): number => {
+      for (let index = after + 1; index < filtered.length; index++) {
+        const article = filtered[index]
+        if (
+          article.read_at == null &&
+          !sessionReadUrls.current.has(article.url)
+        )
+          return index
+      }
+      return -1
+    },
+    [filtered],
+  )
 
   // Mark all as read mutation
-  const markAllReadFeedId: number | undefined = selection.type === "feed" ? selection.id : undefined
+  const markAllReadFeedId: number | undefined =
+    selection.type === "feed" ? selection.id : undefined
   const markAllRead = useMutation({
     mutationFn: (olderThanHours: number | null) =>
       api.markAllRead(markAllReadFeedId, olderThanHours ?? undefined),
@@ -405,7 +462,7 @@ export default function Articles(): JSX.Element {
 
   // Toggle read/unread for a single article
   const toggleReadMutation = useMutation({
-    mutationFn: ({ url, isRead }: { url: string, isRead: boolean }) =>
+    mutationFn: ({ url, isRead }: { url: string; isRead: boolean }) =>
       isRead ? api.markUnread([url]) : api.markRead([url]),
     onSuccess: (): void => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
@@ -415,9 +472,12 @@ export default function Articles(): JSX.Element {
       console.error("Failed to toggle read status:", err)
     },
   })
-  const toggleRead = useCallback((url: string, isRead: boolean): void => {
-    toggleReadMutation.mutate({ url, isRead })
-  }, [toggleReadMutation])
+  const toggleRead = useCallback(
+    (url: string, isRead: boolean): void => {
+      toggleReadMutation.mutate({ url, isRead })
+    },
+    [toggleReadMutation],
+  )
 
   const goToNextFeed = useCallback((): boolean => {
     // Reference feed: in feed selection it is obviously the selected feed;
@@ -430,11 +490,22 @@ export default function Articles(): JSX.Element {
       refFeedId = filtered[focusIndex].feed_id
     }
     if (refFeedId == null) return false
-    const next: number | null = nextUnreadFeedId(orderedFeedIds, refFeedId, unreadCounts)
+    const next: number | null = nextUnreadFeedId(
+      orderedFeedIds,
+      refFeedId,
+      unreadCounts,
+    )
     if (next == null) return false
     updateSelection({ type: "feed", id: next })
     return true
-  }, [selection, orderedFeedIds, unreadCounts, updateSelection, focusIndex, filtered])
+  }, [
+    selection,
+    orderedFeedIds,
+    unreadCounts,
+    updateSelection,
+    focusIndex,
+    filtered,
+  ])
 
   const onJAtEnd = useCallback((): void => {
     // Cancel any in-flight focus-scroll rAF. Without this, the still-running
@@ -474,9 +545,8 @@ export default function Articles(): JSX.Element {
       : main.getBoundingClientRect().top
     const cardTop: number = el.getBoundingClientRect().top
     if (cardTop >= headerBottom - 4) return false
-    const target: number = focusIndex === 0
-      ? 0
-      : main.scrollTop + cardTop - headerBottom
+    const target: number =
+      focusIndex === 0 ? 0 : main.scrollTop + cardTop - headerBottom
     // Shared ref means the focus-scroll effect and this realign can preempt
     // each other safely instead of leaking concurrent rAF loops.
     smoothScrollTo(main, target, { rafRef: focusScrollRafRef })
@@ -495,33 +565,46 @@ export default function Articles(): JSX.Element {
     goToNextFeed,
     onJAtEnd,
     onKBeforeMove,
-    toggleUnreadFilter: (): void => setShowUnreadOnly((prev: boolean): boolean => !prev),
+    toggleUnreadFilter: (): void =>
+      setShowUnreadOnly((prev: boolean): boolean => !prev),
     setShowHelp,
   })
 
-  const setRef = useCallback((index: number, el: HTMLDivElement | null): void => {
-    if (el) {
-      articleRefs.current.set(index, el)
-    } else {
-      articleRefs.current.delete(index)
-    }
-  }, [])
+  const setRef = useCallback(
+    (index: number, el: HTMLDivElement | null): void => {
+      if (el) {
+        articleRefs.current.set(index, el)
+      } else {
+        articleRefs.current.delete(index)
+      }
+    },
+    [],
+  )
 
-  const handleCardClick = useCallback((index: number): void => {
-    setFocusIndex((prev: number): number => {
-      if (prev !== index) markFocusedAsRead(prev)
-      return index
-    })
-  }, [markFocusedAsRead])
+  const handleCardClick = useCallback(
+    (index: number): void => {
+      setFocusIndex((prev: number): number => {
+        if (prev !== index) markFocusedAsRead(prev)
+        return index
+      })
+    },
+    [markFocusedAsRead],
+  )
 
-  const selectionHeader = useMemo((): { icon: string | null, label: string, feedUrl: string | null } | null => {
+  const selectionHeader = useMemo((): {
+    icon: string | null
+    label: string
+    feedUrl: string | null
+  } | null => {
     if (selection.type === "feed") {
       const feed: Feed | undefined = feedMap.get(selection.id)
       if (!feed) return null
       return { icon: faviconUrl(feed), label: feed.name, feedUrl: feed.url }
     }
     if (selection.type === "folder") {
-      const label: string | null = folders?.find((folder): boolean => folder.id === selection.id)?.name ?? null
+      const label: string | null =
+        folders?.find((folder): boolean => folder.id === selection.id)?.name ??
+        null
       return label ? { icon: null, label, feedUrl: null } : null
     }
     return null
@@ -536,7 +619,8 @@ export default function Articles(): JSX.Element {
     void localReadCount
     let count: number = 0
     for (const article of filtered) {
-      if (article.read_at == null && !sessionReadUrls.current.has(article.url)) count++
+      if (article.read_at == null && !sessionReadUrls.current.has(article.url))
+        count++
     }
     return count
   }, [filtered, localReadCount])
@@ -550,117 +634,135 @@ export default function Articles(): JSX.Element {
           onSelect={updateSelection}
           unreadCounts={unreadCounts}
         />
-        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 pb-2 flex flex-col items-center">
+        <main
+          ref={mainRef}
+          className="flex-1 overflow-y-auto px-4 pb-2 flex flex-col items-center"
+        >
           <div className="w-[95%] max-w-4xl pl-1">
-          <div ref={stickySentinelRef} aria-hidden className="h-0" />
-          <div
-            ref={stickyHeaderRef}
-            className="sticky top-0 z-10 bg-bg pt-4 mb-4"
-          >
-            {selectionHeader && (
-              <h2
-                className={`group font-medium text-text-heading flex items-center gap-2 transition-[font-size,padding] duration-200 ease-out ${
-                  isHeaderStuck ? "text-lg py-1" : "text-2xl py-2"
-                }`}
-              >
-                {selectionHeader.icon && (
-                  <img
-                    src={selectionHeader.icon}
-                    alt=""
-                    className={`transition-[width,height] duration-200 ease-out ${
-                      isHeaderStuck ? "w-4 h-4" : "w-5 h-5"
-                    }`}
-                    loading="lazy"
+            <div ref={stickySentinelRef} aria-hidden className="h-0" />
+            <div
+              ref={stickyHeaderRef}
+              className="sticky top-0 z-10 bg-bg pt-4 mb-4"
+            >
+              {selectionHeader && (
+                <h2
+                  className={`group font-medium text-text-heading flex items-center gap-2 transition-[font-size,padding] duration-200 ease-out ${
+                    isHeaderStuck ? "text-lg py-1" : "text-2xl py-2"
+                  }`}
+                >
+                  {selectionHeader.icon && (
+                    <img
+                      src={selectionHeader.icon}
+                      alt=""
+                      className={`transition-[width,height] duration-200 ease-out ${
+                        isHeaderStuck ? "w-4 h-4" : "w-5 h-5"
+                      }`}
+                      loading="lazy"
+                    />
+                  )}
+                  {selectionHeader.label}
+                  {selectionHeader.feedUrl && (
+                    <a
+                      href={selectionHeader.feedUrl}
+                      target="_blank"
+                      rel="noopener"
+                      aria-label="Open feed source"
+                      title="Open feed source"
+                      className="text-text-muted hover:text-text opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-[opacity,color]"
+                    >
+                      <svg
+                        className={`transition-[width,height] duration-200 ease-out ${
+                          isHeaderStuck ? "w-3.5 h-3.5" : "w-4 h-4"
+                        }`}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        role="img"
+                      >
+                        <title>Open feed source</title>
+                        <path d="M4 11a9 9 0 0 1 9 9" />
+                        <path d="M4 4a16 16 0 0 1 16 16" />
+                        <circle cx="5" cy="19" r="1" />
+                      </svg>
+                    </a>
+                  )}
+                </h2>
+              )}
+              <div className="flex items-center justify-between pb-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowUnreadOnly(true)}
+                      className={`px-3 py-1 rounded transition-colors ${
+                        showUnreadOnly
+                          ? "bg-accent-bg text-accent-text"
+                          : "bg-bg-card text-text-muted hover:text-text"
+                      }`}
+                    >
+                      Unread
+                      {selectedUnreadInView > 0
+                        ? ` (${selectedUnreadInView})`
+                        : ""}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowUnreadOnly(false)}
+                      className={`px-3 py-1 rounded transition-colors ${
+                        !showUnreadOnly
+                          ? "bg-warn-bg text-warn-text"
+                          : "bg-bg-card text-text-muted hover:text-text"
+                      }`}
+                    >
+                      All
+                    </button>
+                  </div>
+                  <select
+                    value={timeRangeId}
+                    onChange={(
+                      event: React.ChangeEvent<HTMLSelectElement>,
+                    ): void =>
+                      updateTimeRangeId(parseTimeRangeId(event.target.value))
+                    }
+                    disabled={showUnreadOnly}
+                    className="px-2 py-1 rounded transition-colors outline-none border border-transparent focus:border-border bg-bg-card text-text-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                    aria-label="Time range filter"
+                  >
+                    {TIME_RANGE_OPTIONS.map(
+                      (opt: (typeof TIME_RANGE_OPTIONS)[number]) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
+                {filtered.length > 0 && (
+                  <MarkAllReadMenu
+                    disabled={markAllRead.isPending || markAllUnread.isPending}
+                    onChoose={(hours: number | null): void =>
+                      markAllRead.mutate(hours)
+                    }
+                    onChooseUnread={() => markAllUnread.mutate()}
                   />
                 )}
-                {selectionHeader.label}
-                {selectionHeader.feedUrl && (
-                  <a
-                    href={selectionHeader.feedUrl}
-                    target="_blank"
-                    rel="noopener"
-                    aria-label="Open feed source"
-                    title="Open feed source"
-                    className="text-text-muted hover:text-text opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-[opacity,color]"
-                  >
-                    <svg
-                      className={`transition-[width,height] duration-200 ease-out ${
-                        isHeaderStuck ? "w-3.5 h-3.5" : "w-4 h-4"
-                      }`}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden
-                    >
-                      <path d="M4 11a9 9 0 0 1 9 9" />
-                      <path d="M4 4a16 16 0 0 1 16 16" />
-                      <circle cx="5" cy="19" r="1" />
-                    </svg>
-                  </a>
-                )}
-              </h2>
-            )}
-            <div className="flex items-center justify-between pb-2">
-              <div className="flex items-center gap-2 text-sm">
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => setShowUnreadOnly(true)}
-                    className={`px-3 py-1 rounded transition-colors ${
-                      showUnreadOnly
-                        ? "bg-accent-bg text-accent-text"
-                        : "bg-bg-card text-text-muted hover:text-text"
-                    }`}
-                  >
-                    Unread{selectedUnreadInView > 0 ? ` (${selectedUnreadInView})` : ""}
-                  </button>
-                  <button
-                    onClick={() => setShowUnreadOnly(false)}
-                    className={`px-3 py-1 rounded transition-colors ${
-                      !showUnreadOnly
-                        ? "bg-warn-bg text-warn-text"
-                        : "bg-bg-card text-text-muted hover:text-text"
-                    }`}
-                  >
-                    All
-                  </button>
-                </div>
-                <select
-                  value={timeRangeId}
-                  onChange={(event: React.ChangeEvent<HTMLSelectElement>): void => updateTimeRangeId(parseTimeRangeId(event.target.value))}
-                  disabled={showUnreadOnly}
-                  className="px-2 py-1 rounded transition-colors outline-none border border-transparent focus:border-border bg-bg-card text-text-muted disabled:opacity-40 disabled:cursor-not-allowed"
-                  aria-label="Time range filter"
-                >
-                  {TIME_RANGE_OPTIONS.map((opt: typeof TIME_RANGE_OPTIONS[number]) => (
-                    <option key={opt.id} value={opt.id}>{opt.label}</option>
-                  ))}
-                </select>
               </div>
-              {filtered.length > 0 && (
-                <MarkAllReadMenu
-                  disabled={markAllRead.isPending || markAllUnread.isPending}
-                  onChoose={(hours: number | null): void => markAllRead.mutate(hours)}
-                  onChooseUnread={() => markAllUnread.mutate()}
-                />
-              )}
             </div>
-          </div>
 
-          {isError ? (
-            <div className="text-red-400">Failed to load articles.</div>
-          ) : isLoading ? (
-            <div className="text-text-muted">Loading...</div>
-          ) : filtered.length === 0 ? (
-            showUnreadOnly ? (
-              <CaughtUpIndicator label="No unread articles" />
+            {isError ? (
+              <div className="text-red-400">Failed to load articles.</div>
+            ) : isLoading ? (
+              <div className="text-text-muted">Loading...</div>
+            ) : filtered.length === 0 ? (
+              showUnreadOnly ? (
+                <CaughtUpIndicator label="No unread articles" />
+              ) : (
+                <div className="text-text-muted">No articles</div>
+              )
             ) : (
-              <div className="text-text-muted">No articles</div>
-            )
-          ) : (
-            <>
               <div
                 style={{
                   // `getTotalSize()` already nets out `scrollMargin`
@@ -696,13 +798,15 @@ export default function Articles(): JSX.Element {
                               : "text-text-dim/60"
                           }`}
                         />
-
                       </div>
                     )
                   }
                   const article = filtered[vi.index]
                   if (!article) return null
-                  const feed: Feed | undefined = article.feed_id != null ? feedMap.get(article.feed_id) : undefined
+                  const feed: Feed | undefined =
+                    article.feed_id != null
+                      ? feedMap.get(article.feed_id)
+                      : undefined
                   return (
                     <div
                       key={vi.key}
@@ -720,18 +824,24 @@ export default function Articles(): JSX.Element {
                       <ArticleCard
                         article={article}
                         focused={vi.index === focusIndex}
-                        pendingSummary={!article.summary && !article.content_translated && article.feed_id != null && summarizeFeedIds.has(article.feed_id)}
+                        pendingSummary={
+                          !article.summary &&
+                          !article.content_translated &&
+                          article.feed_id != null &&
+                          summarizeFeedIds.has(article.feed_id)
+                        }
                         feedName={feed?.name}
                         feedFaviconUrl={feed ? faviconUrl(feed) : null}
-                        ref={(el: HTMLDivElement | null): void => setRef(vi.index, el)}
+                        ref={(el: HTMLDivElement | null): void =>
+                          setRef(vi.index, el)
+                        }
                         onClick={(): void => handleCardClick(vi.index)}
                       />
                     </div>
                   )
                 })}
               </div>
-            </>
-          )}
+            )}
           </div>
         </main>
       </div>

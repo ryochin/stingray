@@ -1,9 +1,8 @@
-import { describe, it, expect, vi, afterEach } from "vitest"
-import type { Mock } from "vitest"
-import { render, act } from "@testing-library/react"
+import { act, render } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import type { Mock } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { useTabShortcuts } from "./useTabShortcuts"
-
 
 // Mock react-router's useNavigate so we can assert the navigate calls.
 const navigate: Mock = vi.fn()
@@ -12,12 +11,10 @@ vi.mock("react-router-dom", async (importActual) => {
   return { ...actual, useNavigate: (): Mock => navigate }
 })
 
-
 function Harness(): null {
   useTabShortcuts()
   return null
 }
-
 
 function renderWithRouter(): ReturnType<typeof render> {
   return render(
@@ -27,19 +24,25 @@ function renderWithRouter(): ReturnType<typeof render> {
   )
 }
 
-
-function press(key: string, target: HTMLElement = document.body, modifiers: Partial<KeyboardEventInit> = {}): void {
+function press(
+  key: string,
+  target: HTMLElement = document.body,
+  modifiers: Partial<KeyboardEventInit> = {},
+): void {
   act((): void => {
-    const event: KeyboardEvent = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...modifiers })
+    const event: KeyboardEvent = new KeyboardEvent("keydown", {
+      key,
+      bubbles: true,
+      cancelable: true,
+      ...modifiers,
+    })
     target.dispatchEvent(event)
   })
 }
 
-
 afterEach((): void => {
   navigate.mockReset()
 })
-
 
 describe("useTabShortcuts", (): void => {
   it("'a' navigates to /", (): void => {

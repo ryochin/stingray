@@ -13,21 +13,24 @@ export function formatTime(iso: string): string {
 }
 
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString("ja-JP", {
+  return `${new Date(iso).toLocaleString("ja-JP", {
     timeZone: TIMEZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }) + " JST"
+  })} JST`
 }
 
 // Compact relative time used by the Feeds page badges: "just now", "32m ago",
 // "5h ago", "3d ago". Always tops out at days; older timestamps still get the
 // "Nd ago" form. Different from `formatRelative` below, which is the longer
 // form used in article timestamps.
-export function formatRelativeShort(iso: string, now: Date = new Date()): string {
+export function formatRelativeShort(
+  iso: string,
+  now: Date = new Date(),
+): string {
   const diffMs: number = now.getTime() - new Date(iso).getTime()
   const diffMins: number = Math.floor(diffMs / 60000)
   if (diffMins < 1) return "just now"
@@ -43,7 +46,9 @@ export function formatRelativeShort(iso: string, now: Date = new Date()): string
 // abbreviations and do not pluralize; day/week/month do.
 // Anything older than ~6 months falls back to the absolute date.
 export function formatRelative(iso: string, now: Date = new Date()): string {
-  const diffSec: number = Math.floor((now.getTime() - new Date(iso).getTime()) / 1000)
+  const diffSec: number = Math.floor(
+    (now.getTime() - new Date(iso).getTime()) / 1000,
+  )
   if (diffSec < 45) return "just now"
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min`
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} hr`
