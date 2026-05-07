@@ -21,10 +21,18 @@ import db
 
 
 def _test_db_url() -> str:
-  return os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql://news:news@localhost:25432/news_test",
+  # Explicit override wins.
+  explicit: str | None = os.environ.get("TEST_DATABASE_URL")
+  if explicit:
+    return explicit
+  # Otherwise derive from DATABASE_URL by appending `_test` to the db name,
+  # so any customization of POSTGRES_* / DATABASE_URL flows into tests too.
+  base: str = os.environ.get(
+    "DATABASE_URL", "postgresql://stingray:stingray@postgres:5432/stingray"
   )
+  parsed = urlparse(base)
+  db_name: str = parsed.path.lstrip("/") or "stingray"
+  return urlunparse(parsed._replace(path=f"/{db_name}_test"))
 
 
 def _admin_url(test_url: str) -> str:
