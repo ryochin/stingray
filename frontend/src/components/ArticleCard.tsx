@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify"
-import type { JSX, KeyboardEvent } from "react"
+import type { JSX, KeyboardEvent, MouseEvent } from "react"
 import { forwardRef, useMemo } from "react"
 import type { Article } from "../api/client"
 import { parseSummary } from "../utils/articleContent"
@@ -17,15 +17,43 @@ interface Props {
   feedName?: string
   feedFaviconUrl?: string | null
   onClick?: () => void
+  /** Fires when any of the title links is clicked. The link still opens in
+   *  a new tab via the browser's default action; the parent uses this hook
+   *  to schedule the article as read. */
+  onTitleClick?: () => void
 }
 
 const ArticleCard = forwardRef<HTMLDivElement, Props>(
   (
-    { article, focused, pendingSummary, feedName, feedFaviconUrl, onClick },
+    {
+      article,
+      focused,
+      pendingSummary,
+      feedName,
+      feedFaviconUrl,
+      onClick,
+      onTitleClick,
+    },
     ref,
   ): JSX.Element => {
     const now: Date = useNow()
     const isRead: boolean = article.read_at != null
+    // Title-link click handlers. We stop propagation so the wrapper card's
+    // onClick (focus + previous-article scheduleRead) doesn't fire — opening
+    // the article in a new tab (e.g. Cmd/Ctrl-click for a background tab)
+    // shouldn't change the current tab's focus or read state. The browser's
+    // default action (new tab) is preserved by *not* calling preventDefault.
+    const handleTitleClick = (e: MouseEvent<HTMLAnchorElement>): void => {
+      e.stopPropagation()
+      onTitleClick?.()
+    }
+    // Middle-click fires `auxclick`, not `click`. Wire the same hook so a
+    // middle-click background-open also marks the article read.
+    const handleTitleAuxClick = (e: MouseEvent<HTMLAnchorElement>): void => {
+      if (e.button !== 1) return
+      e.stopPropagation()
+      onTitleClick?.()
+    }
     const hasTranslation: boolean =
       !!article.title_translated && article.title_translated !== article.title
     const titleColor: string = focused
@@ -56,7 +84,29 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
         "vspace",
         "border",
       ]
+      // Only width-related properties on ancestors — keep unrelated inline
+      // styling (margin, padding, text-align, captions, …) intact.
+      const ANCESTOR_WIDTH_STYLE_PROPS: readonly string[] = [
+        "width",
+        "max-width",
+        "min-width",
+      ]
       for (const img of doc.querySelectorAll("img")) {
+        // Clamp widths on image ancestors unconditionally so wrappers like
+        // `<div class="wp-caption" style="width: 1290px">` don't burst the
+        // card. Run before the `src` early-return so lazy-load images
+        // (`data-src` / `srcset`-only, with no resolved `src`) are also
+        // covered.
+        let ancestor: Element | null = img.parentElement
+        while (ancestor && ancestor !== doc.body) {
+          ancestor.removeAttribute("width")
+          if (ancestor instanceof HTMLElement) {
+            for (const prop of ANCESTOR_WIDTH_STYLE_PROPS) {
+              ancestor.style.removeProperty(prop)
+            }
+          }
+          ancestor = ancestor.parentElement
+        }
         const src: string | null = img.getAttribute("src")
         if (!src) continue
         for (const attr of STRIP_IMG_ATTRS) img.removeAttribute(attr)
@@ -99,6 +149,8 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
                 href={article.url}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={handleTitleClick}
+                onAuxClick={handleTitleAuxClick}
                 className={`${titleColor} hover:underline no-underline`}
               >
                 {article.title_translated}
@@ -109,6 +161,8 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
                 href={article.url}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={handleTitleClick}
+                onAuxClick={handleTitleAuxClick}
                 className="text-sm text-link hover:text-link-hover hover:underline no-underline"
               >
                 {article.title}
@@ -121,6 +175,8 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
               href={article.url}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={handleTitleClick}
+              onAuxClick={handleTitleAuxClick}
               className={`${titleColor} hover:underline no-underline`}
             >
               {article.title}

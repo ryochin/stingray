@@ -12,6 +12,11 @@ interface Args {
   selection: Selection
   showUnreadOnly: boolean
   timeRangeId: TimeRangeId
+  // Set to true the moment this hook writes main.scrollTop programmatically.
+  // Consumers (e.g. the scroll-based mark-as-read detector) read this to
+  // distinguish hook-driven shifts from real user input and clear the flag
+  // after observing it.
+  programmaticScrollRef: RefObject<boolean>
 }
 
 // Preserve focus identity and visual position when `filtered` shifts (e.g.
@@ -36,6 +41,7 @@ export function useFocusStabilizer({
   selection,
   showUnreadOnly,
   timeRangeId,
+  programmaticScrollRef,
 }: Args): RefObject<boolean> {
   const prevFocusSnapshot = useRef<{
     filtered: Article[]
@@ -96,6 +102,10 @@ export function useFocusStabilizer({
         "start",
       )?.[0]
       if (newOffset != null) {
+        // Mark before mutating: scroll events may fire synchronously here
+        // (depending on the engine), and the detector must see the flag on
+        // the very first event to skip its frame.
+        programmaticScrollRef.current = true
         main.scrollTop += newOffset - prev.offset
       }
       skipFocusScrollRef.current = true
@@ -133,6 +143,7 @@ export function useFocusStabilizer({
     selection,
     showUnreadOnly,
     timeRangeId,
+    programmaticScrollRef,
   ])
 
   return skipFocusScrollRef

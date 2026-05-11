@@ -37,7 +37,23 @@ export default function Articles(): JSX.Element {
     return { type: "all" }
   })
   const updateSelection = useCallback((sel: Selection): void => {
-    setSelection(sel)
+    // Same-value guard: callers (e.g. Sidebar) construct a fresh object on
+    // every click, so reference equality fails for re-clicks of the active
+    // item. Without this guard, `selection`-keyed effects (session reads
+    // clear, scroll-to-top, focus reset) would re-fire on every re-click.
+    setSelection((prev: Selection): Selection => {
+      if (prev.type === sel.type) {
+        if (sel.type === "all") return prev
+        if (
+          (sel.type === "feed" || sel.type === "folder") &&
+          prev.type === sel.type &&
+          (prev as { id: number }).id === sel.id
+        ) {
+          return prev
+        }
+      }
+      return sel
+    })
     sessionStorage.setItem("feed-selection", JSON.stringify(sel))
   }, [])
   const [showUnreadOnly, setShowUnreadOnly] = useState<boolean>(true)
@@ -64,11 +80,20 @@ export default function Articles(): JSX.Element {
   const stickySentinelRef = useRef<HTMLDivElement>(null)
   const [isHeaderStuck, setIsHeaderStuck] = useState<boolean>(false)
   const [caughtUpPulseKey, setCaughtUpPulseKey] = useState<number>(0)
+  // Sub-text hint shown under "All caught up" on a second consecutive
+  // j-at-end press. "jump" advertises the space shortcut to the next unread
+  // feed; "end" reports that no further unread feed exists.
+  const [caughtUpHint, setCaughtUpHint] = useState<"jump" | "end" | null>(null)
   // Tracks the rAF driving the focus-scroll animation so competing scroll
   // sources (e.g. onJAtEnd's scrollTo bottom) can cancel it before issuing
   // their own scroll — otherwise the rAF keeps writing main.scrollTop each
   // frame and overrides the new scroll intent.
   const focusScrollRafRef = useRef<number | null>(null)
+  // Set by `useFocusStabilizer` whenever it shifts main.scrollTop to keep the
+  // focused card visually pinned across a list rebind. The scroll-based
+  // mark-as-read detector reads this and consumes it on the first event so
+  // such hook-driven shifts don't masquerade as user-initiated down-scroll.
+  const programmaticScrollRef = useRef<boolean>(false)
 
   // Debounced batch read marking
   const pendingReadUrls = useRef<Set<string>>(new Set())
@@ -267,19 +292,21 @@ export default function Articles(): JSX.Element {
   // `localReadCount` is what actually invalidates the `sessionReadByFeed`
   // memo — clearing the ref alone is opaque to React, so the cached tally
   // would otherwise leak the previous selection's reads into the new view.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `selection` is a trigger; the body intentionally only mutates refs/state and doesn't read it.
   useEffect((): void => {
     sessionReadUrls.current.clear()
     setLocalReadCount(0)
-  }, [])
+  }, [selection])
 
   // Clear focus when feed/filter changes and scroll back to the top.
   // A separate effect below picks up from -1 and focuses the first article
   // once data is available (covers both mount and selection change, since
   // articles are often still loading at the moment selection changes).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deps are change triggers; the body resets focus/scroll without reading them.
   useEffect((): void => {
     setFocusIndex(-1)
     mainRef.current?.scrollTo({ top: 0 })
-  }, [])
+  }, [selection, showUnreadOnly, timeRangeId])
 
   // Auto-focus the first article whenever focus is cleared and there is
   // something to focus. This makes opening the articles view land on the
@@ -289,6 +316,16 @@ export default function Articles(): JSX.Element {
       setFocusIndex(0)
     }
   }, [focusIndex, filtered.length])
+
+  // Any focus movement is treated as "user did something else", so the
+  // caught-up pulse counter and hint are cleared. Repeated j-at-end keeps
+  // focus pinned to the last article, so this reset doesn't fire then —
+  // exactly the case where we want the hint to appear on the second press.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `focusIndex` is a change trigger; the body only resets state and doesn't read it.
+  useEffect((): void => {
+    setCaughtUpPulseKey(0)
+    setCaughtUpHint(null)
+  }, [focusIndex])
 
   // Detect when the header block becomes "stuck" to the top so we can shrink
   // the title. A zero-height sentinel placed just above the sticky wrapper
@@ -364,6 +401,7 @@ export default function Articles(): JSX.Element {
     selection,
     showUnreadOnly,
     timeRangeId,
+    programmaticScrollRef,
   })
 
   // Scroll focused article into view (custom rAF smooth scroll for tunable duration)
@@ -410,6 +448,84 @@ export default function Articles(): JSX.Element {
       }
     }
   }, [focusIndex, virtualizer, skipFocusScroll.current, skipFocusScroll])
+
+  // Auto mark-as-read on down-scroll: when a card's bottom scrolls above the
+  // sticky header, mark its article as read and advance focus to the first
+  // card still in view. Up-scroll is intentionally inert (no rewinding of
+  // read state). The effect is suppressed while a programmatic focus-scroll
+  // is in flight so j/k driven snaps don't trip the detector.
+  const lastScrollTopRef = useRef<number>(0)
+  const scrollMarkRafRef = useRef<number | null>(null)
+  useEffect((): (() => void) | undefined => {
+    const main: HTMLElement | null = mainRef.current
+    if (!main) return
+    lastScrollTopRef.current = main.scrollTop
+    const onScroll = (): void => {
+      if (scrollMarkRafRef.current != null) return
+      scrollMarkRafRef.current = requestAnimationFrame((): void => {
+        scrollMarkRafRef.current = null
+        const m: HTMLElement | null = mainRef.current
+        if (!m) return
+        const currentTop: number = m.scrollTop
+        const prevTop: number = lastScrollTopRef.current
+        lastScrollTopRef.current = currentTop
+        if (currentTop <= prevTop) return
+        if (focusScrollRafRef.current != null) return
+        if (programmaticScrollRef.current) {
+          // Hook-driven scrollTop shift (focus rebind). Consume the flag and
+          // skip this frame; the next real user scroll will go through.
+          programmaticScrollRef.current = false
+          return
+        }
+        const headerBottom: number = stickyHeaderRef.current
+          ? stickyHeaderRef.current.getBoundingClientRect().bottom
+          : m.getBoundingClientRect().top
+        let candidate: number = -1
+        for (const vi of virtualizer.getVirtualItems()) {
+          if (vi.index === ALL_CAUGHT_UP_INDEX) continue
+          const el: HTMLDivElement | undefined = articleRefs.current.get(
+            vi.index,
+          )
+          if (!el) continue
+          const bottom: number = el.getBoundingClientRect().bottom
+          if (bottom <= headerBottom) {
+            const article = filtered[vi.index]
+            if (
+              article &&
+              article.read_at == null &&
+              !sessionReadUrls.current.has(article.url)
+            ) {
+              scheduleRead(article.url)
+            }
+          } else if (candidate === -1) {
+            candidate = vi.index
+          }
+        }
+        if (candidate > focusIndex) {
+          // Suppress the focus-scroll effect — the user is driving the
+          // scroll manually, so snapping the new focus into view would
+          // fight their input.
+          skipFocusScroll.current = true
+          setFocusIndex(candidate)
+        }
+      })
+    }
+    main.addEventListener("scroll", onScroll, { passive: true })
+    return (): void => {
+      main.removeEventListener("scroll", onScroll)
+      if (scrollMarkRafRef.current != null) {
+        cancelAnimationFrame(scrollMarkRafRef.current)
+        scrollMarkRafRef.current = null
+      }
+    }
+  }, [
+    virtualizer,
+    filtered,
+    scheduleRead,
+    focusIndex,
+    ALL_CAUGHT_UP_INDEX,
+    skipFocusScroll,
+  ])
 
   // Mark article as read when focus leaves it
   const markFocusedAsRead = useCallback(
@@ -479,33 +595,28 @@ export default function Articles(): JSX.Element {
     [toggleReadMutation],
   )
 
-  const goToNextFeed = useCallback((): boolean => {
-    // Reference feed: in feed selection it is obviously the selected feed;
-    // in all/folder selection we use the feed_id of the currently focused
-    // article so "jump to next unread feed" remains meaningful.
-    let refFeedId: number | null = null
-    if (selection.type === "feed") {
-      refFeedId = selection.id
-    } else if (focusIndex >= 0 && focusIndex < filtered.length) {
-      refFeedId = filtered[focusIndex].feed_id
+  // Resolve the "reference feed" used by both `goToNextFeed` and the j-at-end
+  // hint. In feed selection it is the selected feed itself; otherwise the
+  // feed of the currently focused article so "next unread feed" stays
+  // anchored to where the user is reading.
+  const referenceFeedId: number | null = useMemo((): number | null => {
+    if (selection.type === "feed") return selection.id
+    if (focusIndex >= 0 && focusIndex < filtered.length) {
+      return filtered[focusIndex].feed_id
     }
-    if (refFeedId == null) return false
-    const next: number | null = nextUnreadFeedId(
-      orderedFeedIds,
-      refFeedId,
-      unreadCounts,
-    )
-    if (next == null) return false
-    updateSelection({ type: "feed", id: next })
+    return null
+  }, [selection, focusIndex, filtered])
+
+  const nextUnreadFeed: number | null = useMemo((): number | null => {
+    if (referenceFeedId == null) return null
+    return nextUnreadFeedId(orderedFeedIds, referenceFeedId, unreadCounts)
+  }, [referenceFeedId, orderedFeedIds, unreadCounts])
+
+  const goToNextFeed = useCallback((): boolean => {
+    if (nextUnreadFeed == null) return false
+    updateSelection({ type: "feed", id: nextUnreadFeed })
     return true
-  }, [
-    selection,
-    orderedFeedIds,
-    unreadCounts,
-    updateSelection,
-    focusIndex,
-    filtered,
-  ])
+  }, [nextUnreadFeed, updateSelection])
 
   const onJAtEnd = useCallback((): void => {
     // Cancel any in-flight focus-scroll rAF. Without this, the still-running
@@ -515,7 +626,15 @@ export default function Articles(): JSX.Element {
       cancelAnimationFrame(focusScrollRafRef.current)
       focusScrollRafRef.current = null
     }
-    setCaughtUpPulseKey((key: number): number => key + 1)
+    // Second+ consecutive j-at-end: surface the space-key hint. The first
+    // press only pulses; pulseKey > 0 here means the user already saw the
+    // pulse and pressed j again without moving focus.
+    setCaughtUpPulseKey((key: number): number => {
+      if (key > 0) {
+        setCaughtUpHint(nextUnreadFeed != null ? "jump" : "end")
+      }
+      return key + 1
+    })
     const main: HTMLElement | null = mainRef.current
     if (!main) return
     // Go through virtualizer.scrollToOffset (not main.scrollTo) so that
@@ -525,7 +644,7 @@ export default function Articles(): JSX.Element {
     // those writes to jump main.scrollTop mid-animation, producing a
     // visible up/down jitter instead of a clean scroll to the bottom.
     virtualizer.scrollToOffset(main.scrollHeight, { behavior: "smooth" })
-  }, [virtualizer])
+  }, [virtualizer, nextUnreadFeed])
 
   // When k is pressed while the focused card's top has scrolled above the
   // sticky header (e.g. after j-at-end scrolled to the bottom), re-align the
@@ -790,13 +909,20 @@ export default function Articles(): JSX.Element {
                         }}
                       >
                         <CaughtUpIndicator
-                          key={caughtUpPulseKey}
                           label="All caught up"
-                          className={`origin-center ${
+                          pulseKey={caughtUpPulseKey}
+                          subLabel={
+                            caughtUpHint === "jump"
+                              ? "Press <Space> key to jump to next unread feed"
+                              : caughtUpHint === "end"
+                                ? "No more unread feeds"
+                                : undefined
+                          }
+                          className={
                             caughtUpPulseKey > 0
-                              ? "text-text animate-caught-up-pulse"
+                              ? "text-text"
                               : "text-text-dim/60"
-                          }`}
+                          }
                         />
                       </div>
                     )
@@ -836,6 +962,7 @@ export default function Articles(): JSX.Element {
                           setRef(vi.index, el)
                         }
                         onClick={(): void => handleCardClick(vi.index)}
+                        onTitleClick={(): void => scheduleRead(article.url)}
                       />
                     </div>
                   )

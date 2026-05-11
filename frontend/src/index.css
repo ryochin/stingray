@@ -32,6 +32,14 @@ body {
   line-height: 1.75;
 }
 
+/* Safety net: feed HTML occasionally ships inline `width: ...` on arbitrary
+   wrappers (WordPress `wp-caption` divs, oversized tables, etc.) that would
+   otherwise burst the card. Clamping every descendant keeps the layout
+   contained without depending on us spotting each pattern in JS. */
+.article-html * {
+  max-width: 100%;
+}
+
 .article-html h1 {
   font-size: 1.4em;
   font-weight: 600;
@@ -235,4 +243,18 @@ body {
 }
 .animate-caught-up-pulse {
   animation: caught-up-pulse 150ms ease-out;
+}
+
+/* Fast fade-in for the secondary hint shown under "All caught up" on the
+   second consecutive j-at-end press. */
+@keyframes caught-up-hint-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-caught-up-hint-fade {
+  animation: caught-up-hint-fade 180ms ease-out;
 }
