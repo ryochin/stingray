@@ -1,4 +1,33 @@
-import { type JSX, useEffect, useRef } from "react"
+import { type JSX, type ReactNode, useEffect, useRef } from "react"
+
+// Recognised key names in hint strings. Anything outside this set is
+// rendered verbatim (brackets included) so typos surface visibly instead
+// of silently being styled as a key.
+const KEY_NAMES: ReadonlySet<string> = new Set(["Enter", "Space", "Esc"])
+
+// Highlight `<KeyName>` tokens (e.g. `<Space>`) in a hint string by
+// rendering them as `<kbd>` so the keyboard cue is both semantically
+// correct and visually brighter than the surrounding instructional copy.
+function renderHintWithKeys(text: string): ReactNode {
+  return text.split(/<([^>]+)>/).map(
+    (part: string, i: number): ReactNode =>
+      // Odd indices are the captured key names (the regex's capture group);
+      // even indices are the surrounding plain text.
+      i % 2 === 1 && KEY_NAMES.has(part) ? (
+        <kbd
+          // biome-ignore lint/suspicious/noArrayIndexKey: split output is stable for a given input.
+          key={i}
+          className="px-1.5 py-0.5 mx-0.5 rounded border border-border bg-bg-card text-text font-mono text-[0.7rem] align-baseline"
+        >
+          {part}
+        </kbd>
+      ) : i % 2 === 1 ? (
+        `<${part}>`
+      ) : (
+        part
+      ),
+  )
+}
 
 interface Props {
   label: string
@@ -80,7 +109,7 @@ export default function CaughtUpIndicator({
         key={subLabel ?? "off"}
         className={`text-xs text-text-dim min-h-[1rem] whitespace-nowrap ${subLabel ? "animate-caught-up-hint-fade" : ""}`}
       >
-        {subLabel ?? " "}
+        {subLabel ? renderHintWithKeys(subLabel) : " "}
       </span>
     </div>
   )
