@@ -27,6 +27,9 @@ interface PendingReadsApi {
 }
 
 const FLUSH_DELAY_MS: number = 500
+// Exponential backoff (capped at 30s) for transient markRead failures.
+// After the final entry is consumed, the queued URLs are discarded.
+const RETRY_DELAYS_MS: readonly number[] = [2000, 4000, 8000, 16000, 30000]
 
 /** Batches `markRead` calls so rapid focus traversal doesn't fire one
  *  request per article. Tracks the session-read set locally so the UI can
@@ -37,15 +40,55 @@ export function usePendingReads(): PendingReadsApi {
   const [localReadCount, setLocalReadCount] = useState<number>(0)
   const pendingReadUrls = useRef<Set<string>>(new Set())
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retryAttempt = useRef<number>(0)
+  const isUnmounted = useRef<boolean>(false)
 
   const flushReads = useCallback((): void => {
     if (pendingReadUrls.current.size === 0) return
-    const urls: string[] = Array.from(pendingReadUrls.current)
+    // Clear both timers up front so neither one re-enters flush while the
+    // request is in flight — without this, a stale retryTimer could
+    // short-circuit a later scheduleRead's 500ms debounce window.
+    if (flushTimer.current) {
+      clearTimeout(flushTimer.current)
+      flushTimer.current = null
+    }
+    if (retryTimer.current) {
+      clearTimeout(retryTimer.current)
+      retryTimer.current = null
+    }
+    const inflight: string[] = Array.from(pendingReadUrls.current)
     pendingReadUrls.current.clear()
-    api.markRead(urls).then((): void => {
-      queryClient.invalidateQueries({ queryKey: ["articles"] })
-      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
-    })
+    api
+      .markRead(inflight)
+      .then((): void => {
+        retryAttempt.current = 0
+        queryClient.invalidateQueries({ queryKey: ["articles"] })
+        queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
+      })
+      .catch((err: unknown): void => {
+        // Merge back so the next flush retries the batch. sessionReadUrls
+        // is intentionally untouched to avoid UI flicker on the article
+        // list — failures are recovered server-side via retry, not by
+        // un-hiding the optimistically-read card.
+        for (const url of inflight) pendingReadUrls.current.add(url)
+        if (isUnmounted.current) {
+          console.warn("markRead failed after unmount; reads dropped", err)
+          return
+        }
+        const attempt: number = retryAttempt.current
+        if (attempt >= RETRY_DELAYS_MS.length) {
+          // Discard the queue too — otherwise the next scheduleRead /
+          // manual flush / unmount flush would silently restart the
+          // backoff sequence with stale URLs.
+          console.warn("markRead retry exhausted; dropping reads", err)
+          pendingReadUrls.current.clear()
+          retryAttempt.current = 0
+          return
+        }
+        retryAttempt.current = attempt + 1
+        retryTimer.current = setTimeout(flushReads, RETRY_DELAYS_MS[attempt])
+      })
   }, [queryClient])
 
   const scheduleRead = useCallback(
@@ -74,9 +117,13 @@ export function usePendingReads(): PendingReadsApi {
   )
 
   // Flush on unmount so a tab close mid-debounce doesn't drop reads.
+  // isUnmounted is set so a post-unmount markRead failure is logged
+  // without arming a retry timer that can't fire.
   useEffect(
     (): (() => void) => (): void => {
+      isUnmounted.current = true
       if (flushTimer.current) clearTimeout(flushTimer.current)
+      if (retryTimer.current) clearTimeout(retryTimer.current)
       flushReads()
     },
     [flushReads],
