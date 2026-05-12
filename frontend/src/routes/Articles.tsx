@@ -1,31 +1,28 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { VirtualItem } from "@tanstack/react-virtual"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { JSX } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Feed, Selection } from "../api/client"
-import { api, faviconUrl } from "../api/client"
-import ArticleCard from "../components/ArticleCard"
+import { api } from "../api/client"
+import ArticleList from "../components/ArticleList"
 import CaughtUpIndicator from "../components/CaughtUpIndicator"
 import Header from "../components/Header"
 import MarkAllReadMenu from "../components/MarkAllReadMenu"
 import ShortcutsHelp from "../components/ShortcutsHelp"
 import Sidebar from "../components/Sidebar"
+import { useArticleDerivedState } from "../hooks/useArticleDerivedState"
 import { useArticleKeyboard } from "../hooks/useArticleKeyboard"
-import { useFocusStabilizer } from "../hooks/useFocusStabilizer"
+import { useArticleListController } from "../hooks/useArticleListController"
+import { useArticleQueries } from "../hooks/useArticleQueries"
+import { useElementHeight } from "../hooks/useElementHeight"
+import { usePendingReads } from "../hooks/usePendingReads"
+import { useSelectionHeader } from "../hooks/useSelectionHeader"
+import { useStickyHeader } from "../hooks/useStickyHeader"
 import {
-  applyUnreadFilter,
-  computeFolderFeedOrder,
-  deriveUnreadCounts,
   nextUnreadFeedId,
   parseTimeRangeId,
-  selectArticles,
   TIME_RANGE_OPTIONS,
   type TimeRangeId,
-  tallySessionReadByFeed,
-  timeRangeDays,
 } from "../utils/articleView"
-import { smoothScrollTo } from "../utils/smoothScroll"
 
 export default function Articles(): JSX.Element {
   const queryClient = useQueryClient()
@@ -72,205 +69,41 @@ export default function Articles(): JSX.Element {
   }, [])
   const [focusIndex, setFocusIndex] = useState<number>(-1)
   const [showHelp, setShowHelp] = useState<boolean>(false)
-  const sessionReadUrls = useRef<Set<string>>(new Set())
-  const [localReadCount, setLocalReadCount] = useState<number>(0)
-  const articleRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+  const {
+    scheduleRead,
+    resetSessionReads,
+    sessionReadUrls,
+    hasSessionRead,
+    localReadCount,
+  } = usePendingReads()
   const mainRef = useRef<HTMLElement>(null)
   const stickyHeaderRef = useRef<HTMLDivElement>(null)
   const stickySentinelRef = useRef<HTMLDivElement>(null)
-  const [isHeaderStuck, setIsHeaderStuck] = useState<boolean>(false)
-  const [caughtUpPulseKey, setCaughtUpPulseKey] = useState<number>(0)
-  // Sub-text hint shown under "All caught up" on a second consecutive
-  // j-at-end press. "jump" advertises the space shortcut to the next unread
-  // feed; "end" reports that no further unread feed exists.
-  const [caughtUpHint, setCaughtUpHint] = useState<"jump" | "end" | null>(null)
-  // Tracks the rAF driving the focus-scroll animation so competing scroll
-  // sources (e.g. onJAtEnd's scrollTo bottom) can cancel it before issuing
-  // their own scroll — otherwise the rAF keeps writing main.scrollTop each
-  // frame and overrides the new scroll intent.
-  const focusScrollRafRef = useRef<number | null>(null)
-  // Set by `useFocusStabilizer` whenever it shifts main.scrollTop to keep the
-  // focused card visually pinned across a list rebind. The scroll-based
-  // mark-as-read detector reads this and consumes it on the first event so
-  // such hook-driven shifts don't masquerade as user-initiated down-scroll.
-  const programmaticScrollRef = useRef<boolean>(false)
-
-  // Debounced batch read marking
-  const pendingReadUrls = useRef<Set<string>>(new Set())
-  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const flushReads = useCallback((): void => {
-    if (pendingReadUrls.current.size === 0) return
-    const urls: string[] = Array.from(pendingReadUrls.current)
-    pendingReadUrls.current.clear()
-    api.markRead(urls).then((): void => {
-      queryClient.invalidateQueries({ queryKey: ["articles"] })
-      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
-    })
-  }, [queryClient])
-
-  const scheduleRead = useCallback(
-    (url: string): void => {
-      if (!sessionReadUrls.current.has(url)) {
-        pendingReadUrls.current.add(url)
-        sessionReadUrls.current.add(url)
-        setLocalReadCount((count: number): number => count + 1)
-      }
-      if (flushTimer.current) clearTimeout(flushTimer.current)
-      flushTimer.current = setTimeout(flushReads, 500)
-    },
-    [flushReads],
-  )
-
-  // Flush on unmount
-  useEffect(
-    (): (() => void) => (): void => {
-      if (flushTimer.current) clearTimeout(flushTimer.current)
-      flushReads()
-    },
-    [flushReads],
-  )
-
-  // Subscribe to status so refetchInterval reacts immediately when a refresh
-  // starts/ends, instead of waiting for the next scheduled tick. Header also
-  // owns a status observer — both share the same cache key.
-  const { data: status } = useQuery({
-    queryKey: ["status"],
-    queryFn: api.getStatus,
-    refetchInterval: (query) => (query.state.data?.running ? 2_000 : 30_000),
-  })
-  const running: boolean = status?.running ?? false
-
-  // While a refresh is running, poll faster so per-feed unread counts reflect
-  // as each feed finishes (OPML import, manual refresh).
-  const activeInterval: number = running ? 3_000 : 15_000
-
-  // Unread mode bypasses the time filter: the user wants every still-unread
-  // item to be reachable regardless of age. Otherwise the backend trims to
-  // the selected window so the response naturally matches the visible list.
-  const sinceDays: number | null = showUnreadOnly
-    ? null
-    : timeRangeDays(timeRangeId)
 
   const {
-    data: allArticles,
-    isLoading,
-    isError,
-  } = useQuery({
-    queryKey: ["articles", { sinceDays }],
-    queryFn: (): ReturnType<typeof api.getArticles> =>
-      api.getArticles({ sinceDays }),
-    refetchInterval: activeInterval,
-  })
-
-  const { data: feeds } = useQuery({
-    queryKey: ["feeds"],
-    queryFn: api.getFeeds,
-    refetchInterval: activeInterval,
-  })
+    allArticles,
+    articlesLoading: isLoading,
+    articlesError: isError,
+    feeds,
+    folders,
+    feedStats,
+  } = useArticleQueries({ showUnreadOnly, timeRangeId })
 
   // Both transitions (idle→running, running→idle) are owned by `useRefreshSync`
   // mounted from `Header`, which the route renders. The shared QueryClient
   // cache means we don't need our own copy here.
 
-  const { data: folders } = useQuery({
-    queryKey: ["folders"],
-    queryFn: api.getFolders,
-  })
-
-  // Per-feed unread totals from the DB (not from the time-bounded /articles
-  // response). This is the source of truth for sidebar badges so they stay
-  // consistent regardless of the active time range.
-  const { data: feedStats } = useQuery({
-    queryKey: ["feed-stats"],
-    queryFn: api.getFeedStats,
-    refetchInterval: activeInterval,
-  })
-
-  const feedMap = useMemo((): Map<number, Feed> => {
-    const map: Map<number, Feed> = new Map<number, Feed>()
-    for (const feed of feeds ?? []) map.set(feed.id, feed)
-    return map
-  }, [feeds])
-
-  // Ordered feed list matching sidebar display order
-  const orderedFeedIds = useMemo((): number[] => {
-    if (!feeds || !folders) return []
-    const enabled: Feed[] = feeds.filter((feed: Feed): boolean => feed.enabled)
-    const sortedFolders = folders
-      .slice()
-      .sort(
-        (folderA, folderB): number =>
-          folderA.position - folderB.position || folderA.id - folderB.id,
-      )
-    const ids: number[] = []
-    for (const folder of sortedFolders) {
-      for (const feed of enabled) {
-        if (feed.folder_id === folder.id) ids.push(feed.id)
-      }
-    }
-    for (const feed of enabled) {
-      if (feed.folder_id == null) ids.push(feed.id)
-    }
-    return ids
-  }, [feeds, folders])
-
-  const enabledFeedIds = useMemo((): Set<number> | null => {
-    if (!feeds) return null
-    return new Set(
-      feeds
-        .filter((feed: Feed): boolean => feed.enabled)
-        .map((feed: Feed): number => feed.id),
-    )
-  }, [feeds])
-
-  const summarizeFeedIds = useMemo((): Set<number> => {
-    if (!feeds) return new Set<number>()
-    return new Set(
-      feeds
-        .filter((feed: Feed): boolean => feed.summarize)
-        .map((feed: Feed): number => feed.id),
-    )
-  }, [feeds])
-
-  const enabledArticles = useMemo(() => {
-    if (!enabledFeedIds) return allArticles ?? []
-    return (allArticles ?? []).filter(
-      (article): boolean =>
-        article.feed_id != null && enabledFeedIds.has(article.feed_id),
-    )
-  }, [allArticles, enabledFeedIds])
-
-  // Decrement stats-derived unread counts by URLs the user just marked read
-  // locally, so the sidebar reflects the change before the next stats refetch.
-  const sessionReadByFeed = useMemo((): Map<number, number> => {
-    void localReadCount
-    return tallySessionReadByFeed(enabledArticles, sessionReadUrls.current)
-  }, [enabledArticles, localReadCount])
-
-  const unreadCounts = useMemo(
-    () => deriveUnreadCounts(feedStats, enabledFeedIds, sessionReadByFeed),
-    [feedStats, enabledFeedIds, sessionReadByFeed],
-  )
-
-  const folderFeedOrder = useMemo(
-    () => computeFolderFeedOrder(selection, feeds),
-    [selection, feeds],
-  )
-
-  const filtered = useMemo(() => {
-    void localReadCount // sessionReadUrls mutations are opaque to React; re-run when they tick.
-    const selected = selectArticles(enabledArticles, selection, folderFeedOrder)
-    // Time-range filtering happens at the API layer (sinceDays). The list we
-    // got is already bounded; here we only layer the unread toggle on top.
-    return applyUnreadFilter(selected, showUnreadOnly, sessionReadUrls.current)
-  }, [
-    enabledArticles,
-    selection,
-    folderFeedOrder,
-    showUnreadOnly,
-    localReadCount,
-  ])
+  const { feedMap, orderedFeedIds, summarizeFeedIds, unreadCounts, filtered } =
+    useArticleDerivedState({
+      feeds,
+      folders,
+      feedStats,
+      allArticles,
+      selection,
+      showUnreadOnly,
+      sessionReadUrls,
+      localReadCount,
+    })
 
   // Validate restored selection against current data
   useEffect((): void => {
@@ -288,14 +121,11 @@ export default function Articles(): JSX.Element {
     }
   }, [feeds, folders, selection, updateSelection])
 
-  // Clear session reads and reset focus when selection changes. Resetting
-  // `localReadCount` is what actually invalidates the `sessionReadByFeed`
-  // memo — clearing the ref alone is opaque to React, so the cached tally
-  // would otherwise leak the previous selection's reads into the new view.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `selection` is a trigger; the body intentionally only mutates refs/state and doesn't read it.
+  // Clear session reads when selection changes so previously-read articles
+  // from another view don't leak into the new selection's filtered list.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `selection` is a trigger; the body only invokes a stable reset and doesn't read it.
   useEffect((): void => {
-    sessionReadUrls.current.clear()
-    setLocalReadCount(0)
+    resetSessionReads()
   }, [selection])
 
   // Clear focus when feed/filter changes and scroll back to the top.
@@ -317,244 +147,77 @@ export default function Articles(): JSX.Element {
     }
   }, [focusIndex, filtered.length])
 
-  // Any focus movement is treated as "user did something else", so the
-  // caught-up pulse counter and hint are cleared. Repeated j-at-end keeps
-  // focus pinned to the last article, so this reset doesn't fire then —
-  // exactly the case where we want the hint to appear on the second press.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `focusIndex` is a change trigger; the body only resets state and doesn't read it.
-  useEffect((): void => {
-    setCaughtUpPulseKey(0)
-    setCaughtUpHint(null)
-  }, [focusIndex])
-
   // Detect when the header block becomes "stuck" to the top so we can shrink
-  // the title. A zero-height sentinel placed just above the sticky wrapper
-  // stops intersecting the scroll root the moment the header sticks.
-  useEffect((): (() => void) | undefined => {
-    const sentinel: HTMLDivElement | null = stickySentinelRef.current
-    const main: HTMLElement | null = mainRef.current
-    if (!sentinel || !main) return
-    const observer: IntersectionObserver = new IntersectionObserver(
-      ([entry]: IntersectionObserverEntry[]): void =>
-        setIsHeaderStuck(!entry.isIntersecting),
-      { root: main, threshold: 0 },
-    )
-    observer.observe(sentinel)
-    return (): void => observer.disconnect()
-  }, [])
+  // the title. The sentinel above the sticky wrapper drives the flag.
+  const isHeaderStuck: boolean = useStickyHeader(stickySentinelRef, mainRef)
 
   // Track sticky header height so the virtualizer can offset its scroll
-  // origin by exactly that amount (scrollMargin). Re-measured via
-  // ResizeObserver to cover stuck transitions, wrap changes, font load, etc.
-  const [headerHeight, setHeaderHeight] = useState<number>(0)
-  useEffect((): (() => void) | undefined => {
-    const el: HTMLDivElement | null = stickyHeaderRef.current
-    if (!el) return
-    const update = (): void =>
-      setHeaderHeight(el.getBoundingClientRect().height)
-    update()
-    const observer: ResizeObserver = new ResizeObserver(update)
-    observer.observe(el)
-    return (): void => observer.disconnect()
-  }, [])
+  // origin by exactly that amount (scrollMargin). Re-measured on layout
+  // shifts (stuck transitions, wrap changes, font load, etc.).
+  const headerHeight: number = useElementHeight(stickyHeaderRef)
 
-  // Virtualize the article card list. All rendering modes (all / folder /
-  // feed) share the same list so virtualization is unconditional.
-  // Gap between cards is realised as padding-bottom on the virtualizer
-  // wrapper div so measureElement's bounding rect includes it naturally
-  // without overriding measurement.
-  const CARD_GAP = 16
-  // Include the "All caught up" sentinel as the last virtual item so its
-  // position is coordinated with the virtualizer's scrollAdjustments /
-  // smooth-scroll state. Otherwise it sits in normal flow after the
-  // container and jitters as items below the viewport get measured for
-  // the first time (the classic dynamic-size virtualizer tail wobble).
-  const ALL_CAUGHT_UP_INDEX = filtered.length
-  const virtualizer = useVirtualizer({
-    count: filtered.length + 1,
-    getScrollElement: () => mainRef.current,
-    // Most cards land around 180-220px tall; a closer estimate reduces
-    // the delta applied when an overscan item is first measured, which
-    // in turn dampens the jitter of totalSize-driven layout shifts.
-    // The sentinel row is shorter (~100px icon+text+padding).
-    estimateSize: (index: number): number =>
-      index === ALL_CAUGHT_UP_INDEX ? 100 : 200 + CARD_GAP,
-    // Wider overscan keeps more items measured before they reach the
-    // viewport edge, further reducing first-measure churn.
-    overscan: 12,
-    scrollMargin: headerHeight,
-    // Batch ResizeObserver callbacks into RAF to coalesce bursts of
-    // measurements (e.g. images loading across several visible cards).
-    useAnimationFrameWithResizeObserver: true,
-    getItemKey: (index: number): string | number =>
-      index === ALL_CAUGHT_UP_INDEX
-        ? "__all_caught_up__"
-        : (filtered[index]?.url ?? index),
-  })
+  // Resolve the "reference feed" used by both `goToNextFeed` and the j-at-end
+  // hint. In feed selection it is the selected feed itself; otherwise the
+  // feed of the currently focused article so "next unread feed" stays
+  // anchored to where the user is reading.
+  const referenceFeedId: number | null = useMemo((): number | null => {
+    if (selection.type === "feed") return selection.id
+    if (focusIndex >= 0 && focusIndex < filtered.length) {
+      return filtered[focusIndex].feed_id
+    }
+    return null
+  }, [selection, focusIndex, filtered])
 
-  const skipFocusScroll = useFocusStabilizer({
+  const nextUnreadFeed: number | null = useMemo((): number | null => {
+    if (referenceFeedId == null) return null
+    return nextUnreadFeedId(orderedFeedIds, referenceFeedId, unreadCounts)
+  }, [referenceFeedId, orderedFeedIds, unreadCounts])
+
+  const goToNextFeed = useCallback((): boolean => {
+    if (nextUnreadFeed == null) return false
+    updateSelection({ type: "feed", id: nextUnreadFeed })
+    return true
+  }, [nextUnreadFeed, updateSelection])
+
+  const {
+    virtualizer,
+    allCaughtUpIndex,
+    setRef,
+    handleCardClick,
+    markFocusedAsRead,
+    onJAtEnd,
+    onKBeforeMove,
+    caughtUpPulseKey,
+    caughtUpHint,
+  } = useArticleListController({
     filtered,
     focusIndex,
     setFocusIndex,
-    virtualizer,
     mainRef,
+    stickyHeaderRef,
+    headerHeight,
     selection,
     showUnreadOnly,
     timeRangeId,
-    programmaticScrollRef,
-  })
-
-  // Scroll focused article into view (custom rAF smooth scroll for tunable duration)
-  useEffect((): (() => void) | undefined => {
-    if (focusIndex < 0) return
-    if (skipFocusScroll.current) {
-      skipFocusScroll.current = false
-      return
-    }
-    const main: HTMLElement | null = mainRef.current
-    if (!main) return
-    const el: HTMLDivElement | undefined = articleRefs.current.get(focusIndex)
-    // Out-of-range (virtualized away): jump with virtualizer and let the
-    // next render place the card; the rAF smooth path below handles the
-    // in-range case. For the first article, bypass the virtualizer —
-    // its scrollMargin would land us at headerHeight instead of 0,
-    // leaving the sticky header in its stuck (small) state.
-    if (!el) {
-      if (focusIndex === 0) {
-        main.scrollTop = 0
-      } else {
-        virtualizer.scrollToIndex(focusIndex, { align: "start" })
-      }
-      return
-    }
-    // For the first article, scroll all the way to the top so the sticky
-    // header releases and returns to its initial (full-size) state.
-    // Otherwise, align the article's top with the sticky header's bottom
-    // edge so the article is never occluded by the header.
-    let target: number
-    if (focusIndex === 0) {
-      target = 0
-    } else {
-      const headerBottom: number = stickyHeaderRef.current
-        ? stickyHeaderRef.current.getBoundingClientRect().bottom
-        : main.getBoundingClientRect().top
-      target = main.scrollTop + el.getBoundingClientRect().top - headerBottom
-    }
-    smoothScrollTo(main, target, { rafRef: focusScrollRafRef })
-    return (): void => {
-      if (focusScrollRafRef.current != null) {
-        cancelAnimationFrame(focusScrollRafRef.current)
-        focusScrollRafRef.current = null
-      }
-    }
-  }, [focusIndex, virtualizer, skipFocusScroll.current, skipFocusScroll])
-
-  // Auto mark-as-read on down-scroll: when a card's bottom scrolls above the
-  // sticky header, mark its article as read and advance focus to the first
-  // card still in view. Up-scroll is intentionally inert (no rewinding of
-  // read state). The effect is suppressed while a programmatic focus-scroll
-  // is in flight so j/k driven snaps don't trip the detector.
-  const lastScrollTopRef = useRef<number>(0)
-  const scrollMarkRafRef = useRef<number | null>(null)
-  useEffect((): (() => void) | undefined => {
-    const main: HTMLElement | null = mainRef.current
-    if (!main) return
-    lastScrollTopRef.current = main.scrollTop
-    const onScroll = (): void => {
-      if (scrollMarkRafRef.current != null) return
-      scrollMarkRafRef.current = requestAnimationFrame((): void => {
-        scrollMarkRafRef.current = null
-        const m: HTMLElement | null = mainRef.current
-        if (!m) return
-        const currentTop: number = m.scrollTop
-        const prevTop: number = lastScrollTopRef.current
-        lastScrollTopRef.current = currentTop
-        if (currentTop <= prevTop) return
-        if (focusScrollRafRef.current != null) return
-        if (programmaticScrollRef.current) {
-          // Hook-driven scrollTop shift (focus rebind). Consume the flag and
-          // skip this frame; the next real user scroll will go through.
-          programmaticScrollRef.current = false
-          return
-        }
-        const headerBottom: number = stickyHeaderRef.current
-          ? stickyHeaderRef.current.getBoundingClientRect().bottom
-          : m.getBoundingClientRect().top
-        let candidate: number = -1
-        for (const vi of virtualizer.getVirtualItems()) {
-          if (vi.index === ALL_CAUGHT_UP_INDEX) continue
-          const el: HTMLDivElement | undefined = articleRefs.current.get(
-            vi.index,
-          )
-          if (!el) continue
-          const bottom: number = el.getBoundingClientRect().bottom
-          if (bottom <= headerBottom) {
-            const article = filtered[vi.index]
-            if (
-              article &&
-              article.read_at == null &&
-              !sessionReadUrls.current.has(article.url)
-            ) {
-              scheduleRead(article.url)
-            }
-          } else if (candidate === -1) {
-            candidate = vi.index
-          }
-        }
-        if (candidate > focusIndex) {
-          // Suppress the focus-scroll effect — the user is driving the
-          // scroll manually, so snapping the new focus into view would
-          // fight their input.
-          skipFocusScroll.current = true
-          setFocusIndex(candidate)
-        }
-      })
-    }
-    main.addEventListener("scroll", onScroll, { passive: true })
-    return (): void => {
-      main.removeEventListener("scroll", onScroll)
-      if (scrollMarkRafRef.current != null) {
-        cancelAnimationFrame(scrollMarkRafRef.current)
-        scrollMarkRafRef.current = null
-      }
-    }
-  }, [
-    virtualizer,
-    filtered,
     scheduleRead,
-    focusIndex,
-    ALL_CAUGHT_UP_INDEX,
-    skipFocusScroll,
-  ])
-
-  // Mark article as read when focus leaves it
-  const markFocusedAsRead = useCallback(
-    (index: number): void => {
-      if (index < 0 || index >= filtered.length) return
-      const article = filtered[index]
-      if (article && article.read_at == null) {
-        scheduleRead(article.url)
-      }
-    },
-    [filtered, scheduleRead],
-  )
+    hasSessionRead,
+    nextUnreadFeed,
+  })
 
   // Find the next still-unread article after `after` in the current view.
   // Session-read items count as read so the user is not redirected to an
-  // article they just dismissed via j/m.
+  // article they just dismissed via j/m. Kept inline here because it's
+  // only consumed by the keyboard hook below.
   const nextUnreadInView = useCallback(
     (after: number): number => {
       for (let index = after + 1; index < filtered.length; index++) {
         const article = filtered[index]
-        if (
-          article.read_at == null &&
-          !sessionReadUrls.current.has(article.url)
-        )
+        if (article.read_at == null && !hasSessionRead(article.url))
           return index
       }
       return -1
     },
-    [filtered],
+    [filtered, hasSessionRead],
   )
 
   // Mark all as read mutation
@@ -595,83 +258,6 @@ export default function Articles(): JSX.Element {
     [toggleReadMutation],
   )
 
-  // Resolve the "reference feed" used by both `goToNextFeed` and the j-at-end
-  // hint. In feed selection it is the selected feed itself; otherwise the
-  // feed of the currently focused article so "next unread feed" stays
-  // anchored to where the user is reading.
-  const referenceFeedId: number | null = useMemo((): number | null => {
-    if (selection.type === "feed") return selection.id
-    if (focusIndex >= 0 && focusIndex < filtered.length) {
-      return filtered[focusIndex].feed_id
-    }
-    return null
-  }, [selection, focusIndex, filtered])
-
-  const nextUnreadFeed: number | null = useMemo((): number | null => {
-    if (referenceFeedId == null) return null
-    return nextUnreadFeedId(orderedFeedIds, referenceFeedId, unreadCounts)
-  }, [referenceFeedId, orderedFeedIds, unreadCounts])
-
-  const goToNextFeed = useCallback((): boolean => {
-    if (nextUnreadFeed == null) return false
-    updateSelection({ type: "feed", id: nextUnreadFeed })
-    return true
-  }, [nextUnreadFeed, updateSelection])
-
-  const onJAtEnd = useCallback((): void => {
-    // Cancel any in-flight focus-scroll rAF. Without this, the still-running
-    // rAF keeps writing main.scrollTop each frame and silently overrides the
-    // smooth scroll-to-bottom we issue below.
-    if (focusScrollRafRef.current != null) {
-      cancelAnimationFrame(focusScrollRafRef.current)
-      focusScrollRafRef.current = null
-    }
-    // Second+ consecutive j-at-end: surface the space-key hint. The first
-    // press only pulses; pulseKey > 0 here means the user already saw the
-    // pulse and pressed j again without moving focus.
-    setCaughtUpPulseKey((key: number): number => {
-      if (key > 0) {
-        setCaughtUpHint(nextUnreadFeed != null ? "jump" : "end")
-      }
-      return key + 1
-    })
-    const main: HTMLElement | null = mainRef.current
-    if (!main) return
-    // Go through virtualizer.scrollToOffset (not main.scrollTo) so that
-    // `scrollState.behavior === "smooth"` is set on the virtualizer.
-    // While smooth scrolling, the virtualizer suppresses its scrollAdjust-
-    // ment writes on item-size changes; bypassing the virtualizer causes
-    // those writes to jump main.scrollTop mid-animation, producing a
-    // visible up/down jitter instead of a clean scroll to the bottom.
-    virtualizer.scrollToOffset(main.scrollHeight, { behavior: "smooth" })
-  }, [virtualizer, nextUnreadFeed])
-
-  // When k is pressed while the focused card's top has scrolled above the
-  // sticky header (e.g. after j-at-end scrolled to the bottom), re-align the
-  // current card instead of moving focus to the previous one.
-  const onKBeforeMove = useCallback((): boolean => {
-    const main: HTMLElement | null = mainRef.current
-    if (!main || focusIndex < 0) return false
-    const el: HTMLDivElement | undefined = articleRefs.current.get(focusIndex)
-    // Virtualized away: the card isn't in the DOM, so it's definitely not
-    // aligned. Jump to it with the virtualizer and stay on this index.
-    if (!el) {
-      virtualizer.scrollToIndex(focusIndex, { align: "start" })
-      return true
-    }
-    const headerBottom: number = stickyHeaderRef.current
-      ? stickyHeaderRef.current.getBoundingClientRect().bottom
-      : main.getBoundingClientRect().top
-    const cardTop: number = el.getBoundingClientRect().top
-    if (cardTop >= headerBottom - 4) return false
-    const target: number =
-      focusIndex === 0 ? 0 : main.scrollTop + cardTop - headerBottom
-    // Shared ref means the focus-scroll effect and this realign can preempt
-    // each other safely instead of leaking concurrent rAF loops.
-    smoothScrollTo(main, target, { rafRef: focusScrollRafRef })
-    return true
-  }, [focusIndex, virtualizer])
-
   useArticleKeyboard({
     filtered,
     focusIndex,
@@ -689,60 +275,23 @@ export default function Articles(): JSX.Element {
     setShowHelp,
   })
 
-  const setRef = useCallback(
-    (index: number, el: HTMLDivElement | null): void => {
-      if (el) {
-        articleRefs.current.set(index, el)
-      } else {
-        articleRefs.current.delete(index)
-      }
-    },
-    [],
-  )
+  // Map the controller's hint state into a presentation string here so
+  // `<ArticleList>` doesn't need to know about the "jump"/"end" vocabulary.
+  const caughtUpSubLabel: string | undefined =
+    caughtUpHint === "jump"
+      ? "Press <Space> key to jump to next unread feed"
+      : caughtUpHint === "end"
+        ? "No more unread feeds"
+        : undefined
 
-  const handleCardClick = useCallback(
-    (index: number): void => {
-      setFocusIndex((prev: number): number => {
-        if (prev !== index) markFocusedAsRead(prev)
-        return index
-      })
-    },
-    [markFocusedAsRead],
-  )
-
-  const selectionHeader = useMemo((): {
-    icon: string | null
-    label: string
-    feedUrl: string | null
-  } | null => {
-    if (selection.type === "feed") {
-      const feed: Feed | undefined = feedMap.get(selection.id)
-      if (!feed) return null
-      return { icon: faviconUrl(feed), label: feed.name, feedUrl: feed.url }
-    }
-    if (selection.type === "folder") {
-      const label: string | null =
-        folders?.find((folder): boolean => folder.id === selection.id)?.name ??
-        null
-      return label ? { icon: null, label, feedUrl: null } : null
-    }
-    return null
-  }, [selection, feedMap, folders])
-
-  // Unread count for the header `Unread (N)` button. `filtered` already
-  // applied selection + (in unread mode) the unread filter, so iterate that
-  // directly. Session-read items are kept in `filtered` (intentional, so the
-  // user can still see what they just dismissed) — exclude them here so the
-  // count reflects only true unreads.
-  const selectedUnreadInView = useMemo((): number => {
-    void localReadCount
-    let count: number = 0
-    for (const article of filtered) {
-      if (article.read_at == null && !sessionReadUrls.current.has(article.url))
-        count++
-    }
-    return count
-  }, [filtered, localReadCount])
+  const { selectionHeader, selectedUnreadInView } = useSelectionHeader({
+    selection,
+    feedMap,
+    folders,
+    filtered,
+    localReadCount,
+    hasSessionRead,
+  })
 
   return (
     <div className="flex flex-col h-screen">
@@ -882,92 +431,19 @@ export default function Articles(): JSX.Element {
                 <div className="text-text-muted">No articles</div>
               )
             ) : (
-              <div
-                style={{
-                  // `getTotalSize()` already nets out `scrollMargin`
-                  // (see virtual-core: `end - scrollMargin + paddingEnd`)
-                  // so this is exactly `sum(measured)` — the right value
-                  // for a container whose first card sits at y=0.
-                  height: virtualizer.getTotalSize(),
-                  position: "relative",
-                  width: "100%",
-                }}
-              >
-                {virtualizer.getVirtualItems().map((vi: VirtualItem) => {
-                  if (vi.index === ALL_CAUGHT_UP_INDEX) {
-                    return (
-                      <div
-                        key={vi.key}
-                        ref={virtualizer.measureElement}
-                        data-index={vi.index}
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          width: "100%",
-                          transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
-                        }}
-                      >
-                        <CaughtUpIndicator
-                          label="All caught up"
-                          pulseKey={caughtUpPulseKey}
-                          subLabel={
-                            caughtUpHint === "jump"
-                              ? "Press <Space> key to jump to next unread feed"
-                              : caughtUpHint === "end"
-                                ? "No more unread feeds"
-                                : undefined
-                          }
-                          className={
-                            caughtUpPulseKey > 0
-                              ? "text-text"
-                              : "text-text-dim/60"
-                          }
-                        />
-                      </div>
-                    )
-                  }
-                  const article = filtered[vi.index]
-                  if (!article) return null
-                  const feed: Feed | undefined =
-                    article.feed_id != null
-                      ? feedMap.get(article.feed_id)
-                      : undefined
-                  return (
-                    <div
-                      key={vi.key}
-                      ref={virtualizer.measureElement}
-                      data-index={vi.index}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        paddingBottom: CARD_GAP,
-                        transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
-                      }}
-                    >
-                      <ArticleCard
-                        article={article}
-                        focused={vi.index === focusIndex}
-                        pendingSummary={
-                          !article.summary &&
-                          !article.content_translated &&
-                          article.feed_id != null &&
-                          summarizeFeedIds.has(article.feed_id)
-                        }
-                        feedName={feed?.name}
-                        feedFaviconUrl={feed ? faviconUrl(feed) : null}
-                        ref={(el: HTMLDivElement | null): void =>
-                          setRef(vi.index, el)
-                        }
-                        onClick={(): void => handleCardClick(vi.index)}
-                        onTitleClick={(): void => scheduleRead(article.url)}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
+              <ArticleList
+                articles={filtered}
+                focusIndex={focusIndex}
+                feedMap={feedMap}
+                summarizeFeedIds={summarizeFeedIds}
+                virtualizer={virtualizer}
+                allCaughtUpIndex={allCaughtUpIndex}
+                setRef={setRef}
+                onCardClick={handleCardClick}
+                onTitleClick={scheduleRead}
+                caughtUpPulseKey={caughtUpPulseKey}
+                caughtUpSubLabel={caughtUpSubLabel}
+              />
             )}
           </div>
         </main>
