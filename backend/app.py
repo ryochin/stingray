@@ -28,6 +28,7 @@ import log
 import repo
 from feeds import _fetch_rss, extract_feed_candidates, probe_feed_body, read_file_url  # type: ignore[import-untyped]
 from fetcher import refresh_all, summarize_pending
+from url_cleaner import clean_url
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
 from scraper import fetch_web_page  # type: ignore[import-untyped]
 from schemas import AppConfig, ArticleRow, FeedRow, FeedStats, FilterRow, FolderRow, StatusResponse
@@ -351,18 +352,24 @@ async def _fetch_single_feed(feed: FeedRow) -> None:
   """Fetch articles from a single feed and persist to DB."""
   start = time.perf_counter()
   try:
+    config = _load_config()
+    clean_url_fn = clean_url if config.url_cleanup.enabled else None
     feed_cfg = feed.to_feed_cfg()
     kind = "web" if feed.extraction_rules else "rss"
     log.step(f"Fetching feed [{kind}]: {feed.name} ({feed.url})")
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
       if feed.extraction_rules and feed.extraction_rules != "{}":
-        articles, was_cached = await fetch_web_page(client, feed_cfg)
+        articles, was_cached = await fetch_web_page(
+          client, feed_cfg, clean_url_fn=clean_url_fn,
+        )
       elif feed.extraction_rules is not None:
         log.warn(f"  Skipping '{feed.name}': extraction rules not configured yet.")
         repo.update_feed_fetch_status(feed.id, success=False, error="extraction rules not configured")
         return
       else:
-        articles, was_cached, _tag = await _fetch_rss(client, feed_cfg)
+        articles, was_cached, _tag = await _fetch_rss(
+          client, feed_cfg, clean_url_fn=clean_url_fn,
+        )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     source = "cache" if was_cached else "fresh"
     log.info(f"  [{source}] {len(articles)} items fetched in {elapsed_ms}ms.")

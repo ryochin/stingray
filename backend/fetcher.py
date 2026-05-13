@@ -17,6 +17,7 @@ from models import Article
 from schemas import AppConfig, FeedRow
 from seed import enrich_from_legacy_cache
 from summarizer import summarize_all  # type: ignore[import-untyped]
+from url_cleaner import clean_url
 
 SHORT_SNIPPET_CHARS = 300
 
@@ -134,6 +135,7 @@ async def _fetch_and_persist_feeds(
     max_age_hours=config.max_age_hours,
     max_items=config.max_items_per_feed,
     on_feed_done=_persist_feed,
+    clean_url_fn=clean_url if config.url_cleanup.enabled else None,
   )
   return articles, new_count_total
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from typing import Callable
 from urllib.parse import urljoin
 
 import httpx
@@ -62,7 +63,12 @@ def _extract_own_text(el, item_ids: set, max_len: int = 500) -> str:
   return " ".join(parts)[:max_len]
 
 
-def parse_web_page(html: str, rules: dict, feed_cfg: dict) -> list[Article]:
+def parse_web_page(
+  html: str,
+  rules: dict,
+  feed_cfg: dict,
+  clean_url_fn: Callable[[str], str] | None = None,
+) -> list[Article]:
   """Extract articles from HTML using CSS selector rules."""
   soup = BeautifulSoup(html, "html.parser")
   source = feed_cfg["name"]
@@ -96,6 +102,7 @@ def parse_web_page(html: str, rules: dict, feed_cfg: dict) -> list[Article]:
     article_url = urljoin(page_url, raw_url)
     if not article_url.startswith(("http://", "https://")):
       continue
+    cleaned_url = clean_url_fn(article_url) if clean_url_fn else article_url
 
     # Extract text from direct children only, stopping at nested items
     # (html.parser may not auto-close tags like <p>, causing subsequent
@@ -130,7 +137,7 @@ def parse_web_page(html: str, rules: dict, feed_cfg: dict) -> list[Article]:
 
     articles.append(Article(
       title=title,
-      url=article_url,
+      url=cleaned_url,
       source=source,
       published=published,
       content_snippet=snippet,
@@ -143,6 +150,7 @@ def parse_web_page(html: str, rules: dict, feed_cfg: dict) -> list[Article]:
 async def fetch_web_page(
   client: httpx.AsyncClient,
   feed_cfg: dict,
+  clean_url_fn: Callable[[str], str] | None = None,
 ) -> tuple[list[Article], bool]:
   """Fetch a web page and extract articles using stored CSS rules.
 
@@ -156,5 +164,5 @@ async def fetch_web_page(
   resp.raise_for_status()
   html = resp.text
 
-  articles = parse_web_page(html, rules, feed_cfg)
+  articles = parse_web_page(html, rules, feed_cfg, clean_url_fn=clean_url_fn)
   return articles, False

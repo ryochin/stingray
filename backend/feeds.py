@@ -277,7 +277,11 @@ def _extract_item_images(body: str) -> dict[str, str]:
   return images
 
 
-def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
+def _parse_rss(
+  body: str,
+  feed_cfg: dict,
+  clean_url_fn: Callable[[str], str] | None = None,
+) -> list[Article]:
   max_items = feed_cfg.get("max_items", 200)
   source = feed_cfg["name"]
   parsed = feedparser.parse(body)
@@ -306,19 +310,22 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
     if raw_html:
       snippet = _strip_html(raw_html)
 
-    link = entry.get("link", "")
-    if not link or not link.startswith(("http://", "https://")):
+    raw_link = entry.get("link", "")
+    if not raw_link or not raw_link.startswith(("http://", "https://")):
       continue
+    cleaned_link = clean_url_fn(raw_link) if clean_url_fn else raw_link
 
-    # Inject thumbnail image into content_html if not already present
-    thumb_url = item_images.get(link)
+    # Inject thumbnail image into content_html if not already present.
+    # `item_images` was populated from the same raw <link>, so lookup
+    # uses the raw value — never the cleaned one.
+    thumb_url = item_images.get(raw_link)
     if thumb_url and thumb_url not in raw_html:
       raw_html = f'<img src="{html.escape(thumb_url)}" alt="" />\n{raw_html}'
 
     title = html.unescape(entry.get("title", "(no title)"))
     articles.append(Article(
       title=title,
-      url=link,
+      url=cleaned_link,
       source=source,
       published=published,
       content_snippet=_truncate(snippet),
@@ -328,7 +335,11 @@ def _parse_rss(body: str, feed_cfg: dict) -> list[Article]:
   return articles
 
 
-async def _fetch_rss(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Article], bool, str]:
+async def _fetch_rss(
+  client: httpx.AsyncClient,
+  feed_cfg: dict,
+  clean_url_fn: Callable[[str], str] | None = None,
+) -> tuple[list[Article], bool, str]:
   """Fetch an RSS feed body with caching and parse it.
 
   Returns (articles, was_cached, source_tag). The source_tag is forwarded
@@ -341,12 +352,18 @@ async def _fetch_rss(client: httpx.AsyncClient, feed_cfg: dict) -> tuple[list[Ar
   # Returning [] here lets callers treat it the same as "no new articles".
   if not body:
     return [], was_cached, tag
-  return _parse_rss(body, feed_cfg), was_cached, tag
+  return _parse_rss(body, feed_cfg, clean_url_fn=clean_url_fn), was_cached, tag
 
 
 _CONCURRENCY = 5
 
-async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
+async def _delayed_fetch(
+  client,
+  feed,
+  delay: float,
+  sem: asyncio.Semaphore,
+  clean_url_fn: Callable[[str], str] | None = None,
+):
   """Fetch a single feed with concurrency limit and random delay.
 
   Returns (articles, was_cached, kind, source_tag) where
@@ -366,7 +383,9 @@ async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
       rules = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
       if rules.get("item"):
         start = time.perf_counter()
-        articles, was_cached = await fetch_web_page(client, feed)
+        articles, was_cached = await fetch_web_page(
+          client, feed, clean_url_fn=clean_url_fn,
+        )
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         source = "cache" if was_cached else "fresh"
         log.info(f"  [web/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
@@ -377,7 +396,9 @@ async def _delayed_fetch(client, feed, delay: float, sem: asyncio.Semaphore):
       log.warn(f"  [web/skip] {name}: no extraction rules configured")
       return [], False, "web-norules", None
     start = time.perf_counter()
-    articles, was_cached, source_tag = await _fetch_rss(client, feed)
+    articles, was_cached, source_tag = await _fetch_rss(
+      client, feed, clean_url_fn=clean_url_fn,
+    )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     source = "cache" if was_cached else "fresh"
     log.info(f"  [rss/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
@@ -412,6 +433,7 @@ async def fetch_all(
   max_age_hours: float = 48,
   max_items: int = 200,
   on_feed_done: OnFeedDone | None = None,
+  clean_url_fn: Callable[[str], str] | None = None,
 ) -> list[Article]:
   """Fetch every feed in parallel.
 
@@ -436,6 +458,7 @@ async def fetch_all(
     try:
       articles, was_cached, kind, source_tag = await _delayed_fetch(
         client, feed, random.uniform(0, 2), sem,
+        clean_url_fn=clean_url_fn,
       )
       fetch_exc: Exception | None = None
     except Exception as e:

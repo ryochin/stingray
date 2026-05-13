@@ -108,6 +108,10 @@ class OllamaConfig(BaseModel):
   timeout: int = 120
 
 
+class UrlCleanupConfig(BaseModel):
+  enabled: bool = True
+
+
 class AppConfig(BaseModel):
   max_items_per_feed: int = 200
   max_age_hours: float = 48
@@ -115,3 +119,4 @@ class AppConfig(BaseModel):
   article_cache_max_age_days: int = 0
   native_lang: str = "ja"
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+  url_cleanup: UrlCleanupConfig = Field(default_factory=UrlCleanupConfig)

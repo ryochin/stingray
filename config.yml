@@ -10,3 +10,7 @@ ollama:
   base_url: "http://localhost:11434"  # Override per environment via OLLAMA_BASE_URL env var
   timeout: 120           # Seconds per LLM request
 
+# -- URL cleanup --
+url_cleanup:
+  enabled: true          # Strip well-known tracking params (utm_*, fbclid, gclid, ...) at ingest time
+
