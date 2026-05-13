@@ -13,6 +13,7 @@ import { useArticleDerivedState } from "../hooks/useArticleDerivedState"
 import { useArticleKeyboard } from "../hooks/useArticleKeyboard"
 import { useArticleListController } from "../hooks/useArticleListController"
 import { useArticleQueries } from "../hooks/useArticleQueries"
+import { useDocumentTitle } from "../hooks/useDocumentTitle"
 import { useElementHeight } from "../hooks/useElementHeight"
 import { usePendingReads } from "../hooks/usePendingReads"
 import { useSelectionHeader } from "../hooks/useSelectionHeader"
@@ -23,6 +24,7 @@ import {
   TIME_RANGE_OPTIONS,
   type TimeRangeId,
 } from "../utils/articleView"
+import { totalUnread } from "../utils/sidebarView"
 
 export default function Articles(): JSX.Element {
   const queryClient = useQueryClient()
@@ -104,6 +106,9 @@ export default function Articles(): JSX.Element {
       sessionReadUrls,
       localReadCount,
     })
+
+  const unreadTotal: number = totalUnread(unreadCounts)
+  useDocumentTitle(unreadTotal > 0 ? `Stingray (${unreadTotal})` : "Stingray")
 
   // Validate restored selection against current data
   useEffect((): void => {
