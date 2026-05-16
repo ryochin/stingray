@@ -340,7 +340,7 @@ describe("nextUnreadFeedId", () => {
     expect(nextUnreadFeedId(ordered, 1, unread)).toBe(4)
   })
 
-  it("returns null when no subsequent feed has unread", () => {
+  it("returns null when no other feed has unread", () => {
     const ordered: number[] = [1, 2, 3]
     const unread: Map<number, number> = new Map([
       [1, 0],
@@ -350,8 +350,8 @@ describe("nextUnreadFeedId", () => {
     expect(nextUnreadFeedId(ordered, 1, unread)).toBeNull()
   })
 
-  it("returns null when current id is last in order", () => {
-    expect(nextUnreadFeedId([1, 2, 3], 3, new Map([[1, 5]]))).toBeNull()
+  it("wraps to head when current is last and head has unread", () => {
+    expect(nextUnreadFeedId([1, 2, 3], 3, new Map([[1, 5]]))).toBe(1)
   })
 
   it("returns null when current id is not in order", () => {
@@ -363,5 +363,26 @@ describe("nextUnreadFeedId", () => {
     const ordered: number[] = [1, 2, 3]
     const unread: Map<number, number> = new Map([[3, 1]])
     expect(nextUnreadFeedId(ordered, 1, unread)).toBe(3)
+  })
+
+  it("wraps past tail and skips zero-unread feeds at head", () => {
+    const ordered: number[] = [1, 2, 3, 4, 5]
+    const unread: Map<number, number> = new Map([
+      [1, 0],
+      [2, 3],
+      [5, 0],
+    ])
+    // From current=4: 5 has no unread, wrap to 1 (skip), then hit 2.
+    expect(nextUnreadFeedId(ordered, 4, unread)).toBe(2)
+  })
+
+  it("does not return current itself when only current has unread", () => {
+    expect(nextUnreadFeedId([1, 2, 3], 2, new Map([[2, 7]]))).toBeNull()
+  })
+
+  it("returns null when ordered has a single feed (n=1 boundary)", () => {
+    // step < n means the loop body never runs, so current can never be
+    // returned even though it has unread items.
+    expect(nextUnreadFeedId([2], 2, new Map([[2, 7]]))).toBeNull()
   })
 })

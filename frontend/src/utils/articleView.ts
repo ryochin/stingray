@@ -136,7 +136,11 @@ export function deriveUnreadCounts(
 }
 
 // Advance to the next feed in sidebar order that actually has unread items.
-// Returns null if there is no such feed (end of list or current id not in list).
+// Wraps around past the tail back to the head so the user can cycle through
+// unread feeds without getting stuck at the end of the list. The current feed
+// itself is always excluded — bounding the probe to `n - 1` steps guarantees
+// we never return `currentId`. Returns null only when no other feed has
+// unread items, or when `currentId` is not present in `orderedFeedIds`.
 export function nextUnreadFeedId(
   orderedFeedIds: number[],
   currentId: number,
@@ -144,8 +148,9 @@ export function nextUnreadFeedId(
 ): number | null {
   const idx: number = orderedFeedIds.indexOf(currentId)
   if (idx < 0) return null
-  for (let i = idx + 1; i < orderedFeedIds.length; i++) {
-    const fid: number = orderedFeedIds[i]
+  const n: number = orderedFeedIds.length
+  for (let step = 1; step < n; step++) {
+    const fid: number = orderedFeedIds[(idx + step) % n]
     if ((unreadCounts.get(fid) ?? 0) > 0) return fid
   }
   return null

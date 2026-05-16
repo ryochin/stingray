@@ -3,6 +3,7 @@ import { useState } from "react"
 import type { Mock } from "vitest"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Article } from "../api/client"
+import { nextUnreadFeedId } from "../utils/articleView"
 import { useArticleKeyboard } from "./useArticleKeyboard"
 
 function makeArticle(overrides: Partial<Article> & { url: string }): Article {
@@ -205,6 +206,39 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     event = press(" ")
     expect(event.defaultPrevented).toBe(true)
     expect(nextFeed).toHaveBeenCalledTimes(1)
+  })
+
+  it("from the tail feed, jumps to the first unread feed at the head (wrap-around)", (): void => {
+    // End-to-end wiring check: real `nextUnreadFeedId` over orderedFeedIds=
+    // [1,2,3] with current=3 and unread only at feed 1 must resolve to 1 via
+    // the wrap-around path, and Space on the last unread article must invoke
+    // `goToNextFeed` so the route would navigate to feed 1.
+    const orderedFeedIds: number[] = [1, 2, 3]
+    const unread: Map<number, number> = new Map([[1, 5]])
+    const resolvedTargets: number[] = []
+    const goToNextFeed = (): boolean => {
+      const target: number | null = nextUnreadFeedId(orderedFeedIds, 3, unread)
+      if (target == null) return false
+      resolvedTargets.push(target)
+      return true
+    }
+    const articles: Article[] = [makeArticle({ url: "tail", read_at: null })]
+    const focusSpy: Mock = vi.fn()
+
+    render(
+      <Harness
+        filtered={articles}
+        initialFocus={0}
+        goToNextFeed={goToNextFeed}
+        onFocus={focusSpy}
+      />,
+    )
+
+    const event: KeyboardEvent = press(" ")
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(resolvedTargets).toEqual([1])
+    expect(focusSpy).toHaveBeenLastCalledWith(-1)
   })
 
   it("with no unread anywhere after focus, jumps to next feed", (): void => {
