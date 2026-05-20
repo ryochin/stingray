@@ -1,4 +1,4 @@
-import { type JSX, type ReactNode, useEffect, useRef } from "react"
+import { type JSX, type ReactNode, type Ref, useEffect, useRef } from "react"
 
 // Recognised key names in hint strings. Anything outside this set is
 // rendered verbatim (brackets included) so typos surface visibly instead
@@ -39,6 +39,10 @@ interface Props {
    *  bounding-rect, eliminating the scroll oscillation that key-based
    *  remounts caused. */
   pulseKey?: number
+  /** Optional ref forwarded to the outer wrapper so callers (e.g. the
+   *  controller's IntersectionObserver) can observe whether the sentinel
+   *  is on screen. */
+  ref?: Ref<HTMLDivElement>
 }
 
 /** Sparkle icon + label, used by both the end-of-list sentinel and the
@@ -49,6 +53,7 @@ export default function CaughtUpIndicator({
   subLabel,
   className,
   pulseKey,
+  ref,
 }: Props): JSX.Element {
   const innerRef = useRef<HTMLDivElement>(null)
   // Hold the in-flight Animation so rapid j-at-end presses cancel the prior
@@ -78,7 +83,7 @@ export default function CaughtUpIndicator({
   }, [pulseKey])
 
   return (
-    <div className="flex flex-col items-center gap-1.5 py-10">
+    <div ref={ref} className="flex flex-col items-center gap-1.5 py-10">
       <div
         ref={innerRef}
         className={`flex flex-col items-center gap-2 origin-center ${className ?? "text-text-dim/60"}`}

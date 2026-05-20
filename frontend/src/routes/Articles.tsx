@@ -194,6 +194,8 @@ export default function Articles(): JSX.Element {
     onKBeforeMove,
     caughtUpPulseKey,
     caughtUpHint,
+    caughtUpVisible,
+    caughtUpSentinelRef,
   } = useArticleListController({
     filtered,
     focusIndex,
@@ -208,22 +210,6 @@ export default function Articles(): JSX.Element {
     hasSessionRead,
     nextUnreadFeed,
   })
-
-  // Find the next still-unread article after `after` in the current view.
-  // Session-read items count as read so the user is not redirected to an
-  // article they just dismissed via j/m. Kept inline here because it's
-  // only consumed by the keyboard hook below.
-  const nextUnreadInView = useCallback(
-    (after: number): number => {
-      for (let index = after + 1; index < filtered.length; index++) {
-        const article = filtered[index]
-        if (article.read_at == null && !hasSessionRead(article.url))
-          return index
-      }
-      return -1
-    },
-    [filtered, hasSessionRead],
-  )
 
   // Mark all as read mutation
   const markAllReadFeedId: number | undefined =
@@ -265,10 +251,9 @@ export default function Articles(): JSX.Element {
 
   useArticleKeyboard({
     filtered,
-    focusIndex,
     setFocusIndex,
     markFocusedAsRead,
-    nextUnreadInView,
+    canJumpToNextFeed: caughtUpHint === "jump" && caughtUpVisible,
     scheduleRead,
     toggleRead,
     markAllRead: () => markAllRead.mutate(null),
@@ -448,6 +433,7 @@ export default function Articles(): JSX.Element {
                 onTitleClick={scheduleRead}
                 caughtUpPulseKey={caughtUpPulseKey}
                 caughtUpSubLabel={caughtUpSubLabel}
+                caughtUpRef={caughtUpSentinelRef}
               />
             )}
           </div>

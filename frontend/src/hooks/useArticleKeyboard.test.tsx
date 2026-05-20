@@ -39,7 +39,7 @@ function press(key: string): KeyboardEvent {
 interface HarnessProps {
   filtered: Article[]
   initialFocus: number
-  sessionRead?: ReadonlySet<string>
+  canJumpToNextFeed?: boolean
   goToNextFeed: () => boolean
   onFocus?: (i: number) => void
   onMarkRead?: (i: number) => void
@@ -50,7 +50,7 @@ interface HarnessProps {
 function Harness({
   filtered,
   initialFocus,
-  sessionRead = new Set(),
+  canJumpToNextFeed = false,
   goToNextFeed,
   onFocus,
   onMarkRead,
@@ -64,20 +64,12 @@ function Harness({
     if (i < 0 || i >= filtered.length) return
     onMarkRead?.(i)
   }
-  const nextUnreadInView = (after: number): number => {
-    for (let i: number = after + 1; i < filtered.length; i++) {
-      const article: Article = filtered[i]
-      if (article.read_at == null && !sessionRead.has(article.url)) return i
-    }
-    return -1
-  }
 
   useArticleKeyboard({
     filtered,
-    focusIndex,
     setFocusIndex,
     markFocusedAsRead,
-    nextUnreadInView,
+    canJumpToNextFeed,
     scheduleRead: (): void => {},
     toggleRead: (): void => {},
     markAllRead: (): void => {},
@@ -94,12 +86,14 @@ afterEach((): void => {
   document.body.innerHTML = ""
 })
 
-describe("useArticleKeyboard — Space key (regression: feed jump while unread remain)", (): void => {
-  it("does NOT intercept Space when unread articles remain after focus — browser scroll wins", (): void => {
+describe("useArticleKeyboard — Space key (gated by caught-up hint)", (): void => {
+  it("does NOT intercept Space while the hint is hidden — browser scroll wins", (): void => {
+    // Even if there are no unread items left after focus, Space stays inert
+    // until the caught-up hint advertising the shortcut is visible. This
+    // guards against an idle Space at the bottom silently jumping feeds.
     const articles: Article[] = [
       makeArticle({ url: "a", read_at: null }),
-      makeArticle({ url: "b", read_at: null }),
-      makeArticle({ url: "c", read_at: null }),
+      makeArticle({ url: "b", read_at: "2024-01-01T00:00:00Z" }),
     ]
     const focusSpy: Mock = vi.fn()
     const markSpy: Mock = vi.fn()
@@ -107,7 +101,8 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     render(
       <Harness
         filtered={articles}
-        initialFocus={0}
+        initialFocus={1}
+        canJumpToNextFeed={false}
         goToNextFeed={nextFeed}
         onFocus={focusSpy}
         onMarkRead={markSpy}
@@ -119,14 +114,13 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(event.defaultPrevented).toBe(false)
     expect(nextFeed).not.toHaveBeenCalled()
     expect(markSpy).not.toHaveBeenCalled()
-    // Focus stays put — the harness only ever reported the initial value.
-    expect(focusSpy).toHaveBeenLastCalledWith(0)
+    expect(focusSpy).toHaveBeenLastCalledWith(1)
   })
 
-  it("when focus is on the last unread, jumps to the next feed", (): void => {
+  it("jumps to the next feed when the hint flag is enabled", (): void => {
     const articles: Article[] = [
       makeArticle({ url: "a", read_at: "2024-01-01T00:00:00Z" }),
-      makeArticle({ url: "b", read_at: null }), // last unread
+      makeArticle({ url: "b", read_at: null }),
     ]
     const focusSpy: Mock = vi.fn()
     const markSpy: Mock = vi.fn()
@@ -135,6 +129,7 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
       <Harness
         filtered={articles}
         initialFocus={1}
+        canJumpToNextFeed={true}
         goToNextFeed={nextFeed}
         onFocus={focusSpy}
         onMarkRead={markSpy}
@@ -146,7 +141,6 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(event.defaultPrevented).toBe(true)
     expect(nextFeed).toHaveBeenCalledTimes(1)
     expect(markSpy).toHaveBeenCalledWith(1)
-    // Focus is cleared (-1) after a successful feed jump.
     expect(focusSpy).toHaveBeenLastCalledWith(-1)
   })
 
@@ -158,6 +152,7 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
       <Harness
         filtered={articles}
         initialFocus={0}
+        canJumpToNextFeed={true}
         goToNextFeed={nextFeed}
         onFocus={focusSpy}
       />,
@@ -169,21 +164,15 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(focusSpy).toHaveBeenLastCalledWith(0)
   })
 
-  it("session-read items count as read when deciding whether to jump feeds", (): void => {
-    // a is the focus; b is session-read; c is the only true unread remaining.
-    // Because c is unread, Space must NOT be intercepted.
-    const articles: Article[] = [
-      makeArticle({ url: "a", read_at: null }),
-      makeArticle({ url: "b", read_at: null }),
-      makeArticle({ url: "c", read_at: null }),
-    ]
+  it("toggling the hint flag flips Space between inert and active", (): void => {
+    const articles: Article[] = [makeArticle({ url: "a", read_at: null })]
     const focusSpy: Mock = vi.fn()
     const nextFeed: Mock = vi.fn((): boolean => true)
     const { rerender } = render(
       <Harness
         filtered={articles}
         initialFocus={0}
-        sessionRead={new Set(["b"])}
+        canJumpToNextFeed={false}
         goToNextFeed={nextFeed}
         onFocus={focusSpy}
       />,
@@ -193,12 +182,11 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
     expect(event.defaultPrevented).toBe(false)
     expect(nextFeed).not.toHaveBeenCalled()
 
-    // Now mark c session-read too — no real unread left after focus → jump.
     rerender(
       <Harness
         filtered={articles}
         initialFocus={0}
-        sessionRead={new Set(["b", "c"])}
+        canJumpToNextFeed={true}
         goToNextFeed={nextFeed}
         onFocus={focusSpy}
       />,
@@ -211,7 +199,7 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
   it("from the tail feed, jumps to the first unread feed at the head (wrap-around)", (): void => {
     // End-to-end wiring check: real `nextUnreadFeedId` over orderedFeedIds=
     // [1,2,3] with current=3 and unread only at feed 1 must resolve to 1 via
-    // the wrap-around path, and Space on the last unread article must invoke
+    // the wrap-around path, and Space (with the hint visible) must invoke
     // `goToNextFeed` so the route would navigate to feed 1.
     const orderedFeedIds: number[] = [1, 2, 3]
     const unread: Map<number, number> = new Map([[1, 5]])
@@ -229,6 +217,7 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
       <Harness
         filtered={articles}
         initialFocus={0}
+        canJumpToNextFeed={true}
         goToNextFeed={goToNextFeed}
         onFocus={focusSpy}
       />,
@@ -238,30 +227,6 @@ describe("useArticleKeyboard — Space key (regression: feed jump while unread r
 
     expect(event.defaultPrevented).toBe(true)
     expect(resolvedTargets).toEqual([1])
-    expect(focusSpy).toHaveBeenLastCalledWith(-1)
-  })
-
-  it("with no unread anywhere after focus, jumps to next feed", (): void => {
-    const articles: Article[] = [
-      makeArticle({ url: "a", read_at: null }),
-      makeArticle({ url: "b", read_at: "2024-01-01T00:00:00Z" }),
-      makeArticle({ url: "c", read_at: "2024-01-01T00:00:00Z" }),
-    ]
-    const focusSpy: Mock = vi.fn()
-    const nextFeed: Mock = vi.fn((): boolean => true)
-    render(
-      <Harness
-        filtered={articles}
-        initialFocus={0}
-        goToNextFeed={nextFeed}
-        onFocus={focusSpy}
-      />,
-    )
-
-    const event: KeyboardEvent = press(" ")
-
-    expect(event.defaultPrevented).toBe(true)
-    expect(nextFeed).toHaveBeenCalledTimes(1)
     expect(focusSpy).toHaveBeenLastCalledWith(-1)
   })
 })

@@ -22,6 +22,10 @@ interface ArticleListProps {
   /** Optional sub-text rendered below the "All caught up" label. The
    *  controller decides when/what to show; the view just renders it. */
   caughtUpSubLabel?: string
+  /** Ref-callback attached to the sentinel's outer wrapper so callers can
+   *  observe whether it is currently on screen (e.g. for gating the
+   *  Space-key shortcut on actual hint visibility). */
+  caughtUpRef?: (el: HTMLDivElement | null) => void
 }
 
 /** Virtualized renderer for the article list. Owns no state of its own —
@@ -40,6 +44,7 @@ export default function ArticleList({
   onTitleClick,
   caughtUpPulseKey,
   caughtUpSubLabel,
+  caughtUpRef,
 }: ArticleListProps): JSX.Element {
   return (
     <div
@@ -69,6 +74,7 @@ export default function ArticleList({
               }}
             >
               <CaughtUpIndicator
+                ref={caughtUpRef}
                 label="All caught up"
                 pulseKey={caughtUpPulseKey}
                 subLabel={caughtUpSubLabel}

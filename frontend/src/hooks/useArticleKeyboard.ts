@@ -8,10 +8,9 @@ import type { Article } from "../api/client"
 
 interface Options {
   filtered: Article[]
-  focusIndex: number
   setFocusIndex: Dispatch<SetStateAction<number>>
   markFocusedAsRead: (index: number) => void
-  nextUnreadInView: (after: number) => number
+  canJumpToNextFeed: boolean
   scheduleRead: (url: string) => void
   toggleRead: (url: string, isRead: boolean) => void
   markAllRead: () => void
@@ -25,9 +24,14 @@ interface Options {
 /**
  * Global keyboard shortcuts for the Articles view:
  *   j/k   — next/prev article (marks the previous one as read)
- *   Space — when there are no more unread articles after focus in this view,
- *           jump to the next feed that still has unread articles. Otherwise
- *           do not intercept — let the browser scroll naturally.
+ *   Space — only intercepted while the caught-up hint advertising the
+ *           Space shortcut is visible (`canJumpToNextFeed`). In that
+ *           state, jump to the next feed that still has unread articles.
+ *           Otherwise do not intercept — let the browser scroll naturally.
+ *           This deliberately requires the user to surface the hint
+ *           (two j-at-end presses) before Space takes effect, so an
+ *           idle Space at the bottom of the list never silently
+ *           navigates away.
  *   v/o/Enter — open focused article in a new tab
  *   m     — toggle read/unread on focused article
  *   Shift+A — mark all as read
@@ -42,10 +46,9 @@ interface Options {
  */
 export function useArticleKeyboard({
   filtered,
-  focusIndex,
   setFocusIndex,
   markFocusedAsRead,
-  nextUnreadInView,
+  canJumpToNextFeed,
   scheduleRead,
   toggleRead,
   markAllRead,
@@ -72,10 +75,12 @@ export function useArticleKeyboard({
       }
 
       if (e.key === " ") {
-        // Only steal Space when the user has finished the unread items in this
-        // view. While unread items still remain, leave the keystroke alone so
-        // the browser performs its default action (scroll the page down).
-        if (nextUnreadInView(focusIndex) >= 0) return
+        // Only steal Space while the caught-up hint advertising the
+        // shortcut is visible. In every other state — including merely
+        // reaching the bottom of the list — let the browser perform its
+        // default scroll. This prevents an accidental Space at rest from
+        // silently navigating to another feed.
+        if (!canJumpToNextFeed) return
         e.preventDefault()
         // Call goToNextFeed OUTSIDE the setFocusIndex updater so its side
         // effect (setSelection) fires exactly once even under Strict Mode,
@@ -148,10 +153,9 @@ export function useArticleKeyboard({
     },
     [
       filtered,
-      focusIndex,
       setFocusIndex,
       markFocusedAsRead,
-      nextUnreadInView,
+      canJumpToNextFeed,
       scheduleRead,
       toggleRead,
       markAllRead,

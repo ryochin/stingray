@@ -50,6 +50,15 @@ interface UseArticleListControllerResult {
   onKBeforeMove: () => boolean
   caughtUpPulseKey: number
   caughtUpHint: CaughtUpHint
+  /** True iff the caught-up sentinel is currently intersecting the
+   *  scroll viewport. Combined with `caughtUpHint === "jump"` to gate
+   *  the Space-key shortcut on actual on-screen hint visibility — so
+   *  scrolling the sentinel out of view immediately disarms Space. */
+  caughtUpVisible: boolean
+  /** Ref-callback for the sentinel's outer wrapper; the controller
+   *  attaches an `IntersectionObserver` to it to drive
+   *  `caughtUpVisible`. */
+  caughtUpSentinelRef: (el: HTMLDivElement | null) => void
 }
 
 /** Owns the article-list "control plane": virtualizer wiring, focus
@@ -87,6 +96,50 @@ export function useArticleListController({
   // j-at-end press. "jump" advertises the space shortcut to the next unread
   // feed; "end" reports that no further unread feed exists.
   const [caughtUpHint, setCaughtUpHint] = useState<CaughtUpHint>(null)
+  // Whether the caught-up sentinel is intersecting the scroll viewport.
+  // Driven by an IntersectionObserver attached via `caughtUpSentinelRef`
+  // so the Space-key shortcut can be disarmed the moment the sentinel
+  // (and the hint underneath it) leaves the visible area.
+  const [caughtUpVisible, setCaughtUpVisible] = useState<boolean>(false)
+  const caughtUpObserverRef = useRef<IntersectionObserver | null>(null)
+  const caughtUpObservedRef = useRef<Element | null>(null)
+  const caughtUpSentinelRef = useCallback(
+    (el: HTMLDivElement | null): void => {
+      // Drop the previous observation before swapping targets so a stale
+      // entry from the recycled element can't flip visibility after the
+      // new one is already wired up.
+      if (caughtUpObservedRef.current && caughtUpObserverRef.current) {
+        caughtUpObserverRef.current.unobserve(caughtUpObservedRef.current)
+      }
+      caughtUpObservedRef.current = el
+      if (!el) {
+        setCaughtUpVisible(false)
+        return
+      }
+      if (caughtUpObserverRef.current == null) {
+        caughtUpObserverRef.current = new IntersectionObserver(
+          (entries: IntersectionObserverEntry[]): void => {
+            for (const entry of entries) {
+              if (entry.target === caughtUpObservedRef.current) {
+                setCaughtUpVisible(entry.isIntersecting)
+              }
+            }
+          },
+          { root: mainRef.current, threshold: 0 },
+        )
+      }
+      caughtUpObserverRef.current.observe(el)
+    },
+    [mainRef],
+  )
+  useEffect(
+    (): (() => void) => (): void => {
+      caughtUpObserverRef.current?.disconnect()
+      caughtUpObserverRef.current = null
+      caughtUpObservedRef.current = null
+    },
+    [],
+  )
 
   // Any focus movement is treated as "user did something else", so the
   // caught-up pulse counter and hint are cleared. Repeated j-at-end keeps
@@ -369,5 +422,7 @@ export function useArticleListController({
     onKBeforeMove,
     caughtUpPulseKey,
     caughtUpHint,
+    caughtUpVisible,
+    caughtUpSentinelRef,
   }
 }
