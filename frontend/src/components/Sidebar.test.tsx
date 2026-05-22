@@ -133,6 +133,60 @@ describe("Sidebar", () => {
     expect(screen.queryByText("ChildFeed")).toBeNull()
   })
 
+  it("alt-click on any chevron collapses all folders", async (): Promise<void> => {
+    const user: UserEvent = userEvent.setup()
+    renderSidebar({
+      feeds: [
+        feed(1, { name: "FeedA", folder_id: 10 }),
+        feed(2, { name: "FeedB", folder_id: 20 }),
+        feed(3, { name: "FeedC", folder_id: 30 }),
+      ],
+      folders: [folder(10, "Tech"), folder(20, "News"), folder(30, "Misc")],
+    })
+    expect(screen.getByText("FeedA")).toBeInTheDocument()
+    expect(screen.getByText("FeedB")).toBeInTheDocument()
+    expect(screen.getByText("FeedC")).toBeInTheDocument()
+    const firstChevron = screen.getAllByText("\u25BE")[0].closest("button")!
+    await user.keyboard("{Alt>}")
+    await user.click(firstChevron)
+    await user.keyboard("{/Alt}")
+    expect(screen.queryByText("FeedA")).toBeNull()
+    expect(screen.queryByText("FeedB")).toBeNull()
+    expect(screen.queryByText("FeedC")).toBeNull()
+    const saved: string | null = sessionStorage.getItem("collapsed-folders")
+    expect(saved).not.toBeNull()
+    expect(new Set(JSON.parse(saved as string) as number[])).toEqual(
+      new Set([10, 20, 30]),
+    )
+  })
+
+  it("alt-click preserves auto-expansion of the selected feed's folder", async (): Promise<void> => {
+    const user: UserEvent = userEvent.setup()
+    renderSidebar({
+      feeds: [
+        feed(1, { name: "FeedA", folder_id: 10 }),
+        feed(2, { name: "FeedB", folder_id: 20 }),
+      ],
+      folders: [folder(10, "Tech"), folder(20, "News")],
+      selection: { type: "feed", id: 1 },
+    })
+    // Alt-click any chevron. Folder 10 should re-expand because it contains
+    // the selected feed; folder 20 should stay collapsed.
+    const firstChevron = screen.getAllByText("\u25BE")[0].closest("button")!
+    await user.keyboard("{Alt>}")
+    await user.click(firstChevron)
+    await user.keyboard("{/Alt}")
+    expect(screen.getByText("FeedA")).toBeInTheDocument()
+    expect(screen.queryByText("FeedB")).toBeNull()
+    // After useEffect settles, sessionStorage should reflect the on-screen
+    // state: only the non-selected folder remains in `collapsed-folders`.
+    const saved: string | null = sessionStorage.getItem("collapsed-folders")
+    expect(saved).not.toBeNull()
+    expect(new Set(JSON.parse(saved as string) as number[])).toEqual(
+      new Set([20]),
+    )
+  })
+
   it("folder badge shows sum of unread in its feeds", () => {
     renderSidebar({
       feeds: [feed(1, { folder_id: 10 }), feed(2, { folder_id: 10 })],

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import type { JSX } from "react"
+import type { JSX, MouseEvent } from "react"
 import { useEffect, useState } from "react"
 import type { Feed, Folder, Selection } from "../api/client"
 import { api, faviconUrl } from "../api/client"
@@ -111,6 +111,17 @@ export default function Sidebar({
     })
   }
 
+  // Alt+caret bulk-close. Clears autoExpanded by design: any folder currently
+  // open because of a feed selection will be re-expanded by the useEffect
+  // above (mirrors the single-folder collapse behavior for the selected feed).
+  const collapseAll = (): void => {
+    const allIds: number[] = (folders ?? []).map((f: Folder): number => f.id)
+    const next: Set<number> = new Set(allIds)
+    setCollapsed(next)
+    setAutoExpanded(new Set<number>())
+    sessionStorage.setItem("collapsed-folders", JSON.stringify([...next]))
+  }
+
   const isActive = (sel: Selection): boolean => {
     if (selection.type !== sel.type) return false
     if (sel.type === "all") return true
@@ -204,7 +215,10 @@ export default function Sidebar({
             <div className="flex items-center">
               <button
                 type="button"
-                onClick={(): void => toggleCollapse(folder.id)}
+                onClick={(e: MouseEvent<HTMLButtonElement>): void => {
+                  if (e.altKey) collapseAll()
+                  else toggleCollapse(folder.id)
+                }}
                 className="pl-3 pr-1.5 py-1.5 text-text-dim text-base leading-none focus:outline-none"
               >
                 {isOpen ? "\u25BE" : "\u25B8"}
