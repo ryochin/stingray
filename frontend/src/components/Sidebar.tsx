@@ -111,9 +111,11 @@ export default function Sidebar({
     })
   }
 
-  // Alt+caret bulk-close. Clears autoExpanded by design: any folder currently
-  // open because of a feed selection will be re-expanded by the useEffect
-  // above (mirrors the single-folder collapse behavior for the selected feed).
+  // Alt+caret bulk-close. Also keyboard-accessible: focusing a caret and
+  // pressing Alt+Enter (or Alt+Space) fires a click event whose `altKey` is
+  // true, so the same branch below runs. Clears autoExpanded by design: a
+  // folder open because of a feed selection will be re-expanded by the
+  // useEffect above (mirrors single-folder collapse for the selected feed).
   const collapseAll = (): void => {
     const allIds: number[] = (folders ?? []).map((f: Folder): number => f.id)
     const next: Set<number> = new Set(allIds)
@@ -215,6 +217,8 @@ export default function Sidebar({
             <div className="flex items-center">
               <button
                 type="button"
+                aria-label={`${isOpen ? "Collapse" : "Expand"} ${folder.name}`}
+                aria-expanded={isOpen}
                 onClick={(e: MouseEvent<HTMLButtonElement>): void => {
                   if (e.altKey) collapseAll()
                   else toggleCollapse(folder.id)

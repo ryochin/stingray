@@ -120,6 +120,19 @@ describe("Sidebar", () => {
     expect(onSelect).toHaveBeenCalledWith({ type: "feed", id: 1 })
   })
 
+  it("caret button exposes aria-label and aria-expanded reflecting state", async (): Promise<void> => {
+    const user: UserEvent = userEvent.setup()
+    renderSidebar({
+      feeds: [feed(1, { name: "ChildFeed", folder_id: 10 })],
+      folders: [folder(10, "Tech")],
+    })
+    const caret = screen.getByRole("button", { name: "Collapse Tech" })
+    expect(caret).toHaveAttribute("aria-expanded", "true")
+    await user.click(caret)
+    const collapsedCaret = screen.getByRole("button", { name: "Expand Tech" })
+    expect(collapsedCaret).toHaveAttribute("aria-expanded", "false")
+  })
+
   it("collapses a folder on chevron click, hiding child feeds", async (): Promise<void> => {
     const user: UserEvent = userEvent.setup()
     renderSidebar({
