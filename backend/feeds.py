@@ -124,6 +124,17 @@ def extract_site_url(body: str) -> str | None:
   return stripped or None
 
 
+def _normalize_title(text: str) -> str:
+  # Some upstream feeds embed HTML (e.g. <br />) inside <title>. Replace
+  # line-break tags with a space so the surrounding words don't fuse, then
+  # drop any remaining tags and collapse whitespace.
+  text = html.unescape(text)
+  text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
+  text = re.sub(r"<[^>]+>", "", text)
+  text = re.sub(r"\s+", " ", text)
+  return text.strip()
+
+
 def _strip_html(text: str) -> str:
   text = html.unescape(text)
   text = re.sub(r"<[^>]+>", "", text)
@@ -322,7 +333,7 @@ def _parse_rss(
     if thumb_url and thumb_url not in raw_html:
       raw_html = f'<img src="{html.escape(thumb_url)}" alt="" />\n{raw_html}'
 
-    title = html.unescape(entry.get("title", "(no title)"))
+    title = _normalize_title(entry.get("title", "") or "") or "(no title)"
     articles.append(Article(
       title=title,
       url=cleaned_link,
