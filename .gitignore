@@ -324,3 +324,4 @@ dist
 /debug-feeds/*.xml
 .env
 .env.local
+tsconfig.tsbuildinfo
