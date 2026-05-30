@@ -337,3 +337,112 @@ class TestRefreshJobs:
     assert latest is not None
     assert latest.id == second
     assert latest.source == "cron"
+
+
+class TestListArticlesOrderStability:
+  """Tie-breakers in the ORDER BY (`fetched_at DESC, url DESC`) keep the
+  result deterministic when rows share `COALESCE(published, fetched_at)`.
+  The repo `reversed()`s the SQL slice before returning, so within ties the
+  API-visible direction is `fetched_at ASC, url ASC`.
+  """
+
+  def _force_timestamps(
+    self,
+    url: str,
+    *,
+    published: datetime | None,
+    fetched_at: datetime,
+  ) -> None:
+    # `fetched_at` defaults to NOW() on insert, so the test pins it via
+    # UPDATE to construct exact tie configurations without relying on
+    # wall-clock spacing.
+    with db.connection() as conn:
+      conn.execute(
+        "UPDATE articles SET published = %s, fetched_at = %s WHERE url = %s",
+        (published, fetched_at, url),
+      )
+
+  def test_full_tie_order_is_stable_and_url_asc(self):
+    fid = _make_feed()
+    repo.upsert_articles(
+      [_art(url="u-c"), _art(url="u-a"), _art(url="u-b")],
+      {"F": fid},
+    )
+    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc)
+    fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=timezone.utc)
+    for u in ("u-a", "u-b", "u-c"):
+      self._force_timestamps(u, published=pub, fetched_at=fetched)
+
+    first = [r.url for r in repo.list_articles()]
+    second = [r.url for r in repo.list_articles()]
+    assert first == second
+    # API returns oldest-first (`reversed()` after SQL `... url DESC`), so
+    # within a full tie the visible order is `url ASC`.
+    assert first == ["u-a", "u-b", "u-c"]
+
+  def test_limit_boundary_set_is_stable(self):
+    fid = _make_feed()
+    repo.upsert_articles(
+      [_art(url="u-c"), _art(url="u-a"), _art(url="u-b")],
+      {"F": fid},
+    )
+    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc)
+    fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=timezone.utc)
+    for u in ("u-a", "u-b", "u-c"):
+      self._force_timestamps(u, published=pub, fetched_at=fetched)
+
+    # SQL keeps the top `limit` after `... url DESC`, so {u-c, u-b} survive
+    # the cut. Compare as lists so the order within the surviving slice is
+    # locked too — a future change can't silently flip the visible order.
+    first = [r.url for r in repo.list_articles(limit=2)]
+    second = [r.url for r in repo.list_articles(limit=2)]
+    assert first == second
+    # `reversed()` after SQL `... url DESC` → API yields `url ASC` inside
+    # the kept tie group.
+    assert first == ["u-b", "u-c"]
+
+  def test_fetched_at_breaks_published_tie(self):
+    fid = _make_feed()
+    repo.upsert_articles(
+      [_art(url="u-old-fetch"), _art(url="u-new-fetch")],
+      {"F": fid},
+    )
+    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc)
+    self._force_timestamps(
+      "u-old-fetch",
+      published=pub,
+      fetched_at=datetime(2026, 5, 20, 10, 0, 0, tzinfo=timezone.utc),
+    )
+    self._force_timestamps(
+      "u-new-fetch",
+      published=pub,
+      fetched_at=datetime(2026, 5, 20, 14, 0, 0, tzinfo=timezone.utc),
+    )
+
+    # SQL `fetched_at DESC` → newer fetch first; `reversed()` → API yields
+    # older fetch first.
+    urls = [r.url for r in repo.list_articles()]
+    assert urls == ["u-old-fetch", "u-new-fetch"]
+
+  def test_published_null_group_orders_by_fetched_at(self):
+    fid = _make_feed()
+    repo.upsert_articles(
+      [_art(url="u-early"), _art(url="u-late")],
+      {"F": fid},
+    )
+    self._force_timestamps(
+      "u-early",
+      published=None,
+      fetched_at=datetime(2026, 5, 20, 9, 0, 0, tzinfo=timezone.utc),
+    )
+    self._force_timestamps(
+      "u-late",
+      published=None,
+      fetched_at=datetime(2026, 5, 20, 15, 0, 0, tzinfo=timezone.utc),
+    )
+
+    first = [r.url for r in repo.list_articles()]
+    second = [r.url for r in repo.list_articles()]
+    assert first == second
+    # COALESCE falls back to `fetched_at`; API returns oldest-first.
+    assert first == ["u-early", "u-late"]

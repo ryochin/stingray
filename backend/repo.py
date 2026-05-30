@@ -696,9 +696,15 @@ def list_articles(
   # SQL returns newest first so LIMIT keeps the most recent `limit` rows
   # even when total >> limit. Final response is reversed to oldest-first so
   # the UI can render in ascending publication order without re-sorting.
+  # `fetched_at DESC, url DESC` are tie-breakers: without them, rows that
+  # share `COALESCE(published, fetched_at)` (e.g. multiple items from one
+  # fetch batch whose feed emits a coarse-granularity pubDate) come back in
+  # an implementation-defined order that shuffles between requests.
+  # `url` is the PK so the ordering is fully deterministic.
   query = sql.SQL(
     "SELECT * FROM articles {where} "
-    "ORDER BY COALESCE(published, fetched_at) DESC NULLS LAST "
+    "ORDER BY COALESCE(published, fetched_at) DESC NULLS LAST, "
+    "         fetched_at DESC, url DESC "
     "LIMIT %s"
   ).format(where=where)
   with db.connection() as conn:
