@@ -416,7 +416,11 @@ export default function Articles(): JSX.Element {
               <div className="text-text-muted">Loading...</div>
             ) : filtered.length === 0 ? (
               showUnreadOnly ? (
-                <CaughtUpIndicator label="No unread articles" />
+                <CaughtUpIndicator
+                  label="No unread articles"
+                  subLabel={caughtUpSubLabel}
+                  ref={caughtUpSentinelRef}
+                />
               ) : (
                 <div className="text-text-muted">No articles</div>
               )

@@ -412,6 +412,17 @@ export function useArticleListController({
     [markFocusedAsRead, setFocusIndex],
   )
 
+  // A feed with zero unread renders no article cards, so the j-at-end flow
+  // that surfaces the jump hint can't run. In the unread-only empty state,
+  // derive it from whether another unread feed exists; the empty-state
+  // indicator mounts the same sentinel, so `caughtUpVisible` still gates Space.
+  const effectiveCaughtUpHint: CaughtUpHint =
+    showUnreadOnly && filtered.length === 0
+      ? nextUnreadFeed != null
+        ? "jump"
+        : "end"
+      : caughtUpHint
+
   return {
     virtualizer,
     allCaughtUpIndex,
@@ -421,7 +432,7 @@ export function useArticleListController({
     onJAtEnd,
     onKBeforeMove,
     caughtUpPulseKey,
-    caughtUpHint,
+    caughtUpHint: effectiveCaughtUpHint,
     caughtUpVisible,
     caughtUpSentinelRef,
   }

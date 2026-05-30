@@ -97,6 +97,7 @@ interface HarnessProps {
   nextUnreadFeed: number | null
   goToNextFeed: () => boolean
   onReady: (handle: HarnessHandle) => void
+  showUnreadOnly?: boolean
 }
 
 function Harness({
@@ -105,6 +106,7 @@ function Harness({
   nextUnreadFeed,
   goToNextFeed,
   onReady,
+  showUnreadOnly = false,
 }: HarnessProps): JSX.Element {
   const mainRef = useRef<HTMLDivElement | null>(null)
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null)
@@ -119,7 +121,7 @@ function Harness({
     stickyHeaderRef,
     headerHeight: 0,
     selection,
-    showUnreadOnly: false,
+    showUnreadOnly,
     timeRangeId: "all",
     scheduleRead: (): void => {},
     hasSessionRead: (): boolean => false,
@@ -305,5 +307,119 @@ describe("Space-key gating wires through controller + keyboard", (): void => {
     event = pressSpace()
     expect(event.defaultPrevented).toBe(true)
     expect(goToNextFeed).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("Space-key arming on an empty unread feed", (): void => {
+  it("jumps without any j-at-end when the empty-state hint is visible", (): void => {
+    let handle: HarnessHandle | undefined
+    const goToNextFeed = vi.fn((): boolean => true)
+    render(
+      <Harness
+        articles={[]}
+        initialFocus={-1}
+        nextUnreadFeed={42}
+        goToNextFeed={goToNextFeed}
+        showUnreadOnly={true}
+        onReady={(h: HarnessHandle): void => {
+          handle = h
+        }}
+      />,
+    )
+
+    const sentinel: HTMLDivElement = document.createElement("div")
+    document.body.appendChild(sentinel)
+    act((): void => {
+      handle?.sentinelRef(sentinel)
+    })
+    triggerIntersection(sentinel, true)
+
+    const event: KeyboardEvent = pressSpace()
+    expect(event.defaultPrevented).toBe(true)
+    expect(goToNextFeed).toHaveBeenCalledTimes(1)
+  })
+
+  it("with nextUnreadFeed=null, the empty 'end' hint keeps Space inert", (): void => {
+    let handle: HarnessHandle | undefined
+    const goToNextFeed = vi.fn((): boolean => false)
+    render(
+      <Harness
+        articles={[]}
+        initialFocus={-1}
+        nextUnreadFeed={null}
+        goToNextFeed={goToNextFeed}
+        showUnreadOnly={true}
+        onReady={(h: HarnessHandle): void => {
+          handle = h
+        }}
+      />,
+    )
+
+    const sentinel: HTMLDivElement = document.createElement("div")
+    document.body.appendChild(sentinel)
+    act((): void => {
+      handle?.sentinelRef(sentinel)
+    })
+    triggerIntersection(sentinel, true)
+
+    const event: KeyboardEvent = pressSpace()
+    expect(event.defaultPrevented).toBe(false)
+    expect(goToNextFeed).not.toHaveBeenCalled()
+  })
+
+  it("stays inert while the sentinel is out of view", (): void => {
+    let handle: HarnessHandle | undefined
+    const goToNextFeed = vi.fn((): boolean => true)
+    render(
+      <Harness
+        articles={[]}
+        initialFocus={-1}
+        nextUnreadFeed={42}
+        goToNextFeed={goToNextFeed}
+        showUnreadOnly={true}
+        onReady={(h: HarnessHandle): void => {
+          handle = h
+        }}
+      />,
+    )
+
+    const sentinel: HTMLDivElement = document.createElement("div")
+    document.body.appendChild(sentinel)
+    act((): void => {
+      handle?.sentinelRef(sentinel)
+    })
+    triggerIntersection(sentinel, false)
+
+    const event: KeyboardEvent = pressSpace()
+    expect(event.defaultPrevented).toBe(false)
+    expect(goToNextFeed).not.toHaveBeenCalled()
+  })
+
+  it("does not arm in the All filter (showUnreadOnly=false) empty list", (): void => {
+    let handle: HarnessHandle | undefined
+    const goToNextFeed = vi.fn((): boolean => true)
+    render(
+      <Harness
+        articles={[]}
+        initialFocus={-1}
+        nextUnreadFeed={42}
+        goToNextFeed={goToNextFeed}
+        showUnreadOnly={false}
+        onReady={(h: HarnessHandle): void => {
+          handle = h
+        }}
+      />,
+    )
+
+    const sentinel: HTMLDivElement = document.createElement("div")
+    document.body.appendChild(sentinel)
+    act((): void => {
+      handle?.sentinelRef(sentinel)
+    })
+    triggerIntersection(sentinel, true)
+
+    const event: KeyboardEvent = pressSpace()
+    expect(event.defaultPrevented).toBe(false)
+    expect(goToNextFeed).not.toHaveBeenCalled()
   })
 })
