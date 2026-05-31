@@ -141,6 +141,15 @@ export default function Articles(): JSX.Element {
   useEffect((): void => {
     setFocusIndex(-1)
     mainRef.current?.scrollTo({ top: 0 })
+    // Move DOM focus into the scroll container so the browser's native
+    // Space/PageDown scrolling has a target. The app scrolls inside <main>
+    // (overflow-y-auto) rather than the document, so on open — or after a
+    // feed/filter switch — focus would otherwise sit on <body> and Space
+    // would do nothing until the user clicks into the list. preventScroll
+    // keeps this from fighting the scroll-to-top above or the focus-driven
+    // smooth scroll. Cards (tabIndex=0) take over focus once clicked, and
+    // their Space falls through to the same native scroll.
+    mainRef.current?.focus({ preventScroll: true })
   }, [selection, showUnreadOnly, timeRangeId])
 
   // Auto-focus the first article whenever focus is cleared and there is
@@ -294,7 +303,8 @@ export default function Articles(): JSX.Element {
         />
         <main
           ref={mainRef}
-          className="flex-1 overflow-y-auto px-4 pb-2 flex flex-col items-center"
+          tabIndex={-1}
+          className="flex-1 overflow-y-auto px-4 pb-2 flex flex-col items-center outline-none"
         >
           <div className="w-[95%] max-w-4xl pl-1">
             <div ref={stickySentinelRef} aria-hidden className="h-0" />

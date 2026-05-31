@@ -196,6 +196,95 @@ describe("useArticleKeyboard — Space key (gated by caught-up hint)", (): void 
     expect(nextFeed).toHaveBeenCalledTimes(1)
   })
 
+  it("Shift+Space is never stolen — preserves browser PageUp", (): void => {
+    const articles: Article[] = [makeArticle({ url: "a", read_at: null })]
+    const nextFeed: Mock = vi.fn((): boolean => true)
+    render(
+      <Harness
+        filtered={articles}
+        initialFocus={0}
+        canJumpToNextFeed={true}
+        goToNextFeed={nextFeed}
+      />,
+    )
+
+    const event: KeyboardEvent = new KeyboardEvent("keydown", {
+      key: " ",
+      bubbles: true,
+      cancelable: true,
+      shiftKey: true,
+    })
+    act((): void => {
+      document.body.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(nextFeed).not.toHaveBeenCalled()
+  })
+
+  it("Space on a native <button> defers to default activation", (): void => {
+    const articles: Article[] = [makeArticle({ url: "a", read_at: null })]
+    const nextFeed: Mock = vi.fn((): boolean => true)
+    render(
+      <Harness
+        filtered={articles}
+        initialFocus={0}
+        canJumpToNextFeed={true}
+        goToNextFeed={nextFeed}
+      />,
+    )
+
+    const button: HTMLButtonElement = document.createElement("button")
+    document.body.appendChild(button)
+    const event: KeyboardEvent = new KeyboardEvent("keydown", {
+      key: " ",
+      bubbles: true,
+      cancelable: true,
+    })
+    act((): void => {
+      button.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(nextFeed).not.toHaveBeenCalled()
+  })
+
+  it("Space whose defaultPrevented is already true is skipped", (): void => {
+    const articles: Article[] = [makeArticle({ url: "a", read_at: null })]
+    const nextFeed: Mock = vi.fn((): boolean => true)
+    render(
+      <Harness
+        filtered={articles}
+        initialFocus={0}
+        canJumpToNextFeed={true}
+        goToNextFeed={nextFeed}
+      />,
+    )
+
+    const target: HTMLDivElement = document.createElement("div")
+    document.body.appendChild(target)
+    // Pre-handle the event on the way up: a capture-phase listener on the
+    // parent calls preventDefault, mirroring an overlay that consumed Space.
+    document.body.addEventListener(
+      "keydown",
+      (e: Event): void => {
+        e.preventDefault()
+      },
+      { capture: true, once: true },
+    )
+    const event: KeyboardEvent = new KeyboardEvent("keydown", {
+      key: " ",
+      bubbles: true,
+      cancelable: true,
+    })
+    act((): void => {
+      target.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(nextFeed).not.toHaveBeenCalled()
+  })
+
   it("from the tail feed, jumps to the first unread feed at the head (wrap-around)", (): void => {
     // End-to-end wiring check: real `nextUnreadFeedId` over orderedFeedIds=
     // [1,2,3] with current=3 and unread only at feed 1 must resolve to 1 via

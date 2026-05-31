@@ -1,8 +1,9 @@
-import { act, render } from "@testing-library/react"
+import { act, fireEvent, render } from "@testing-library/react"
 import type { JSX } from "react"
 import { useRef, useState } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Article, Selection } from "../api/client"
+import ArticleCard from "../components/ArticleCard"
 import { useArticleKeyboard } from "./useArticleKeyboard"
 import { useArticleListController } from "./useArticleListController"
 
@@ -393,6 +394,50 @@ describe("Space-key arming on an empty unread feed", (): void => {
     const event: KeyboardEvent = pressSpace()
     expect(event.defaultPrevented).toBe(false)
     expect(goToNextFeed).not.toHaveBeenCalled()
+  })
+
+  it("focused ArticleCard Space falls through to the global jump handler", (): void => {
+    // Regression: ArticleCard used to preventDefault on Space, which broke
+    // both browser page-scroll AND the global feed-jump shortcut while the
+    // card had keyboard focus. Verify the card now lets Space bubble to
+    // window so the existing caught-up gate can take the jump.
+    let handle: HarnessHandle | undefined
+    const goToNextFeed = vi.fn((): boolean => true)
+    const cardClick = vi.fn()
+    const { container } = render(
+      <div>
+        <Harness
+          articles={[]}
+          initialFocus={-1}
+          nextUnreadFeed={42}
+          goToNextFeed={goToNextFeed}
+          showUnreadOnly={true}
+          onReady={(h: HarnessHandle): void => {
+            handle = h
+          }}
+        />
+        <ArticleCard
+          article={makeArticle({ url: "x", read_at: null })}
+          onClick={cardClick}
+        />
+      </div>,
+    )
+
+    const sentinel: HTMLDivElement = document.createElement("div")
+    document.body.appendChild(sentinel)
+    act((): void => {
+      handle?.sentinelRef(sentinel)
+    })
+    triggerIntersection(sentinel, true)
+
+    const card = container.querySelector('[role="button"]') as HTMLElement
+    expect(card).not.toBeNull()
+    // Space from the card must NOT activate the card's onClick (Enter does
+    // that) and must bubble up to window, which jumps to the next feed.
+    fireEvent.keyDown(card, { key: " ", bubbles: true, cancelable: true })
+
+    expect(cardClick).not.toHaveBeenCalled()
+    expect(goToNextFeed).toHaveBeenCalledTimes(1)
   })
 
   it("does not arm in the All filter (showUnreadOnly=false) empty list", (): void => {

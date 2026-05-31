@@ -127,7 +127,9 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
         tabIndex={0}
         onClick={onClick}
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>): void => {
-          if (onClick && (event.key === "Enter" || event.key === " ")) {
+          // Space is intentionally not handled here so the browser default
+          // (page scroll) or the global feed-jump shortcut can take over.
+          if (onClick && event.key === "Enter") {
             event.preventDefault()
             onClick()
           }

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 import userEvent from "@testing-library/user-event"
 import type { Mock } from "vitest"
@@ -132,5 +132,31 @@ describe("ArticleCard", () => {
     )
     await user.click(container.firstElementChild as HTMLElement)
     expect(onClick).toHaveBeenCalled()
+  })
+
+  it("does not consume Space (lets browser scroll / global shortcut take over)", () => {
+    const onClick: Mock = vi.fn()
+    const { container } = render(
+      <ArticleCard article={article()} onClick={onClick} />,
+    )
+    const card = container.firstElementChild as HTMLElement
+    // fireEvent.keyDown uses dispatchEvent under the hood and reports
+    // whether preventDefault was called via the returned bool.
+    const notPrevented = fireEvent.keyDown(card, { key: " " })
+    expect(onClick).not.toHaveBeenCalled()
+    // fireEvent returns true when the event was NOT canceled (i.e. no
+    // preventDefault), which is what we want for Space to scroll.
+    expect(notPrevented).toBe(true)
+  })
+
+  it("still fires onClick on Enter (and prevents default)", () => {
+    const onClick: Mock = vi.fn()
+    const { container } = render(
+      <ArticleCard article={article()} onClick={onClick} />,
+    )
+    const card = container.firstElementChild as HTMLElement
+    const notPrevented = fireEvent.keyDown(card, { key: "Enter" })
+    expect(onClick).toHaveBeenCalledTimes(1)
+    expect(notPrevented).toBe(false)
   })
 })

@@ -1,4 +1,5 @@
 import type { JSX, KeyboardEvent, MouseEvent } from "react"
+import { useEffect, useRef } from "react"
 
 interface Props {
   onClose: () => void
@@ -19,6 +20,22 @@ const SHORTCUTS: readonly (readonly [string, string])[] = [
 
 /** Keyboard shortcut cheatsheet shown when the user presses `?`. */
 export default function ShortcutsHelp({ onClose }: Props): JSX.Element {
+  const overlayRef = useRef<HTMLDivElement>(null)
+
+  // Pull focus into the overlay while it's open so its own keydown handler
+  // owns Space/Enter/Escape. Otherwise focus stays on the scroll container
+  // (<main>) and a Space behind the dialog would natively scroll the list
+  // or trigger the feed-jump shortcut. Restore the previously focused
+  // element on close so Space-scroll keeps working where the user left off.
+  useEffect((): (() => void) => {
+    const prevActive: HTMLElement | null =
+      document.activeElement as HTMLElement | null
+    overlayRef.current?.focus()
+    return (): void => {
+      prevActive?.focus({ preventScroll: true })
+    }
+  }, [])
+
   const handleOverlayKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "Enter" || event.key === " " || event.key === "Escape") {
       event.preventDefault()
@@ -33,7 +50,8 @@ export default function ShortcutsHelp({ onClose }: Props): JSX.Element {
   return (
     // biome-ignore lint/a11y/useSemanticElements: cannot use <button> because the overlay wraps a dialog with table/structured content (HTML5 disallows interactive content nesting)
     <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+      ref={overlayRef}
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 outline-none"
       role="button"
       tabIndex={0}
       aria-label="Close keyboard shortcuts help"

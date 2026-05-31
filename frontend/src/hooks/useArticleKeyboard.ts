@@ -75,6 +75,17 @@ export function useArticleKeyboard({
       }
 
       if (e.key === " ") {
+        // Leave Shift+Space (PageUp) and events another handler already
+        // processed (e.g. ShortcutsHelp overlay close) to their owners.
+        if (e.shiftKey || e.defaultPrevented) return
+        // Respect focus on a native <button>: its browser-default Space
+        // activation (Unread/All toggle, MarkAllReadMenu items, etc.) must
+        // win over the feed-jump shortcut. role="button" divs are not
+        // matched here on purpose — ArticleCard wants Space to fall through
+        // to this handler, and ShortcutsHelp overlays self-handle Space
+        // via preventDefault and are covered by the guard above.
+        const targetEl = e.target as HTMLElement | null
+        if (targetEl?.closest("button")) return
         // Only steal Space while the caught-up hint advertising the
         // shortcut is visible. In every other state — including merely
         // reaching the bottom of the list — let the browser perform its
