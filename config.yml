@@ -5,9 +5,9 @@ cache_dir: "cache"                 # Cache directory
 article_cache_max_age_days: 0      # Days to keep article cache (0 = keep forever)
 
 # -- LLM (Ollama) --
+# The server URL lives in `.env` as OLLAMA_BASE_URL (it varies per host).
 ollama:
   model: "gemma4:e4b"
-  base_url: "http://localhost:11434"  # Override per environment via OLLAMA_BASE_URL env var
   timeout: 120           # Seconds per LLM request
 
 # -- URL cleanup --
