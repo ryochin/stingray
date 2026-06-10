@@ -304,7 +304,11 @@ export default function Articles(): JSX.Element {
         <main
           ref={mainRef}
           tabIndex={-1}
-          className="flex-1 overflow-y-auto px-4 pb-2 flex flex-col items-center outline-none"
+          // `[overflow-anchor:none]`: browser scroll anchoring can double-apply
+          // with the virtualizer's own scrollAdjustment on above-viewport item
+          // resizes (lazy images, late content_html), so hand scrollTop control
+          // solely to the virtualizer.
+          className="flex-1 overflow-y-auto px-4 pb-2 flex flex-col items-center outline-none [overflow-anchor:none]"
         >
           <div className="w-[95%] max-w-4xl pl-1">
             <div ref={stickySentinelRef} aria-hidden className="h-0" />

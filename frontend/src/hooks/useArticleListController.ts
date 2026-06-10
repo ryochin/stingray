@@ -1,4 +1,4 @@
-import type { Virtualizer } from "@tanstack/react-virtual"
+import type { VirtualItem, Virtualizer } from "@tanstack/react-virtual"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import type { Dispatch, RefObject, SetStateAction } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -9,6 +9,30 @@ import { smoothScrollTo } from "../utils/smoothScroll"
 import { useFocusStabilizer } from "./useFocusStabilizer"
 
 type CaughtUpHint = "jump" | "end" | null
+
+// Gate the virtualizer's scroll-position correction. Lazy images / late
+// content_html resize cards mid-scroll; if the virtualizer writes scrollTop
+// to keep above-viewport content pinned *during* an active scroll, that write
+// fights momentum scrolling and surfaces as a rapid up/down jitter (confirmed
+// via a temporary scroll-jitter probe). So skip the correction while
+// `isScrolling`, and otherwise mirror virtual-core's default gate exactly:
+// `item.start < scrollOffset + scrollAdjustments`. The accumulated
+// `scrollAdjustments` term matters when several cards resize back-to-back
+// while idle (no scroll event between them resets it), so dropping it would
+// miss corrections for items straddling the boundary. It is a private field,
+// read defensively so a library rename degrades to the unadjusted gate rather
+// than throwing. Pure over its args, so it lives at module scope.
+function adjustScrollOnlyWhenIdle(
+  item: VirtualItem,
+  _delta: number,
+  instance: Virtualizer<HTMLElement, Element>,
+): boolean {
+  if (instance.isScrolling) return false
+  const scrollAdjustments: number =
+    (instance as unknown as { scrollAdjustments?: number }).scrollAdjustments ??
+    0
+  return item.start < (instance.scrollOffset ?? 0) + scrollAdjustments
+}
 
 interface UseArticleListControllerInput {
   filtered: Article[]
@@ -178,6 +202,11 @@ export function useArticleListController({
         ? "__all_caught_up__"
         : (filtered[index]?.url ?? index),
   })
+  // Not a constructor option — it's a public instance field the core only
+  // reads (default: undefined → library default). Assigning the stable
+  // module-level fn each render is idempotent and survives option updates.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange =
+    adjustScrollOnlyWhenIdle
 
   const skipFocusScroll = useFocusStabilizer({
     filtered,
