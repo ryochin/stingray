@@ -13,6 +13,7 @@
     "format": "biome format --write"
   },
   "dependencies": {
+    "@fontsource-variable/mulish": "^5.2.8",
     "@tanstack/react-query": "^5",
     "@tanstack/react-virtual": "^3.13.24",
     "dompurify": "^3.4.0",

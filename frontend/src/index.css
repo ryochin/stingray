@@ -17,6 +17,7 @@
   --color-warn-text: #f0c09c;
   --color-link: #8899aa;
   --color-link-hover: #aabbcc;
+  --font-display: "Mulish Variable", sans-serif;
 }
 
 body {

@@ -28,14 +28,24 @@ export default function Header(): JSX.Element {
 
   return (
     <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-bg-secondary shrink-0">
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-6 -ml-2">
         <Link
           to="/"
-          className="text-xl font-semibold text-text-heading no-underline"
+          className="flex items-center gap-2 font-display text-xl font-[250] tracking-wide text-text-heading no-underline"
         >
+          {/* logo.png 120×80 (1x) / logo@2x.png 240×160 (2x); rendered at the
+              heading font-size via h-5, width auto-keeps the 3:2 aspect ratio. */}
+          <img
+            src="/logo.png"
+            srcSet="/logo.png 1x, /logo@2x.png 2x"
+            width={120}
+            height={80}
+            alt=""
+            className="h-5 w-auto shrink-0"
+          />
           Stingray
         </Link>
-        <nav className="flex gap-4 text-sm">
+        <nav className="relative top-0.5 flex gap-4 text-sm">
           <Link to="/" className="text-text-muted hover:text-text no-underline">
             Articles
           </Link>
