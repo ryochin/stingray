@@ -132,7 +132,7 @@ export default function Sidebar({
 
   const btnClass = (active: boolean): string =>
     `flex justify-between items-center w-full px-4 py-1.5 text-xs text-left transition-colors cursor-pointer focus:outline-none ${
-      active ? "text-accent-text" : "text-text-muted hover:text-text"
+      active ? "text-accent-text" : "text-[#bcbcbc] hover:text-text"
     }`
 
   const badgeClass = (active: boolean): string =>

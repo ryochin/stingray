@@ -79,7 +79,7 @@ export default function ArticleList({
                 pulseKey={caughtUpPulseKey}
                 subLabel={caughtUpSubLabel}
                 className={
-                  caughtUpPulseKey > 0 ? "text-text" : "text-text-dim/60"
+                  caughtUpPulseKey > 0 ? "text-text" : "text-text-muted"
                 }
               />
             </div>

@@ -86,7 +86,7 @@ export default function CaughtUpIndicator({
     <div ref={ref} className="flex flex-col items-center gap-1.5 py-10">
       <div
         ref={innerRef}
-        className={`flex flex-col items-center gap-2 origin-center ${className ?? "text-text-dim/60"}`}
+        className={`flex flex-col items-center gap-2 origin-center ${className ?? "text-text-muted"}`}
       >
         <svg
           className="w-7 h-7 text-accent-text/70"
@@ -112,7 +112,7 @@ export default function CaughtUpIndicator({
         // the hint text appears or switches variant. The outer wrapper is
         // unaffected because `min-h-[1rem]` reserves the line either way.
         key={subLabel ?? "off"}
-        className={`text-xs text-text-dim min-h-[1rem] whitespace-nowrap ${subLabel ? "animate-caught-up-hint-fade" : ""}`}
+        className={`text-xs text-text-muted min-h-[1rem] whitespace-nowrap ${subLabel ? "animate-caught-up-hint-fade" : ""}`}
       >
         {subLabel ? renderHintWithKeys(subLabel) : " "}
       </span>

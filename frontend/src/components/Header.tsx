@@ -74,7 +74,7 @@ export default function Header(): JSX.Element {
             </span>
           ) : status.llm_available ? (
             <span
-              className="flex items-center gap-1 text-text-dim"
+              className="flex items-center gap-1 text-text-muted"
               title="LLM online"
             >
               <span
@@ -99,7 +99,7 @@ export default function Header(): JSX.Element {
           <span className="text-accent animate-pulse">Fetching...</span>
         )}
         {status?.last_finished_at && !status.running && (
-          <span className="text-text-dim">
+          <span className="text-text-muted">
             {formatTime(status.last_finished_at)}
             {status.last_new_count != null && ` / ${status.last_new_count} new`}
           </span>
