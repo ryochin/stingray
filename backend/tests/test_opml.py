@@ -114,9 +114,7 @@ class TestParseOpmlStructure:
     assert uncat == []
 
   def test_web_feed_uses_html_url(self):
-    # Web-type feeds must sit inside a folder: at body-level, parse_opml
-    # treats "no xmlUrl" as a folder marker, so a top-level web outline would
-    # be parsed as an empty folder and dropped. Document that by wrapping.
+    # A web-type feed nested in a folder is parsed from its htmlUrl.
     xml = """<?xml version="1.0"?>
     <opml version="2.0"><body>
       <outline text="Web">
@@ -139,15 +137,33 @@ class TestParseOpmlStructure:
     folders, _ = opml.parse_opml(xml)
     assert folders[0].feeds[0].extraction_rules == "{}"
 
-  def test_top_level_web_feed_is_misparsed_as_empty_folder(self):
-    # Regression marker: known limitation — web feeds at top level are
-    # swallowed because body-level outlines without xmlUrl become folders.
+  def test_top_level_web_feed_imported_as_uncategorized(self):
+    # Folderless web feeds carry htmlUrl without xmlUrl; they must still be
+    # recognized as feeds instead of being swallowed as empty folders.
     xml = """<?xml version="1.0"?>
     <opml version="2.0"><body>
       <outline type="web" text="Top" htmlUrl="https://example.com/page"/>
     </body></opml>"""
     folders, uncat = opml.parse_opml(xml)
-    assert folders == [] and uncat == []
+    assert folders == []
+    assert len(uncat) == 1
+    assert uncat[0].url == "https://example.com/page"
+    assert uncat[0].extraction_rules == "{}"
+
+  def test_web_typed_outline_with_children_is_folder(self):
+    # An outline carrying type="web"/htmlUrl but containing child outlines is
+    # a folder, not a leaf feed — its children must still be imported.
+    xml = """<?xml version="1.0"?>
+    <opml version="2.0"><body>
+      <outline type="web" text="Folder" htmlUrl="https://example.com/">
+        <outline type="rss" text="Child" xmlUrl="https://example.com/rss"/>
+      </outline>
+    </body></opml>"""
+    folders, uncat = opml.parse_opml(xml)
+    assert uncat == []
+    assert len(folders) == 1
+    assert folders[0].name == "Folder"
+    assert [f.url for f in folders[0].feeds] == ["https://example.com/rss"]
 
 
 class TestExportOpml:
@@ -175,3 +191,13 @@ class TestExportOpml:
     by_name = {f.name: f for f in parsed}
     assert by_name["F1"].translate is True
     assert by_name["F2"].translate is False
+
+  def test_round_trip_preserves_top_level_web_feed(self):
+    rules = '{"item": ".x", "title": ".t", "link": ".t"}'
+    feeds = [_feed(name="W", url="https://example.com/page", extraction_rules=rules)]
+    xml = opml.export_opml([], feeds)
+    folders, uncat = opml.parse_opml(xml)
+    assert folders == []
+    assert len(uncat) == 1
+    assert uncat[0].url == "https://example.com/page"
+    assert uncat[0].extraction_rules == rules

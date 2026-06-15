@@ -101,8 +101,7 @@ def parse_opml(
   uncategorized: list[ImportFeed] = []
 
   for outline in body:
-    xml_url = outline.get("xmlUrl")
-    if xml_url:
+    if _is_feed_outline(outline):
       feed = _parse_feed_outline(outline, native_lang)
       if feed:
         uncategorized.append(feed)
@@ -116,6 +115,23 @@ def parse_opml(
         folders.append(folder)
 
   return folders, uncategorized
+
+
+def _is_feed_outline(el: ET.Element) -> bool:
+  """Whether a body-level outline is a feed (vs. a folder containing feeds).
+
+  RSS feeds carry xmlUrl; web-page feeds carry type="web" with htmlUrl. A
+  folderless web feed has only htmlUrl, so it must be detected here too —
+  otherwise it is mistaken for an empty folder and dropped on import.
+
+  An outline that contains child outlines is always a folder, even when it
+  also carries a type/htmlUrl, so its children are not swallowed.
+  """
+  if any(child.tag == "outline" for child in el):
+    return False
+  if el.get("xmlUrl"):
+    return True
+  return el.get("type") == "web" and bool(el.get("htmlUrl"))
 
 
 def _parse_feed_outline(el: ET.Element, native_lang: str) -> ImportFeed | None:
