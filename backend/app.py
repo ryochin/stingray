@@ -274,7 +274,7 @@ class ProbeResult:
   site_url: str | None = None
   is_web_page: bool = False
   html: str = ""
-  feed_candidates: list[dict[str, str]] = field(default_factory=list)
+  feed_candidates: list[dict[str, str]] = field(default_factory=list["dict[str, str]"])
 
 
 def _is_html(content_type: str, body: str) -> bool:
@@ -324,7 +324,7 @@ async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
         title = title_match.group(1).strip() if title_match else None
         # Resolve candidates against the response URL so redirects don't confuse relative hrefs.
         final_url = str(resp.url) or url
-        candidates = extract_feed_candidates(body, final_url)
+        candidates: list[dict[str, str]] = extract_feed_candidates(body, final_url)
         return ProbeResult(
           title=title,
           translate=False,

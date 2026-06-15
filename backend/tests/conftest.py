@@ -6,7 +6,9 @@ DB fixtures give Rails-like isolation:
   - function fixture `clean_db` truncates all tables between tests.
   - Tests opt in by requesting `clean_db` (which depends on `db_session`);
     pure unit tests (lang, opml) skip DB plumbing entirely.
-  - If Postgres is unreachable, DB-requiring tests skip rather than fail.
+  - If Postgres is unreachable, DB-requiring tests skip rather than fail,
+    unless REQUIRE_DB is set (CI) — then they fail loudly so a misconfigured
+    database never masquerades as a green run.
 """
 
 from __future__ import annotations
@@ -58,6 +60,8 @@ def db_session():
   try:
     _ensure_test_db(test_url)
   except psycopg.OperationalError as e:
+    if os.environ.get("REQUIRE_DB"):
+      raise
     pytest.skip(f"Postgres unreachable ({test_url}): {e}")
   db.configure(test_url)
   db.init_schema()
