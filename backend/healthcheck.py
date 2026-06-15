@@ -2,7 +2,8 @@
 
 Checks:
   1. Database reachable (SELECT 1).
-  2. LLM backend (Ollama) reachable at OLLAMA_BASE_URL.
+  2. LLM backend (Ollama) reachable at OLLAMA_BASE_URL. Skipped when config.yml
+     sets ollama.enabled=false (or --skip-llm-check is passed).
   3. Latest refresh_jobs.finished_at is recent (within MAX_AGE_MINUTES).
      If no job record exists yet, treated as a startup grace period and passes.
 
@@ -15,11 +16,28 @@ import argparse
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
+import yaml
 
 import db
 import repo
+from schemas import AppConfig
+
+
+def _load_config() -> AppConfig:
+  # Mirror main.py's strictness: a config.yml the fetcher would reject (non-
+  # mapping YAML) must surface as unhealthy here too, rather than silently
+  # falling back to defaults and masking a fetcher that cannot start.
+  config_path = Path("config.yml")
+  if not config_path.exists():
+    return AppConfig()
+  with open(config_path, encoding="utf-8") as f:
+    raw: object = yaml.safe_load(f)
+  if not isinstance(raw, dict):
+    raise ValueError(f"config file is not a valid YAML mapping: {config_path}")
+  return AppConfig.model_validate(raw)
 
 
 def _check_db() -> None:
@@ -67,12 +85,22 @@ def main() -> int:
     print(f"healthcheck: db: {type(e).__name__}: {e}", file=sys.stderr)
     return 1
 
+  # Skip the LLM probe when summarization/translation is turned off in config —
+  # otherwise the fetcher would report unhealthy on a deployment with no Ollama.
+  # Config is read only here (never under --skip-llm-check), so skipping the LLM
+  # probe also skips config parsing entirely.
   if not args.skip_llm_check:
     try:
-      _check_llm(base_url, timeout=args.llm_timeout)
+      llm_enabled = _load_config().ollama.enabled
     except Exception as e:
-      print(f"healthcheck: llm ({base_url}): {type(e).__name__}: {e}", file=sys.stderr)
+      print(f"healthcheck: config: {type(e).__name__}: {e}", file=sys.stderr)
       return 1
+    if llm_enabled:
+      try:
+        _check_llm(base_url, timeout=args.llm_timeout)
+      except Exception as e:
+        print(f"healthcheck: llm ({base_url}): {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
 
   if not args.skip_job_check:
     try:
