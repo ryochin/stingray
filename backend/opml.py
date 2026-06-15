@@ -62,13 +62,18 @@ def _add_feed_outline(parent: ET.Element, feed: FeedRow) -> None:
     "text": feed.name,
     "title": feed.name,
   }
-  if feed.url:
-    if is_web:
-      attrs["htmlUrl"] = feed.url
-    else:
+  if is_web:
+    # htmlUrl IS the scrape target for web feeds: prefer url, fall back to
+    # site_url so a url-less feed still round-trips. site_url must never
+    # clobber a present url, or scraping would be redirected to the site root.
+    scrape_url = feed.url or feed.site_url
+    if scrape_url:
+      attrs["htmlUrl"] = scrape_url
+  else:
+    if feed.url:
       attrs["xmlUrl"] = feed.url
-  if feed.site_url:
-    attrs["htmlUrl"] = feed.site_url
+    if feed.site_url:
+      attrs["htmlUrl"] = feed.site_url
   if feed.translate:
     attrs["data-translate"] = "1"
   if feed.summarize:

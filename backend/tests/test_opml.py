@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import opml
 from schemas import FeedRow, FolderRow
 
@@ -184,6 +186,41 @@ class TestExportOpml:
     xml = opml.export_opml([_folder(id=1, name="Empty")], [])
     assert 'text="Empty"' not in xml
 
+  def test_rss_feed_emits_site_url_as_html_url(self):
+    # RSS feeds expose both the feed URL (xmlUrl) and the site URL (htmlUrl).
+    feed = _feed(url="https://example.com/rss", site_url="https://example.com/")
+    xml = opml.export_opml([], [feed])
+    assert 'xmlUrl="https://example.com/rss"' in xml
+    assert 'htmlUrl="https://example.com/"' in xml
+
+  # Any non-None extraction_rules marks a web feed (incl. "" and the "{}"
+  # default a feed carries right after creation), so htmlUrl must stay the
+  # scrape target (url) for all of them, never the differing site_url.
+  @pytest.mark.parametrize("rules", ["", "{}", '{"item": ".x", "title": ".t", "link": ".t"}'])
+  def test_web_feed_html_url_keeps_url_not_site_url(self, rules: str):
+    feed = _feed(
+      url="https://example.com/articles",
+      site_url="https://example.com/",
+      extraction_rules=rules,
+    )
+    xml = opml.export_opml([], [feed])
+    assert 'htmlUrl="https://example.com/articles"' in xml
+    assert 'htmlUrl="https://example.com/"' not in xml
+
+  def test_url_less_web_feed_falls_back_to_site_url(self):
+    # A web feed without a scrape url must still emit htmlUrl from site_url,
+    # or it would be silently dropped on re-import.
+    feed = _feed(url=None, site_url="https://example.com/", extraction_rules="{}")
+    xml = opml.export_opml([], [feed])
+    assert 'htmlUrl="https://example.com/"' in xml
+
+  def test_url_less_rss_feed_emits_site_url_as_html_url(self):
+    # A url-less RSS feed (legacy/hand-entered) keeps exporting its site_url.
+    feed = _feed(url=None, site_url="https://example.com/")
+    xml = opml.export_opml([], [feed])
+    assert 'htmlUrl="https://example.com/"' in xml
+    assert "xmlUrl" not in xml
+
   def test_round_trip_preserves_translate(self):
     feeds = [_feed(name="F1", translate=True), _feed(id=2, name="F2", translate=False, url="https://example.jp/")]
     xml = opml.export_opml([], feeds)
@@ -200,4 +237,22 @@ class TestExportOpml:
     assert folders == []
     assert len(uncat) == 1
     assert uncat[0].url == "https://example.com/page"
+    assert uncat[0].extraction_rules == rules
+
+  def test_round_trip_preserves_web_scrape_url_distinct_from_site_url(self):
+    # When a web feed's scrape target differs from its site_url, the round-trip
+    # must keep scraping the original page rather than the site root.
+    rules = '{"item": ".x", "title": ".t", "link": ".t"}'
+    feeds = [
+      _feed(
+        name="W",
+        url="https://example.com/articles",
+        site_url="https://example.com/",
+        extraction_rules=rules,
+      ),
+    ]
+    xml = opml.export_opml([], feeds)
+    _, uncat = opml.parse_opml(xml)
+    assert len(uncat) == 1
+    assert uncat[0].url == "https://example.com/articles"
     assert uncat[0].extraction_rules == rules
