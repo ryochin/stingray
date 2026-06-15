@@ -1,0 +1,23 @@
+# Normalize line endings to LF on checkout across all platforms.
+# Prevents CRLF (from Windows clones) from breaking the crontab/supercronic
+# schedule and shell-style commands inside containers.
+* text=auto eol=lf
+
+# Files that MUST stay LF — CRLF here breaks runtime behavior.
+crontab text eol=lf
+*.sh    text eol=lf
+Dockerfile text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Treat known binary assets as binary (never normalize/diff as text).
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
+*.bz2  binary
+*.gz   binary
+*.zip  binary
