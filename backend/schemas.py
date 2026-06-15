@@ -103,7 +103,7 @@ class StatusResponse(BaseModel):
 
 class OllamaConfig(BaseModel):
   enabled: bool = True
-  model: str = "gemma3"
+  model: str = "gemma4:e4b"
   base_url: str = "http://localhost:11434"
   timeout: int = 120
 

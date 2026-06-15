@@ -90,7 +90,7 @@ async def process_article(
 
 async def summarize_all(
   articles: list[Article],
-  model: str = "gemma3",
+  model: str = "gemma4:e4b",
   base_url: str = "http://localhost:11434",
   timeout: int = 120,
   concurrency: int = 3,
