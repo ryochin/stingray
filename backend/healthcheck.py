@@ -16,10 +16,8 @@ import argparse
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import httpx
-import yaml
 
 import db
 import repo
@@ -27,17 +25,10 @@ from schemas import AppConfig
 
 
 def _load_config() -> AppConfig:
-  # Mirror main.py's strictness: a config.yml the fetcher would reject (non-
-  # mapping YAML) must surface as unhealthy here too, rather than silently
-  # falling back to defaults and masking a fetcher that cannot start.
-  config_path = Path("config.yml")
-  if not config_path.exists():
-    return AppConfig()
-  with open(config_path, encoding="utf-8") as f:
-    raw: object = yaml.safe_load(f)
-  if not isinstance(raw, dict):
-    raise ValueError(f"config file is not a valid YAML mapping: {config_path}")
-  return AppConfig.model_validate(raw)
+  # Shares AppConfig.load with the fetcher/web: a config.yml the fetcher would
+  # reject (non-mapping YAML) surfaces as unhealthy here too, rather than
+  # silently falling back to defaults and masking a fetcher that cannot start.
+  return AppConfig.load()
 
 
 def _check_db() -> None:

@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
-import yaml
 
 import cache as cache_mod
 import db
@@ -16,12 +15,13 @@ from schemas import AppConfig
 
 
 def load_config(path: Path) -> AppConfig:
-  with open(path, encoding="utf-8") as f:
-    raw: object = yaml.safe_load(f)
-  if not isinstance(raw, dict):
-    log.error(f"Error: config file is not a valid YAML mapping: {path}")
+  # The fetcher requires a real config; turn any load/validation error into a
+  # clean message and non-zero exit rather than an uncaught traceback.
+  try:
+    return AppConfig.load(path, required=True)
+  except (OSError, ValueError) as e:
+    log.error(f"Error: {e}")
     sys.exit(1)
-  return AppConfig.model_validate(raw)
 
 
 async def run(args: argparse.Namespace) -> None:

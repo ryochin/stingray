@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
+import yaml
 from pydantic import BaseModel, Field
 
 
@@ -120,3 +122,27 @@ class AppConfig(BaseModel):
   native_lang: str = "ja"
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)
   url_cleanup: UrlCleanupConfig = Field(default_factory=UrlCleanupConfig)
+
+  @classmethod
+  def load(cls, path: Path = Path("config.yml"), *, required: bool = False) -> "AppConfig":
+    """Read and validate config.yml. The single source of truth for all
+    callers (web, fetcher, healthcheck).
+
+    A missing file yields defaults unless `required` (the fetcher needs a real
+    config). A non-mapping YAML is always an error: a broken config must surface
+    consistently rather than being silently treated as defaults by some callers.
+    """
+    if not path.exists():
+      if required:
+        raise FileNotFoundError(path)
+      return cls()
+    with open(path, encoding="utf-8") as f:
+      try:
+        raw: object = yaml.safe_load(f)
+      except yaml.YAMLError as e:
+        # Normalize syntax errors to ValueError so every caller can treat a
+        # broken config as a single "invalid config" failure mode.
+        raise ValueError(f"config file is not valid YAML: {path}: {e}") from e
+    if not isinstance(raw, dict):
+      raise ValueError(f"config file is not a valid YAML mapping: {path}")
+    return cls.model_validate(raw)

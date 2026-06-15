@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import AsyncIterator, Coroutine, cast
 
 import httpx
-import yaml
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -59,14 +58,7 @@ def _spawn_background(coro: Coroutine[object, object, object]) -> asyncio.Task[o
 
 
 def _load_config() -> AppConfig:
-  config_path = Path("config.yml")
-  if not config_path.exists():
-    return AppConfig()
-  with open(config_path, encoding="utf-8") as f:
-    raw: object = yaml.safe_load(f)
-  if isinstance(raw, dict):
-    return AppConfig.model_validate(raw)
-  return AppConfig()
+  return AppConfig.load()
 
 
 # LLM reachability probe. Cached because /api/status is polled as often as every 2s

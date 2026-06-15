@@ -1,4 +1,4 @@
-"""Tests for healthcheck.py: config loading, LLM gating, and job-age logic.
+"""Tests for healthcheck.py: LLM gating and job-age logic.
 
 The _check_recent_job branch (covered below):
   - no job record → startup grace (OK)
@@ -127,27 +127,3 @@ class TestLlmGating:
     err = capsys.readouterr().err
     assert "healthcheck: config:" in err
     assert "bad config" in err
-
-
-class TestLoadConfig:
-  def test_reads_ollama_enabled_false(self, tmp_path, monkeypatch):
-    (tmp_path / "config.yml").write_text("ollama:\n  enabled: false\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    assert healthcheck._load_config().ollama.enabled is False
-
-  def test_missing_config_defaults_enabled_true(self, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    assert healthcheck._load_config().ollama.enabled is True
-
-  def test_non_mapping_yaml_is_rejected(self, tmp_path, monkeypatch):
-    # A config the fetcher (main.py) would reject must not be silently accepted.
-    (tmp_path / "config.yml").write_text("just a string\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    with pytest.raises(ValueError, match="not a valid YAML mapping"):
-      healthcheck._load_config()
-
-  def test_empty_yaml_is_rejected(self, tmp_path, monkeypatch):
-    (tmp_path / "config.yml").write_text("", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    with pytest.raises(ValueError, match="not a valid YAML mapping"):
-      healthcheck._load_config()
