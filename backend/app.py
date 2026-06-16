@@ -57,10 +57,6 @@ def _spawn_background(coro: Coroutine[object, object, object]) -> asyncio.Task[o
   return task
 
 
-def _load_config() -> AppConfig:
-  return AppConfig.load()
-
-
 # LLM reachability probe. Cached because /api/status is polled as often as every 2s
 # while a fetch is running — we don't need (or want) to hammer Ollama that hard.
 # Timeout is deliberately generous and we retry once on failure: Docker Desktop's
@@ -117,7 +113,7 @@ async def _background_summarizer(config: AppConfig) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-  config = _load_config()
+  config = AppConfig.load()
   db.configure()
   db.init_schema()
   app.state.config = config  # type: ignore[attr-defined]
@@ -340,11 +336,10 @@ async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
   return ProbeResult()
 
 
-async def _fetch_single_feed(feed: FeedRow) -> None:
+async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
   """Fetch articles from a single feed and persist to DB."""
   start = time.perf_counter()
   try:
-    config = _load_config()
     clean_url_fn = clean_url if config.url_cleanup.enabled else None
     feed_cfg = feed.to_feed_cfg()
     kind = "web" if feed.extraction_rules else "rss"
@@ -384,8 +379,8 @@ async def _fetch_single_feed(feed: FeedRow) -> None:
 
 
 @app.post("/api/feeds", status_code=201)
-async def create_feed(body: FeedCreate) -> FeedRow:
-  config = _load_config()
+async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
+  config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
   log.step(f"Probing feed: {body.url}")
   probe = await _probe_feed(body.url, native_lang=config.native_lang)
   if not body.name.strip():
@@ -418,7 +413,7 @@ async def create_feed(body: FeedCreate) -> FeedRow:
   feed = FeedRow(**body.model_dump(), site_url=probe.site_url, extraction_rules=extraction_rules)
   created = repo.add_feed(feed)
   log.info(f"  Feed created: id={created.id}, name={created.name}")
-  _spawn_background(_fetch_single_feed(created))
+  _spawn_background(_fetch_single_feed(created, config))
   return created
 
 
@@ -445,11 +440,12 @@ async def delete_all_data() -> None:
 
 
 @app.post("/api/feeds/{feed_id}/fetch", status_code=202)
-async def fetch_feed(feed_id: int) -> dict[str, str]:
+async def fetch_feed(feed_id: int, request: Request) -> dict[str, str]:
   feed = repo.get_feed_by_id(feed_id)
   if feed is None:
     raise HTTPException(404, "Feed not found")
-  _spawn_background(_fetch_single_feed(feed))
+  config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
+  _spawn_background(_fetch_single_feed(feed, config))
   return {"message": "Fetch started"}
 
 
@@ -684,9 +680,9 @@ async def _maybe_trigger_opml_refresh(request: Request, feeds_created: int) -> N
 
 @app.post("/api/opml/import")
 async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
+  config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
   try:
     content = (await file.read()).decode("utf-8")
-    config = _load_config()
     imported_folders, uncategorized = parse_opml(content, native_lang=config.native_lang)
   except UnicodeDecodeError as e:
     raise HTTPException(400, f"Invalid file encoding: {e}")
@@ -752,8 +748,8 @@ async def trigger_refresh(request: Request) -> JSONResponse:
 
 
 @app.get("/api/status")
-def get_status() -> StatusResponse:
-  config = _load_config()
+def get_status(request: Request) -> StatusResponse:
+  config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
   if config.ollama.enabled:
     # Env var wins so containers can override the config.yml default (which
     # usually points at localhost — not reachable from inside Docker).
