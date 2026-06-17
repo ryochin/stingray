@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # -- DB row models --
@@ -104,6 +104,8 @@ class StatusResponse(BaseModel):
 
 
 class OllamaConfig(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
   enabled: bool = True
   model: str = "gemma4:e4b"
   base_url: str = "http://localhost:11434"
@@ -111,10 +113,14 @@ class OllamaConfig(BaseModel):
 
 
 class UrlCleanupConfig(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
   enabled: bool = True
 
 
 class AppConfig(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
   max_items_per_feed: int = 200
   max_age_hours: float = 48
   cache_dir: str = "cache"

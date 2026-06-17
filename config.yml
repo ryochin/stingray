@@ -1,12 +1,14 @@
 # -- General --
 native_lang: "ja"        # Your native language (feeds in other languages will be translated)
 max_age_hours: 48        # How far back to include articles
+max_items_per_feed: 200  # Max articles to ingest per feed on each refresh
 cache_dir: "cache"                 # Cache directory
 article_cache_max_age_days: 0      # Days to keep article cache (0 = keep forever)
 
 # -- LLM (Ollama) --
 # The server URL lives in `.env` as OLLAMA_BASE_URL (it varies per host).
 ollama:
+  enabled: true          # Translation/summarization on/off (false disables all LLM calls)
   model: "gemma4:e4b"
   timeout: 120           # Seconds per LLM request
 
