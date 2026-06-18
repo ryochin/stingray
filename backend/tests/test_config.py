@@ -63,6 +63,21 @@ class TestAppConfigLoad:
     monkeypatch.chdir(tmp_path)
     assert AppConfig.load().native_lang == "en"
 
+  def test_article_order_defaults_to_oldest(self, tmp_path: Path):
+    config = AppConfig.load(tmp_path / "nope.yml")
+    assert config.article_order == "oldest"
+
+  def test_reads_article_order_newest(self, tmp_path: Path):
+    path = tmp_path / "config.yml"
+    path.write_text('article_order: "newest"\n', encoding="utf-8")
+    assert AppConfig.load(path).article_order == "newest"
+
+  def test_invalid_article_order_raises(self, tmp_path: Path):
+    path = tmp_path / "config.yml"
+    path.write_text('article_order: "sideways"\n', encoding="utf-8")
+    with pytest.raises(ValidationError):
+      AppConfig.load(path)
+
 
 class TestMainLoadConfig:
   def test_valid_config_loaded(self, tmp_path: Path):

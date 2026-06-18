@@ -668,6 +668,7 @@ def list_articles(
   unread: bool = False,
   since_days: int | None = None,
   limit: int = 10000,
+  order: Literal["oldest", "newest"] = "oldest",
 ) -> list[ArticleRow]:
   filters = list_filters()
   contains_filters, regex_filters = _split_filters(filters)
@@ -694,8 +695,9 @@ def list_articles(
   fetch_limit = limit * 3 if regex_filters else limit
   params.append(fetch_limit)
   # SQL returns newest first so LIMIT keeps the most recent `limit` rows
-  # even when total >> limit. Final response is reversed to oldest-first so
-  # the UI can render in ascending publication order without re-sorting.
+  # even when total >> limit. By default the response is reversed to
+  # oldest-first so the UI can render in ascending publication order without
+  # re-sorting; `order="newest"` keeps the SQL's descending order.
   # `fetched_at DESC, url DESC` are tie-breakers: without them, rows that
   # share `COALESCE(published, fetched_at)` (e.g. multiple items from one
   # fetch batch whose feed emits a coarse-granularity pubDate) come back in
@@ -712,7 +714,8 @@ def list_articles(
   articles = [ArticleRow.model_validate(r) for r in rows]
   if regex_filters:
     articles = [a for a in articles if not _article_matches_filter(a, regex_filters)]
-  return list(reversed(articles[:limit]))
+  trimmed = articles[:limit]
+  return trimmed if order == "newest" else list(reversed(trimmed))
 
 
 def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:

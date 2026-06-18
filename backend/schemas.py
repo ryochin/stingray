@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -126,6 +127,7 @@ class AppConfig(BaseModel):
   cache_dir: str = "cache"
   article_cache_max_age_days: int = 0
   native_lang: str = "ja"
+  article_order: Literal["oldest", "newest"] = "oldest"
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)
   url_cleanup: UrlCleanupConfig = Field(default_factory=UrlCleanupConfig)
 

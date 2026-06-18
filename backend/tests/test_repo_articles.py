@@ -446,3 +446,45 @@ class TestListArticlesOrderStability:
     assert first == second
     # COALESCE falls back to `fetched_at`; API returns oldest-first.
     assert first == ["u-early", "u-late"]
+
+  def test_order_newest_keeps_descending(self):
+    fid = _make_feed()
+    repo.upsert_articles(
+      [_art(url="u-old"), _art(url="u-new")],
+      {"F": fid},
+    )
+    self._force_timestamps(
+      "u-old",
+      published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc),
+      fetched_at=datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc),
+    )
+    self._force_timestamps(
+      "u-new",
+      published=datetime(2026, 5, 21, 8, 0, 0, tzinfo=timezone.utc),
+      fetched_at=datetime(2026, 5, 21, 8, 0, 0, tzinfo=timezone.utc),
+    )
+
+    # Default is oldest-first; `order="newest"` keeps the SQL descending order.
+    assert [r.url for r in repo.list_articles()] == ["u-old", "u-new"]
+    assert [
+      r.url for r in repo.list_articles(order="newest")
+    ] == ["u-new", "u-old"]
+
+  def test_order_newest_full_tie_is_url_desc(self):
+    fid = _make_feed()
+    repo.upsert_articles(
+      [_art(url="u-c"), _art(url="u-a"), _art(url="u-b")],
+      {"F": fid},
+    )
+    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc)
+    fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=timezone.utc)
+    for u in ("u-a", "u-b", "u-c"):
+      self._force_timestamps(u, published=pub, fetched_at=fetched)
+
+    # `order="newest"` keeps SQL's `... url DESC` without the oldest-first
+    # `reversed()`, so a full tie is visible as `url DESC`.
+    assert [r.url for r in repo.list_articles(order="newest")] == ["u-c", "u-b", "u-a"]
+    # The limit cut keeps the SQL top slice {u-c, u-b}; newest order preserves it.
+    assert [
+      r.url for r in repo.list_articles(order="newest", limit=2)
+    ] == ["u-c", "u-b"]
