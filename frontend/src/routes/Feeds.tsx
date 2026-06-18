@@ -308,10 +308,6 @@ function FolderManager({
                   ? "border-accent border-solid"
                   : "border-border"
               }`}
-              draggable={editingId !== folder.id}
-              onDragStart={(): void => {
-                dragSrcId.current = folder.id
-              }}
               onDragOver={(event: React.DragEvent<HTMLLIElement>): void => {
                 event.preventDefault()
                 setDragOverId(folder.id)
@@ -321,15 +317,27 @@ function FolderManager({
                   prev === folder.id ? null : prev,
                 )
               }
-              onDragEnd={(): void => {
-                dragSrcId.current = null
-                setDragOverId(null)
-              }}
               onDrop={(): void => handleDrop(folder.id)}
             >
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle relies on native HTML5 DnD, which has no standard ARIA role */}
               <span
-                className="text-text-dim cursor-grab active:cursor-grabbing select-none"
-                title="Drag to reorder"
+                draggable={editingId !== folder.id}
+                onDragStart={(
+                  event: React.DragEvent<HTMLSpanElement>,
+                ): void => {
+                  setCardDragImage(event, "li")
+                  dragSrcId.current = folder.id
+                }}
+                onDragEnd={(): void => {
+                  dragSrcId.current = null
+                  setDragOverId(null)
+                }}
+                className={`text-text-dim select-none inline-flex px-1 -mx-1 ${
+                  editingId === folder.id
+                    ? "cursor-default opacity-40"
+                    : "cursor-grab active:cursor-grabbing"
+                }`}
+                title={editingId === folder.id ? undefined : "Drag to reorder"}
               >
                 ⠿
               </span>
@@ -636,6 +644,22 @@ type FeedItemProps = {
   onDrop: (feed: Feed) => void
 }
 
+/**
+ * Use the whole card/row (found via `selector`) as the native DnD drag image,
+ * so dragging by the small handle still previews the full item under the
+ * cursor. The image offset keeps the grab point aligned with the pointer.
+ */
+function setCardDragImage(event: React.DragEvent, selector: string): void {
+  const card: Element | null = event.currentTarget.closest(selector)
+  if (!card) return
+  const rect: DOMRect = card.getBoundingClientRect()
+  event.dataTransfer.setDragImage(
+    card,
+    event.clientX - rect.left,
+    event.clientY - rect.top,
+  )
+}
+
 function FeedItem({
   feed,
   stats,
@@ -673,14 +697,11 @@ function FeedItem({
     // biome-ignore lint/a11y/useSemanticElements: switching to <li> would require restructuring the parent FeedList container into <ul>
     <div
       role="listitem"
-      draggable={!editing}
-      onDragStart={(): void => onDragStart(feed)}
       onDragOver={(event: React.DragEvent<HTMLDivElement>): void => {
         event.preventDefault()
         onDragOver(feed)
       }}
       onDragLeave={(): void => onDragLeave(feed)}
-      onDragEnd={onDragEnd}
       onDrop={(event: React.DragEvent<HTMLDivElement>): void => {
         event.preventDefault()
         onDrop(feed)
@@ -691,9 +712,20 @@ function FeedItem({
     >
       <div className="flex items-center justify-between p-3">
         <div className="flex-1 min-w-0 flex items-start gap-2.5">
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle relies on native HTML5 DnD, which has no standard ARIA role */}
           <span
-            className="text-text-dim cursor-grab active:cursor-grabbing select-none mt-0.5 shrink-0"
-            title="Drag to reorder"
+            draggable={!editing}
+            onDragStart={(event: React.DragEvent<HTMLSpanElement>): void => {
+              setCardDragImage(event, '[role="listitem"]')
+              onDragStart(feed)
+            }}
+            onDragEnd={onDragEnd}
+            className={`text-text-dim select-none mt-0.5 shrink-0 inline-flex px-1 -mx-1 ${
+              editing
+                ? "cursor-default opacity-40"
+                : "cursor-grab active:cursor-grabbing"
+            }`}
+            title={editing ? undefined : "Drag to reorder"}
           >
             ⠿
           </span>
