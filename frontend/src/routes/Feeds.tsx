@@ -29,12 +29,16 @@ const ExtractionRulesEditor = lazy(
 )
 
 interface AddFeedFormProps {
-  onAdd: (f: FeedCreate) => void
+  // Resolves on a successful add and rejects on failure (including the 422
+  // "feed candidates" path), so the form can clear its inputs only on success.
+  onAdd: (f: FeedCreate) => Promise<unknown>
   isAdding: boolean
   folders: Folder[]
   candidates: FeedCandidate[] | null
   candidatesFor: string | null
-  onPickCandidate: (href: string) => void
+  // Resolves on a successful add of the picked candidate; same contract as
+  // `onAdd` so the form clears its inputs once the candidate is added.
+  onPickCandidate: (href: string) => Promise<unknown>
   onDismissCandidates: () => void
 }
 
@@ -51,11 +55,29 @@ function AddFeedForm({
   const [url, setUrl] = useState<string>("")
   const [folderId, setFolderId] = useState<number | undefined>(undefined)
 
+  // Clear the per-feed inputs after a successful add, but only the fields the
+  // user has not edited since submitting: a slow add must not wipe a value the
+  // user already started typing for the next feed. The folder is intentionally
+  // kept so several feeds can be added to it in a row.
+  const clearInputsIfUnchanged = (
+    submittedName: string,
+    submittedUrl: string,
+  ): void => {
+    setName((cur: string): string => (cur === submittedName ? "" : cur))
+    setUrl((cur: string): string => (cur === submittedUrl ? "" : cur))
+  }
+
   const submit = (event: React.FormEvent): void => {
     event.preventDefault()
     const body: FeedCreate = { name, url }
     if (folderId != null) body.folder_id = folderId
     onAdd(body)
+      .then((): void => clearInputsIfUnchanged(name, url))
+      .catch((): void => {
+        // Keep the inputs on failure or when the URL resolved to feed
+        // candidates, so the user can fix the value or pick a candidate. The
+        // parent surfaces the error / candidate list.
+      })
   }
 
   const reset = (): void => {
@@ -67,7 +89,11 @@ function AddFeedForm({
 
   const pick = (href: string): void => {
     setUrl(href)
+    // The candidate is added with an auto-detected name (name: ""), so clear
+    // against that on success — same untouched-only guard as the main submit.
     onPickCandidate(href)
+      .then((): void => clearInputsIfUnchanged("", href))
+      .catch((): void => {})
   }
 
   return (
@@ -1102,13 +1128,15 @@ export default function Feeds(): JSX.Element {
         <FolderManager folders={sortedFolders} onError={reportError} />
 
         <AddFeedForm
-          onAdd={(feedCreate: FeedCreate): void => addFeed.mutate(feedCreate)}
+          onAdd={(feedCreate: FeedCreate): Promise<unknown> =>
+            addFeed.mutateAsync(feedCreate)
+          }
           isAdding={addFeed.isPending}
           folders={sortedFolders}
           candidates={feedCandidates}
           candidatesFor={candidatesFor}
-          onPickCandidate={(href: string): void =>
-            addFeed.mutate({ url: href, name: "" })
+          onPickCandidate={(href: string): Promise<unknown> =>
+            addFeed.mutateAsync({ url: href, name: "" })
           }
           onDismissCandidates={dismissCandidates}
         />
