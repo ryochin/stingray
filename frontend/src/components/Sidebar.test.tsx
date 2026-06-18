@@ -86,7 +86,7 @@ describe("Sidebar", () => {
     expect(screen.getByText("F1")).toBeInTheDocument()
   })
 
-  it("renders uncategorized feeds only after folders have content", () => {
+  it("renders uncategorized feeds above folders so new feeds surface at top", () => {
     renderSidebar({
       feeds: [
         feed(1, { name: "Folded", folder_id: 10 }),
@@ -95,7 +95,12 @@ describe("Sidebar", () => {
       folders: [folder(10, "Tech")],
     })
     expect(screen.getByText("Uncategorized")).toBeInTheDocument()
-    expect(screen.getByText("Loose")).toBeInTheDocument()
+    const loose = screen.getByText("Loose")
+    const tech = screen.getByText("Tech")
+    // Uncategorized section precedes the folder section in document order.
+    expect(loose.compareDocumentPosition(tech)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
   })
 
   it("hides disabled feeds", () => {

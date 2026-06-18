@@ -362,15 +362,29 @@ def get_feed_by_id(feed_id: int) -> FeedRow | None:
     return _row_to_feed(row) if row else None
 
 
-def add_feed(feed: FeedRow) -> FeedRow:
-  """Insert a new feed at the end of the list. Returns the persisted row."""
+def add_feed(feed: FeedRow, *, at_top: bool = True) -> FeedRow:
+  """Insert a new feed and return the persisted row.
+
+  Positions are global and ordered ascending. By default a new feed gets the
+  smallest position (MIN - 1) so an interactively added feed surfaces at the
+  front of its section. Bulk callers that must preserve input order (OPML
+  import) pass `at_top=False` to append at the end (MAX + 1). Positions may
+  drift negative over many top inserts; that is acceptable for INTEGER and
+  `reorder_feeds` rebases from the group's MIN.
+  """
+  # The position expression is a constant chosen by `at_top`, never user input.
+  position_expr: str = (
+    "COALESCE((SELECT MIN(position) - 1 FROM feeds), 0)"
+    if at_top
+    else "COALESCE((SELECT MAX(position) + 1 FROM feeds), 0)"
+  )
   with db.connection() as conn:
     row = conn.execute(
-      """INSERT INTO feeds
+      f"""INSERT INTO feeds
            (name, url, site_url, translate, summarize, enabled, folder_id, position, extraction_rules)
          VALUES
            (%s, %s, %s, %s, %s, %s, %s,
-            COALESCE((SELECT MAX(position) + 1 FROM feeds), 0),
+            {position_expr},
             %s)
          RETURNING *""",
       (

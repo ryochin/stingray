@@ -202,6 +202,22 @@ export default function Sidebar({
       </button>
       <div className="border-b border-border mx-3 my-1" />
 
+      {/* Uncategorized first so newly added (uncategorized) feeds, which get
+          the smallest position, surface at the very top. */}
+      {uncategorized.length > 0 && (
+        <>
+          {sortedFolders.length > 0 && (
+            <div className="px-4 py-1.5 text-xs text-text-dim">
+              Uncategorized
+            </div>
+          )}
+          {uncategorized.map(renderFeed)}
+          {sortedFolders.length > 0 && (
+            <div className="border-b border-border mx-3 my-1" />
+          )}
+        </>
+      )}
+
       {/* Folders */}
       {sortedFolders.map((folder: Folder): JSX.Element => {
         const isOpen: boolean = !collapsed.has(folder.id)
@@ -255,14 +271,6 @@ export default function Sidebar({
           </div>
         )
       })}
-
-      {/* Uncategorized */}
-      {uncategorized.length > 0 && sortedFolders.length > 0 && (
-        <div className="border-t border-border mt-1 pt-1">
-          <div className="px-4 py-1.5 text-xs text-text-dim">Uncategorized</div>
-        </div>
-      )}
-      {uncategorized.map(renderFeed)}
     </nav>
   )
 }

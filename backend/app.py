@@ -631,15 +631,20 @@ def _persist_opml_feeds(
     if feed_data.url in existing_urls:
       feeds_skipped += 1
       return
-    repo.add_feed(FeedRow(
-      name=feed_data.name,
-      url=feed_data.url,
-      site_url=feed_data.site_url,
-      translate=feed_data.translate,
-      summarize=feed_data.summarize,
-      folder_id=folder_id,
-      extraction_rules=feed_data.extraction_rules,
-    ))
+    # Append in file order so an imported OPML keeps its original ordering,
+    # rather than reversing it (the interactive add-at-top default).
+    repo.add_feed(
+      FeedRow(
+        name=feed_data.name,
+        url=feed_data.url,
+        site_url=feed_data.site_url,
+        translate=feed_data.translate,
+        summarize=feed_data.summarize,
+        folder_id=folder_id,
+        extraction_rules=feed_data.extraction_rules,
+      ),
+      at_top=False,
+    )
     existing_urls.add(feed_data.url)
     feeds_created += 1
 

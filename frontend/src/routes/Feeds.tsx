@@ -1044,6 +1044,19 @@ export default function Feeds(): JSX.Element {
     })
   }, [])
 
+  // Add a feed and auto-expand its card so the user can edit/inspect it right
+  // away. Shared by the main submit and the 422 "pick a candidate" path.
+  const addFeedAndExpand = useCallback(
+    (body: FeedCreate): Promise<Feed> =>
+      addFeed.mutateAsync(body).then((feed: Feed): Feed => {
+        setExpandedFeeds(
+          (prev: Set<number>): Set<number> => new Set(prev).add(feed.id),
+        )
+        return feed
+      }),
+    [addFeed],
+  )
+
   const handleStartEdit = useCallback((feed: Feed): void => {
     setEditingFeedId(feed.id)
     setEditFeedName(feed.name)
@@ -1160,15 +1173,13 @@ export default function Feeds(): JSX.Element {
         <FolderManager folders={sortedFolders} onError={reportError} />
 
         <AddFeedForm
-          onAdd={(feedCreate: FeedCreate): Promise<unknown> =>
-            addFeed.mutateAsync(feedCreate)
-          }
+          onAdd={addFeedAndExpand}
           isAdding={addFeed.isPending}
           folders={sortedFolders}
           candidates={feedCandidates}
           candidatesFor={candidatesFor}
           onPickCandidate={(href: string): Promise<unknown> =>
-            addFeed.mutateAsync({ url: href, name: "" })
+            addFeedAndExpand({ url: href, name: "" })
           }
           onDismissCandidates={dismissCandidates}
         />
@@ -1211,20 +1222,8 @@ export default function Feeds(): JSX.Element {
           <div className="text-text-muted">Loading...</div>
         ) : (
           <div className="space-y-4">
-            {sortedFolders.map((folder: Folder) => {
-              const folderFeeds: Feed[] = feedsByFolder.get(folder.id) ?? []
-              if (folderFeeds.length === 0) return null
-              return (
-                <div key={folder.id}>
-                  <h3 className="text-base font-semibold text-text-heading mb-2">
-                    {folder.name}
-                  </h3>
-                  <div className="space-y-2 ml-2">
-                    {folderFeeds.map(renderFeed)}
-                  </div>
-                </div>
-              )
-            })}
+            {/* Uncategorized first so newly added (uncategorized) feeds, which
+                get the smallest position, surface at the very top. */}
             {uncategorized.length > 0 && (
               <div>
                 {sortedFolders.length > 0 && (
@@ -1239,6 +1238,20 @@ export default function Feeds(): JSX.Element {
                 </div>
               </div>
             )}
+            {sortedFolders.map((folder: Folder) => {
+              const folderFeeds: Feed[] = feedsByFolder.get(folder.id) ?? []
+              if (folderFeeds.length === 0) return null
+              return (
+                <div key={folder.id}>
+                  <h3 className="text-base font-semibold text-text-heading mb-2">
+                    {folder.name}
+                  </h3>
+                  <div className="space-y-2 ml-2">
+                    {folderFeeds.map(renderFeed)}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </main>

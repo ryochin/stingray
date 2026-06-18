@@ -82,6 +82,36 @@ class TestMoveFeedToFolder:
     assert feed is not None and feed.folder_id is None
 
 
+class TestAddFeedPosition:
+  def _add(self, name: str) -> FeedRow:
+    return repo.add_feed(FeedRow(name=name, url=f"https://{name}.example.com/rss"))
+
+  def test_new_feed_gets_smaller_position(self):
+    a = self._add("A")
+    b = self._add("B")
+    assert b.position < a.position
+
+  def test_list_feeds_surfaces_newest_first(self):
+    a = self._add("A")
+    b = self._add("B")
+    c = self._add("C")
+    assert [f.id for f in repo.list_feeds()] == [c.id, b.id, a.id]
+
+  def test_at_top_false_appends_preserving_order(self):
+    # Bulk callers (OPML import) append in input order instead of reversing it.
+    a = repo.add_feed(
+      FeedRow(name="A", url="https://a.example.com/rss"), at_top=False
+    )
+    b = repo.add_feed(
+      FeedRow(name="B", url="https://b.example.com/rss"), at_top=False
+    )
+    c = repo.add_feed(
+      FeedRow(name="C", url="https://c.example.com/rss"), at_top=False
+    )
+    assert a.position < b.position < c.position
+    assert [f.id for f in repo.list_feeds()] == [a.id, b.id, c.id]
+
+
 class TestReorderFeeds:
   def _add(self, name: str) -> int:
     return repo.add_feed(
@@ -97,10 +127,11 @@ class TestReorderFeeds:
     assert [f.id for f in rows] == [c, a, b]
 
   def test_empty_is_noop(self):
+    # New feeds are inserted at the top, so the natural order is newest-first.
     a = self._add("A")
     b = self._add("B")
     repo.reorder_feeds([])
-    assert [f.id for f in repo.list_feeds()] == [a, b]
+    assert [f.id for f in repo.list_feeds()] == [b, a]
 
   def test_partial_reorder_keeps_smallest_base_position(self):
     # Only the listed feeds are repositioned; they should reuse the lowest
