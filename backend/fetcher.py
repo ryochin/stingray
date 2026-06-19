@@ -33,20 +33,36 @@ def _build_feed_id_map(feeds: list[FeedRow]) -> dict[str, int]:
   return {f.name: f.id for f in feeds}
 
 
-def _needs_llm(article: Article, *, translate: bool) -> bool:
-  """Check if an article needs LLM processing."""
+def _needs_llm(article: Article, *, translate: bool, summarize: bool) -> bool:
+  """Check if an article still needs LLM processing.
+
+  The done-condition mirrors `process_article`'s output per
+  (translate, summarize, short) so already-processed articles never bounce
+  back into the queue (see repo.list_pending_summaries).
+  """
+  snippet = article.content_snippet or ""
   if translate:
-    # Non-native: need both title_translated and (summary or content_translated)
-    if article.title_translated and (article.summary or article.content_translated):
+    if not article.title_translated:
+      return True
+    if len(snippet) == 0:
+      # No body to translate or summarize → the title alone completes it.
+      # (An empty body can never fill content_translated/summary, so requiring
+      # either would re-queue the article forever.)
       return False
-    return True
-  else:
-    # Native: only need summary for long content
-    if article.summary:
-      return False
-    if article.content_snippet and len(article.content_snippet) < SHORT_SNIPPET_CHARS:
-      return False  # Native + short → nothing to do
-    return True
+    if len(snippet) < SHORT_SNIPPET_CHARS:
+      # Short foreign article → full-body translation required.
+      return not article.content_translated
+    if summarize:
+      # Long foreign article with summary → translated summary required.
+      return not article.summary
+    # Long foreign article, summary disabled → title translation is enough.
+    return False
+  if not summarize:
+    return False
+  # Native summarize: only content long enough to summarize (>= threshold).
+  if len(snippet) < SHORT_SNIPPET_CHARS:
+    return False
+  return not article.summary
 
 
 def _classify_outcome(
@@ -143,6 +159,7 @@ async def _fetch_and_persist_feeds(
 async def _run_summarize(
   need_llm: list[Article],
   translate_set: set[str],
+  summarize_set: set[str],
   config: AppConfig,
   *,
   log_prefix: str = "Processing",
@@ -162,7 +179,7 @@ async def _run_summarize(
   log.step(f"{log_prefix} {len(need_llm)} articles with {model}...")
   failures: int = await summarize_all(
     need_llm, model=model, base_url=base_url, timeout=timeout,
-    translate_set=translate_set, short_set=short_set,
+    translate_set=translate_set, summarize_set=summarize_set, short_set=short_set,
     native_lang=config.native_lang,
   )
   if failures:
@@ -183,16 +200,22 @@ async def _run_llm_pass(
   """
   summarize_map = {f.name: f.summarize for f in feeds}
   translate_map = {f.name: f.translate for f in feeds}
+  # _needs_llm internalizes the feed-level gate: a feed with neither translate
+  # nor summarize yields False for every article, so no separate gate is needed.
   need_llm = [
     a for a in articles
-    if summarize_map.get(a.source, False)
-    and _needs_llm(a, translate=translate_map.get(a.source, False))
+    if _needs_llm(
+      a,
+      translate=translate_map.get(a.source, False),
+      summarize=summarize_map.get(a.source, False),
+    )
   ]
   if not need_llm:
     log.success("  All articles already processed.")
     return 0
   translate_set = {name for name, flag in translate_map.items() if flag}
-  failures = await _run_summarize(need_llm, translate_set, config)
+  summarize_set = {name for name, flag in summarize_map.items() if flag}
+  failures = await _run_summarize(need_llm, translate_set, summarize_set, config)
   # Re-upsert to persist LLM-filled fields. Rows already exist from the
   # per-feed pass; COALESCE in _UPSERT_ARTICLE only fills newly non-null ones.
   await asyncio.to_thread(repo.upsert_articles, need_llm, feed_id_map)
@@ -327,6 +350,7 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
 
   feeds = repo.list_feeds(enabled=True)
   feed_translate = {f.id: f.translate for f in feeds}
+  feed_summarize = {f.id: f.summarize for f in feeds}
 
   articles = [
     Article(
@@ -346,10 +370,22 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
     row.source for row in pending
     if row.feed_id and feed_translate.get(row.feed_id, False)
   }
-  need_llm = [a for a in articles if _needs_llm(a, translate=a.source in translate_set)]
+  summarize_set: set[str] = {
+    row.source for row in pending
+    if row.feed_id and feed_summarize.get(row.feed_id, False)
+  }
+  need_llm = [
+    a for a in articles
+    if _needs_llm(
+      a, translate=a.source in translate_set, summarize=a.source in summarize_set
+    )
+  ]
 
   if need_llm:
-    await _run_summarize(need_llm, translate_set, config, log_prefix="Background processing")
+    await _run_summarize(
+      need_llm, translate_set, summarize_set, config,
+      log_prefix="Background processing",
+    )
 
   for article in articles:
     if article.title_translated or article.summary or article.content_translated:

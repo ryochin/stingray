@@ -58,10 +58,48 @@ def _urls(rows: list[object]) -> set[str]:
 pytestmark = pytest.mark.usefixtures("clean_db")
 
 
-class TestSummarizeDisabled:
-  def test_summarize_false_feed_never_pending(self):
+class TestNoLlmFeed:
+  def test_neither_translate_nor_summarize_never_pending(self):
+    fid = _make_feed(translate=False, summarize=False)
+    _make_article(feed_id=fid, url="u1", content_snippet="x" * 500)
+    assert repo.list_pending_summaries() == []
+
+
+class TestTranslateOnlyFeed:
+  def test_long_article_without_title_is_pending(self):
     fid = _make_feed(translate=True, summarize=False)
     _make_article(feed_id=fid, url="u1", content_snippet="x" * 500)
+    assert _urls(repo.list_pending_summaries()) == {"u1"}
+
+  def test_long_article_with_title_not_pending(self):
+    # Anti-loop guarantee: a translated title alone completes a long
+    # translate-only article (no summary / content_translated expected).
+    fid = _make_feed(translate=True, summarize=False)
+    _make_article(
+      feed_id=fid, url="u1", title_translated="訳", content_snippet="x" * 500
+    )
+    assert repo.list_pending_summaries() == []
+
+  def test_short_article_with_title_but_no_content_is_pending(self):
+    fid = _make_feed(translate=True, summarize=False)
+    _make_article(
+      feed_id=fid, url="u1", title_translated="訳", content_snippet="短い"
+    )
+    assert _urls(repo.list_pending_summaries()) == {"u1"}
+
+  def test_short_article_fully_translated_not_pending(self):
+    fid = _make_feed(translate=True, summarize=False)
+    _make_article(
+      feed_id=fid, url="u1",
+      title_translated="訳", content_translated="翻訳本文", content_snippet="短い",
+    )
+    assert repo.list_pending_summaries() == []
+
+  def test_empty_body_with_title_not_pending(self):
+    # Anti-loop: an empty body can never fill content_translated, so the title
+    # translation alone must complete it (otherwise it requeues forever).
+    fid = _make_feed(translate=True, summarize=False)
+    _make_article(feed_id=fid, url="u1", title_translated="訳", content_snippet=None)
     assert repo.list_pending_summaries() == []
 
 
@@ -88,11 +126,19 @@ class TestTranslatingFeed:
     )
     assert repo.list_pending_summaries() == []
 
-  def test_title_translated_and_summary_not_pending(self):
+  def test_empty_body_with_title_not_pending(self):
+    # Even with summarize on, an empty body completes on the title alone.
+    fid = _make_feed(translate=True, summarize=True)
+    _make_article(feed_id=fid, url="u1", title_translated="訳", content_snippet=None)
+    assert repo.list_pending_summaries() == []
+
+  def test_long_title_translated_and_summary_not_pending(self):
+    # Long article: the translated summary is the expected output, not a full
+    # body translation, so title + summary completes it.
     fid = _make_feed(translate=True, summarize=True)
     _make_article(
       feed_id=fid, url="u1",
-      title_translated="訳", summary="要約",
+      title_translated="訳", summary="要約", content_snippet="x" * 400,
     )
     assert repo.list_pending_summaries() == []
 

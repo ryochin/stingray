@@ -390,6 +390,11 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
     body.name = probe.title or body.url
   if not body.translate:
     body.translate = probe.translate
+  # Foreign feeds detected by the probe also get summarize enabled so the body
+  # is rendered in the native language right after adding — translate alone only
+  # translates titles for long articles. Native feeds keep summarize opt-in.
+  if probe.translate:
+    body.summarize = True
 
   extraction_rules = None
   if probe.is_web_page:

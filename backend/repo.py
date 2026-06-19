@@ -733,27 +733,33 @@ def list_articles(
 
 
 def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:
-  """Find articles needing summarization.
+  """Find articles needing LLM processing.
 
-  Condition must match `fetcher._needs_llm`:
-    - translate=TRUE: title_translated missing, or both summary and content_translated missing.
-    - translate=FALSE: summary missing AND content is long enough to summarize (>= 300 chars).
+  Condition must match `fetcher._needs_llm`. The feed-level gate is
+  `translate OR summarize`; the article-level done-condition depends on
+  (translate, summarize, body length). "Short" means a non-empty body shorter
+  than 300 chars; an empty body needs nothing beyond the title translation.
+    - translate: title_translated required always; short → content_translated;
+      long & summarize → summary; long & not summarize (or empty) → title alone.
+    - not translate & summarize: long content (>= 300) without a summary.
   """
   with db.connection() as conn:
     rows = conn.execute(
       """SELECT a.* FROM articles a
          JOIN feeds f ON a.feed_id = f.id
-         WHERE f.summarize = TRUE
-           AND (
-             (f.translate AND (
-               a.title_translated IS NULL
-               OR (a.summary IS NULL AND a.content_translated IS NULL)
-             ))
-             OR
-             (NOT f.translate
-               AND a.summary IS NULL
-               AND LENGTH(COALESCE(a.content_snippet, '')) >= 300)
-           )
+         WHERE (
+           (f.translate AND (
+             a.title_translated IS NULL
+             OR (LENGTH(COALESCE(a.content_snippet, '')) BETWEEN 1 AND 299
+                 AND a.content_translated IS NULL)
+             OR (LENGTH(COALESCE(a.content_snippet, '')) >= 300
+                 AND f.summarize AND a.summary IS NULL)
+           ))
+           OR
+           (NOT f.translate AND f.summarize
+             AND LENGTH(COALESCE(a.content_snippet, '')) >= 300
+             AND a.summary IS NULL)
+         )
          ORDER BY a.published ASC
          LIMIT %s""",
       (limit,),
