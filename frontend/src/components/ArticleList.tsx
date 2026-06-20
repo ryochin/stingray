@@ -2,6 +2,7 @@ import type { VirtualItem, Virtualizer } from "@tanstack/react-virtual"
 import type { JSX } from "react"
 import type { Article, Feed } from "../api/client"
 import { faviconUrl } from "../api/client"
+import { pendingProcessing } from "../utils/articleProcessing"
 import ArticleCard from "./ArticleCard"
 import { CARD_GAP } from "./articleListLayout"
 import CaughtUpIndicator from "./CaughtUpIndicator"
@@ -10,7 +11,6 @@ interface ArticleListProps {
   articles: Article[]
   focusIndex: number
   feedMap: Map<number, Feed>
-  summarizeFeedIds: Set<number>
   virtualizer: Virtualizer<HTMLElement, Element>
   /** Virtualizer index that renders the end-of-list "all caught up" sentinel
    *  instead of an article card. */
@@ -36,7 +36,6 @@ export default function ArticleList({
   articles,
   focusIndex,
   feedMap,
-  summarizeFeedIds,
   virtualizer,
   allCaughtUpIndex,
   setRef,
@@ -106,11 +105,10 @@ export default function ArticleList({
             <ArticleCard
               article={article}
               focused={vi.index === focusIndex}
-              pendingSummary={
-                !article.summary &&
-                !article.content_translated &&
-                article.feed_id != null &&
-                summarizeFeedIds.has(article.feed_id)
+              pendingKind={
+                feed
+                  ? pendingProcessing(article, feed.translate, feed.summarize)
+                  : null
               }
               feedName={feed?.name}
               feedFaviconUrl={feed ? faviconUrl(feed) : null}

@@ -95,7 +95,7 @@ export default function Articles(): JSX.Element {
   // mounted from `Header`, which the route renders. The shared QueryClient
   // cache means we don't need our own copy here.
 
-  const { feedMap, orderedFeedIds, summarizeFeedIds, unreadCounts, filtered } =
+  const { feedMap, orderedFeedIds, unreadCounts, filtered } =
     useArticleDerivedState({
       feeds,
       folders,
@@ -443,7 +443,6 @@ export default function Articles(): JSX.Element {
                 articles={filtered}
                 focusIndex={focusIndex}
                 feedMap={feedMap}
-                summarizeFeedIds={summarizeFeedIds}
                 virtualizer={virtualizer}
                 allCaughtUpIndex={allCaughtUpIndex}
                 setRef={setRef}

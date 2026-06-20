@@ -69,19 +69,20 @@ describe("ArticleCard", () => {
     ).toBeNull()
   })
 
-  it("shows 'Awaiting summary...' only when pendingSummary and no existing content", () => {
-    render(<ArticleCard article={article()} pendingSummary={true} />)
+  it("shows 'Awaiting summary...' when pendingKind is 'summary'", () => {
+    render(<ArticleCard article={article()} pendingKind="summary" />)
     expect(screen.getByText("Awaiting summary...")).toBeInTheDocument()
   })
 
-  it("hides 'Awaiting summary...' when summary already exists", () => {
-    render(
-      <ArticleCard
-        article={article({ summary: "既要約" })}
-        pendingSummary={true}
-      />,
-    )
+  it("shows 'Awaiting translation...' when pendingKind is 'translation'", () => {
+    render(<ArticleCard article={article()} pendingKind="translation" />)
+    expect(screen.getByText("Awaiting translation...")).toBeInTheDocument()
+  })
+
+  it("shows no placeholder when pendingKind is absent", () => {
+    render(<ArticleCard article={article()} />)
     expect(screen.queryByText("Awaiting summary...")).toBeNull()
+    expect(screen.queryByText("Awaiting translation...")).toBeNull()
   })
 
   it("shows content_snippet only when no summary / html / translation exist", () => {

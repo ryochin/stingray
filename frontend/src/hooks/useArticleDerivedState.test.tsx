@@ -147,7 +147,7 @@ describe("useArticleDerivedState — feedMap / orderedFeedIds / enabledFeedIds",
     expect(result.current.result.orderedFeedIds).toEqual([])
   })
 
-  it("enabledFeedIds reflects only enabled feeds; summarizeFeedIds reflects summarize flag", (): void => {
+  it("enabledFeedIds reflects only enabled feeds", (): void => {
     const feeds: Feed[] = [
       feed(1, { enabled: true, summarize: true }),
       feed(2, { enabled: false, summarize: true }),
@@ -169,7 +169,6 @@ describe("useArticleDerivedState — feedMap / orderedFeedIds / enabledFeedIds",
     expect([...(result.current.result.enabledFeedIds ?? [])].sort()).toEqual([
       1, 3,
     ])
-    expect([...result.current.result.summarizeFeedIds].sort()).toEqual([1, 2])
   })
 
   it("enabledFeedIds is null when feeds are not yet loaded so downstream can skip filtering", (): void => {

@@ -26,7 +26,6 @@ interface UseArticleDerivedStateResult {
   feedMap: Map<number, Feed>
   orderedFeedIds: number[]
   enabledFeedIds: Set<number> | null
-  summarizeFeedIds: Set<number>
   enabledArticles: Article[]
   sessionReadByFeed: Map<number, number>
   unreadCounts: Map<number, number>
@@ -84,15 +83,6 @@ export function useArticleDerivedState({
     )
   }, [feeds])
 
-  const summarizeFeedIds = useMemo((): Set<number> => {
-    if (!feeds) return new Set<number>()
-    return new Set(
-      feeds
-        .filter((feed: Feed): boolean => feed.summarize)
-        .map((feed: Feed): number => feed.id),
-    )
-  }, [feeds])
-
   const enabledArticles = useMemo((): Article[] => {
     if (!enabledFeedIds) return allArticles ?? []
     return (allArticles ?? []).filter(
@@ -139,7 +129,6 @@ export function useArticleDerivedState({
     feedMap,
     orderedFeedIds,
     enabledFeedIds,
-    summarizeFeedIds,
     enabledArticles,
     sessionReadByFeed,
     unreadCounts,

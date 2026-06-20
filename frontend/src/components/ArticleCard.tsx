@@ -3,6 +3,7 @@ import type { JSX, KeyboardEvent, MouseEvent } from "react"
 import { forwardRef, useMemo } from "react"
 import type { Article } from "../api/client"
 import { parseSummary } from "../utils/articleContent"
+import type { PendingKind } from "../utils/articleProcessing"
 import { formatDate, formatRelative } from "../utils/date"
 
 type ParsedSummary = { text: string; imageUrls: string[] }
@@ -13,7 +14,9 @@ import { transformTwitterBlockquotes } from "../utils/twitterCard"
 interface Props {
   article: Article
   focused?: boolean
-  pendingSummary?: boolean
+  /** Which body-level LLM placeholder to show ("Awaiting summary/translation"),
+   *  or null/undefined when the body needs no processing. */
+  pendingKind?: PendingKind
   feedName?: string
   feedFaviconUrl?: string | null
   onClick?: () => void
@@ -28,7 +31,7 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
     {
       article,
       focused,
-      pendingSummary,
+      pendingKind,
       feedName,
       feedFaviconUrl,
       onClick,
@@ -212,9 +215,11 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
           </div>
         )}
 
-        {!parsedSummary && !article.content_translated && pendingSummary && (
+        {pendingKind && (
           <div className="mt-1 text-sm text-text-dim italic">
-            Awaiting summary...
+            {pendingKind === "translation"
+              ? "Awaiting translation..."
+              : "Awaiting summary..."}
           </div>
         )}
 
