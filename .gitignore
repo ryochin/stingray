@@ -325,3 +325,15 @@ dist
 .env
 .env.local
 tsconfig.tsbuildinfo
+
+# Local-only generated artifacts
+/output/
+
+# Database dumps — root-level backups in any compression (.sql / .sql.bz2 / .sql.gz)
+/backup*.sql*
+
+# Private working notes — kept out of the public repository
+/plans/
+/task.md
+/AGENTS.md
+/CLAUDE.md
