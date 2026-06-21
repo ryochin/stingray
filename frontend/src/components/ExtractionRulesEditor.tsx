@@ -5,8 +5,9 @@ import Editor from "react-simple-code-editor"
 import "prismjs/components/prism-clike"
 import "prismjs/components/prism-javascript"
 import "prismjs/components/prism-json"
-import type { Feed } from "../api/client"
+import type { Feed, InferStatus, SampleArticle } from "../api/client"
 import { api } from "../api/client"
+import { formatRelativeShort } from "../utils/date"
 
 function prettifyRules(raw: string | null | undefined): string {
   try {
@@ -15,6 +16,16 @@ function prettifyRules(raw: string | null | undefined): string {
   } catch {
     return raw || ""
   }
+}
+
+// User-facing hint shown when inference returns rules that didn't fully work.
+// "ok" needs no hint (the preview speaks for itself).
+const INFER_STATUS_HINT: Record<InferStatus, string | null> = {
+  ok: null,
+  empty: "Selectors matched no articles — adjust them above, then save.",
+  invalid:
+    "The model returned invalid selectors — adjust them above, then save.",
+  error: "Inference failed (LLM or page error) — try again or edit manually.",
 }
 
 export default function ExtractionRulesEditor({
@@ -30,6 +41,9 @@ export default function ExtractionRulesEditor({
   const [saving, setSaving] = useState<boolean>(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [inferring, setInferring] = useState<boolean>(false)
+  const [inferHint, setInferHint] = useState<string | null>(null)
+  const [samples, setSamples] = useState<SampleArticle[]>([])
 
   // Keep editor in sync when the feed prop changes (e.g. after invalidation)
   useEffect((): void => {
@@ -45,6 +59,23 @@ export default function ExtractionRulesEditor({
     )
     return (): void => clearTimeout(timer)
   }, [savedAt])
+
+  const runInference = async (): Promise<void> => {
+    setInferring(true)
+    setError(null)
+    setInferHint(null)
+    try {
+      const result = await api.inferRules(feed.id)
+      setJson(prettifyRules(JSON.stringify(result.rules)))
+      setSamples(result.sample_articles)
+      setInferHint(INFER_STATUS_HINT[result.status])
+    } catch (caught) {
+      setSamples([])
+      setError(caught instanceof Error ? caught.message : "Inference failed")
+    } finally {
+      setInferring(false)
+    }
+  }
 
   const validate = (): Record<string, string | null> | null => {
     try {
@@ -105,6 +136,41 @@ export default function ExtractionRulesEditor({
         />
       </div>
       {error && <div className="text-xs text-red-400 mt-1">{error}</div>}
+      {inferHint && (
+        <div className="text-xs text-yellow-400 mt-1" aria-live="polite">
+          <span aria-hidden="true">⚠</span> {inferHint}
+        </div>
+      )}
+      {samples.length > 0 && (
+        <div className="mt-2">
+          <div className="text-xs font-semibold text-text-heading mb-1">
+            Preview — {samples.length} article
+            {samples.length === 1 ? "" : "s"} extracted
+          </div>
+          <ul className="space-y-0.5 list-none p-0 m-0">
+            {samples.map((sample: SampleArticle) => (
+              <li
+                key={sample.url}
+                className="text-xs text-text-muted flex items-baseline gap-2"
+              >
+                <a
+                  href={sample.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-link hover:text-link-hover hover:underline truncate"
+                >
+                  {sample.title}
+                </a>
+                {sample.published && (
+                  <span className="text-text-dim shrink-0">
+                    {formatRelativeShort(sample.published)}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="flex items-center justify-end gap-2 mt-1.5">
         {savedAt != null && (
           <span
@@ -114,6 +180,18 @@ export default function ExtractionRulesEditor({
             ✓ Saved
           </span>
         )}
+        <button
+          type="button"
+          onClick={runInference}
+          disabled={inferring}
+          title="Ask the LLM to infer selectors from the page"
+          className="px-3 py-1 rounded text-xs bg-bg-secondary text-text-muted border border-border hover:text-text transition-colors disabled:opacity-40"
+        >
+          <span className={`inline-block ${inferring ? "animate-spin" : ""}`}>
+            {inferring ? "↻" : "✨"}
+          </span>{" "}
+          {inferring ? "Inferring..." : "Infer with LLM"}
+        </button>
         <button
           type="button"
           onClick={handleSave}

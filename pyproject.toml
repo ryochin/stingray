@@ -40,5 +40,6 @@ exclude = [
   "backend/summarizer.py",
   "backend/log.py",
   "backend/scraper.py",
+  "backend/selector_inference.py",
   "backend/tests",
 ]

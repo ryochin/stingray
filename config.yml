@@ -13,6 +13,13 @@ ollama:
   model: "gemma4:e4b"
   timeout: 120           # Seconds per LLM request
 
+# -- LLM selector inference (the "Infer with LLM" button for feed-less sites) --
+selector_inference:
+  max_html_bytes: 150000   # Max preprocessed HTML (bytes) sent to the LLM
+  max_attempts: 4          # Retries to locate the article list (temperature stays high for diversity)
+  num_ctx: 65536           # Ollama context window for inference (model must support it)
+  min_articles: 3          # Min extracted articles to accept (rejects small related/ranking side-lists)
+
 # -- URL cleanup --
 url_cleanup:
   enabled: true          # Strip well-known tracking params (utm_*, fbclid, gclid, ...) at ingest time

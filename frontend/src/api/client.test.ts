@@ -116,6 +116,40 @@ describe("api fetchJson behavior", () => {
     expect(await api.deleteFolder(1)).toBeUndefined()
   })
 
+  it("inferRules POSTs to the infer endpoint and returns the preview", async () => {
+    const payload = {
+      rules: { item: "li.entry", title: "a", link: "a" },
+      sample_articles: [
+        { title: "First", url: "https://example.com/a/1", published: null },
+      ],
+      attempts: 1,
+      status: "ok",
+    }
+    const spy: Mock<(input: string, init: RequestInit) => Promise<Response>> =
+      vi.fn(
+        (_input: string, _init: RequestInit): Promise<Response> =>
+          Promise.resolve(
+            new Response(JSON.stringify(payload), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+      )
+    vi.stubGlobal("fetch", spy)
+    const result: Awaited<ReturnType<typeof api.inferRules>> =
+      await api.inferRules(7)
+    expect(spy).toHaveBeenCalledOnce()
+    const call: [string, RequestInit] = spy.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(call[0]).toBe("/api/feeds/7/rules/infer")
+    expect(call[1].method).toBe("POST")
+    expect(result.status).toBe("ok")
+    expect(result.rules.item).toBe("li.entry")
+    expect(result.sample_articles[0].title).toBe("First")
+  })
+
   it("markRead POSTs url array as JSON", async () => {
     const spy: Mock<(input: string, init: RequestInit) => Promise<Response>> =
       vi.fn(

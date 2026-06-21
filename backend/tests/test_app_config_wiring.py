@@ -34,6 +34,12 @@ class TestOpenApiSchema:
     params = post.get("parameters", [])
     assert [(p["name"], p["in"]) for p in params] == [("feed_id", "path")]
 
+  def test_infer_rules_endpoint_exposed(self):
+    # The selector-inference endpoint must exist with only feed_id as a path param.
+    post = self._spec()["paths"]["/api/feeds/{feed_id}/rules/infer"]["post"]
+    params = post.get("parameters", [])
+    assert [(p["name"], p["in"]) for p in params] == [("feed_id", "path")]
+
 
 class TestConfigLoadedOnce:
   """The whole point of the refactor: config.yml is read once, in lifespan,

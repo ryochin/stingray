@@ -119,6 +119,19 @@ class UrlCleanupConfig(BaseModel):
   enabled: bool = True
 
 
+class SelectorInferenceConfig(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
+  # Guard against config typos that would silently break inference: e.g.
+  # min_articles=0 accepts a zero-article match, max_attempts=0 never calls the LLM.
+  max_html_bytes: int = Field(default=150000, ge=1000)
+  max_attempts: int = Field(default=4, ge=1)
+  num_ctx: int = Field(default=65536, ge=512)
+  # A real article index almost always lists 3+ posts; requiring 3 rejects small
+  # related/ranking side-lists that a 2-row match would otherwise accept.
+  min_articles: int = Field(default=3, ge=1)
+
+
 class AppConfig(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
@@ -130,6 +143,7 @@ class AppConfig(BaseModel):
   article_order: Literal["oldest", "newest"] = "oldest"
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)
   url_cleanup: UrlCleanupConfig = Field(default_factory=UrlCleanupConfig)
+  selector_inference: SelectorInferenceConfig = Field(default_factory=SelectorInferenceConfig)
 
   @classmethod
   def load(cls, path: Path = Path("config.yml"), *, required: bool = False) -> "AppConfig":

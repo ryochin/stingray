@@ -10,7 +10,7 @@ import time
 import xml.etree.ElementTree as _ET
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import AsyncIterator, Coroutine, cast
 
@@ -29,7 +29,8 @@ from feeds import _fetch_rss, extract_feed_candidates, probe_feed_body, read_fil
 from fetcher import refresh_all, summarize_pending
 from url_cleaner import clean_url
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
-from scraper import fetch_web_page  # type: ignore[import-untyped]
+from scraper import fetch_web_page, validate_extraction_rules  # type: ignore[import-untyped]
+from selector_inference import infer_and_validate
 from schemas import AppConfig, ArticleRow, FeedRow, FeedStats, FilterRow, FolderRow, StatusResponse
 
 # -- Globals for background refresh --
@@ -37,6 +38,10 @@ _refresh_lock = asyncio.Lock()
 _refresh_task: asyncio.Task[None] | None = None
 _summarize_lock = asyncio.Lock()
 _background_tasks: set[asyncio.Task[object]] = set()
+# Limit concurrent LLM selector inference so button mashing cannot flood Ollama.
+_infer_semaphore = asyncio.Semaphore(2)
+# Cap the raw HTML download for inference before preprocessing/truncation.
+_INFER_MAX_HTML_FETCH_BYTES = 5 * 1024 * 1024
 
 
 def _log_task_exception(task: asyncio.Task[object]) -> None:
@@ -421,7 +426,11 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
   feed = FeedRow(**body.model_dump(), site_url=probe.site_url, extraction_rules=extraction_rules)
   created = repo.add_feed(feed)
   log.info(f"  Feed created: id={created.id}, name={created.name}")
-  _spawn_background(_fetch_single_feed(created, config))
+  # Web-scrape feeds are created with empty rules ("{}"); fetching now would
+  # just fail (no "item" selector) and record an error. Defer the first fetch
+  # until rules are inferred and saved. RSS/Atom feeds fetch immediately.
+  if extraction_rules is None:
+    _spawn_background(_fetch_single_feed(created, config))
   return created
 
 
@@ -489,15 +498,84 @@ async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
   if feed.extraction_rules is None:
     raise HTTPException(400, "Not a web page feed")
   rules_raw: object = await request.json()
-  if not isinstance(rules_raw, dict):
-    raise HTTPException(422, "Must be a JSON object")
-  rules = cast(dict[str, object], rules_raw)
-  for key in ("item", "title", "link"):
-    value = rules.get(key)
-    if not value or not isinstance(value, str):
-      raise HTTPException(422, f"Missing or empty required field: {key}")
+  try:
+    rules = validate_extraction_rules(rules_raw)
+  except ValueError as e:
+    raise HTTPException(422, str(e))
   repo.update_feed_extraction_rules(feed_id, json.dumps(rules))
   return _get_feed_or_404(feed_id)
+
+
+class SampleArticle(BaseModel):
+  title: str
+  url: str
+  published: datetime | None = None
+
+
+class InferRulesResponse(BaseModel):
+  rules: dict[str, str]
+  sample_articles: list[SampleArticle]
+  attempts: int
+  status: str
+
+
+@app.post("/api/feeds/{feed_id}/rules/infer")
+async def infer_feed_rules(feed_id: int, request: Request) -> InferRulesResponse:
+  """Infer CSS extraction rules for a web-scrape feed via the LLM. Validates the
+  rules against the live page and returns a preview — never persists them."""
+  feed = _get_feed_or_404(feed_id)
+  if feed.extraction_rules is None:
+    raise HTTPException(400, "Not a web page feed")
+  if not feed.url:
+    raise HTTPException(400, "Feed has no URL")
+  config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
+  if not config.ollama.enabled:
+    raise HTTPException(503, "LLM is disabled (ollama.enabled=false)")
+  ollama_url = os.environ.get("OLLAMA_BASE_URL") or config.ollama.base_url
+  llm_ok, llm_err = _probe_llm(ollama_url)
+  if not llm_ok:
+    raise HTTPException(503, f"LLM is unavailable: {llm_err}")
+
+  # Fetch the page, capping the download and using the final (post-redirect)
+  # URL as the base for resolving relative article links.
+  try:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+      resp = await client.get(feed.url)
+      resp.raise_for_status()
+      raw = resp.content[:_INFER_MAX_HTML_FETCH_BYTES]
+      html = raw.decode(resp.encoding or "utf-8", errors="ignore")
+      page_url = str(resp.url)
+  except httpx.HTTPError as e:
+    raise HTTPException(502, f"Failed to fetch page: {e}")
+
+  clean_url_fn = clean_url if config.url_cleanup.enabled else None
+  async with _infer_semaphore:
+    async with httpx.AsyncClient(
+      base_url=ollama_url, timeout=config.ollama.timeout,
+    ) as ollama_client:
+      result = await infer_and_validate(
+        ollama_client,
+        config.ollama.model,
+        html,
+        page_url=page_url,
+        source=feed.name,
+        max_html_bytes=config.selector_inference.max_html_bytes,
+        max_attempts=config.selector_inference.max_attempts,
+        max_items=config.max_items_per_feed,
+        min_articles=config.selector_inference.min_articles,
+        num_ctx=config.selector_inference.num_ctx,
+        clean_url_fn=clean_url_fn,
+      )
+
+  return InferRulesResponse(
+    rules=result.rules,
+    sample_articles=[
+      SampleArticle(title=a.title, url=a.url, published=a.published)
+      for a in result.sample_articles
+    ],
+    attempts=result.attempts,
+    status=result.status,
+  )
 
 
 class FeedTranslateUpdate(BaseModel):

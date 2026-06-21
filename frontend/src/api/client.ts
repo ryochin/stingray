@@ -64,6 +64,25 @@ export interface FeedCreate {
   folder_id?: number
 }
 
+// CSS selector rules for web-scrape feeds (item/title/link required, rest optional).
+export type ExtractionRules = Record<string, string>
+
+export interface SampleArticle {
+  title: string
+  url: string
+  published: string | null
+}
+
+// Mirrors selector_inference.InferResult.status on the backend.
+export type InferStatus = "ok" | "empty" | "invalid" | "error"
+
+export interface InferResult {
+  rules: ExtractionRules
+  sample_articles: SampleArticle[]
+  attempts: number
+  status: InferStatus
+}
+
 export interface FilterRule {
   id: number
   pattern: string
@@ -280,6 +299,11 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(rules),
     }),
+
+  // Ask the LLM to infer extraction rules. Returns a validated preview; never
+  // persists (the user confirms via updateFeedRules).
+  inferRules: (feedId: number) =>
+    fetchJson<InferResult>(`/feeds/${feedId}/rules/infer`, { method: "POST" }),
 
   exportFilters: async (): Promise<void> => {
     const resp: Response = await fetch(`${BASE}/filters/export`)

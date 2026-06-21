@@ -9,9 +9,58 @@ from typing import Callable
 from urllib.parse import urljoin
 
 import httpx
+import soupsieve
 from bs4 import BeautifulSoup
 
 from models import Article
+
+# Extraction rule keys. The required three identify the repeating item and its
+# title/link; the rest are optional refinements. "link" accepts the sentinel
+# "_self" meaning the item element itself is the <a> (see parse_web_page).
+ALLOWED_RULE_KEYS = frozenset({
+  "item", "title", "link", "link_attr",
+  "date", "date_attr", "thumbnail", "thumbnail_attr",
+})
+REQUIRED_RULE_KEYS = ("item", "title", "link")
+SELECTOR_RULE_KEYS = ("item", "title", "link", "date", "thumbnail")
+MAX_RULE_VALUE_LEN = 200
+
+
+def validate_extraction_rules(raw: object) -> dict[str, str]:
+  """Validate and normalize extraction rules. Raises ValueError on bad input.
+
+  Shared by the PATCH /rules endpoint and LLM selector inference so the same
+  contract (allowed keys, required fields, CSS syntax) is enforced in one place.
+  """
+  if not isinstance(raw, dict):
+    raise ValueError("Extraction rules must be a JSON object")
+  rules: dict[str, str] = {}
+  for key, value in raw.items():
+    if key not in ALLOWED_RULE_KEYS:
+      raise ValueError(f"Unknown extraction rule key: {key}")
+    if value is None:
+      # LLMs tend to fill optional fields with null instead of omitting them;
+      # treat null as "omitted" (a missing required key is still caught below).
+      continue
+    if not isinstance(value, str):
+      raise ValueError(f"Value for '{key}' must be a string")
+    trimmed = value.strip()
+    if len(trimmed) > MAX_RULE_VALUE_LEN:
+      raise ValueError(f"Value for '{key}' is too long (max {MAX_RULE_VALUE_LEN} chars)")
+    if trimmed:
+      rules[key] = trimmed
+  for key in REQUIRED_RULE_KEYS:
+    if not rules.get(key):
+      raise ValueError(f"Missing or empty required field: {key}")
+  for key in SELECTOR_RULE_KEYS:
+    selector = rules.get(key)
+    if not selector or (key == "link" and selector == "_self"):
+      continue
+    try:
+      soupsieve.compile(selector)
+    except Exception as e:
+      raise ValueError(f"Invalid CSS selector for '{key}': {selector!r}") from e
+  return rules
 
 
 def _parse_date(text: str | None) -> datetime | None:

@@ -57,6 +57,7 @@ async def call_ollama(
   user_prompt: str,
   *,
   retries: int = 2,
+  options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
   """Send a chat completion request to Ollama and return parsed JSON."""
   last_error = None
@@ -65,15 +66,15 @@ async def call_ollama(
     {"role": "user", "content": user_prompt},
   ]
   for attempt in range(1 + retries):
-    resp = await client.post(
-      "/api/chat",
-      json={
-        "model": model,
-        "messages": messages,
-        "stream": False,
-        "format": "json",
-      },
-    )
+    payload: dict[str, Any] = {
+      "model": model,
+      "messages": messages,
+      "stream": False,
+      "format": "json",
+    }
+    if options:
+      payload["options"] = options
+    resp = await client.post("/api/chat", json=payload)
     resp.raise_for_status()
     body: Any = resp.json()
     content = str(body["message"]["content"]).strip()
