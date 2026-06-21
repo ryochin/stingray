@@ -40,7 +40,7 @@ def _insert_feed(*, web: bool) -> int:
           RETURNING id"""
     ).fetchone()
   assert row is not None
-  return int(row[0])
+  return int(row["id"])
 
 
 def _stored_rules(feed_id: int) -> str | None:
@@ -49,7 +49,7 @@ def _stored_rules(feed_id: int) -> str | None:
       "SELECT extraction_rules FROM feeds WHERE id = %s", (feed_id,)
     ).fetchone()
   assert row is not None
-  return row[0]
+  return row["extraction_rules"]
 
 
 def _client(config: AppConfig | None = None) -> TestClient:
@@ -100,7 +100,10 @@ def test_llm_disabled_returns_503() -> None:
 def test_inference_returns_preview_without_persisting(monkeypatch: pytest.MonkeyPatch) -> None:
   feed_id = _insert_feed(web=True)
   _mock_inference(monkeypatch, GOOD_RULES)
-  resp = _client().post(f"/api/feeds/{feed_id}/rules/infer")
+  # The fixture page lists exactly two articles, so accept a two-item match.
+  config = AppConfig()
+  config.selector_inference.min_articles = 2
+  resp = _client(config).post(f"/api/feeds/{feed_id}/rules/infer")
   assert resp.status_code == 200
   body = resp.json()
   assert body["status"] == "ok"
