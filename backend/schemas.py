@@ -13,6 +13,13 @@ from pydantic import BaseModel, ConfigDict, Field
 # -- DB row models --
 
 
+# Explicit fetch-health classification surfaced to the API. Unlike
+# consecutive_failures (which measures severity of a failure streak), this
+# captures the *most recent* fetch outcome so the UI can distinguish a soft
+# degraded/stale-cache state from a hard failure without heuristics.
+FeedHealth = Literal["ok", "degraded", "failing"]
+
+
 class FilterRow(BaseModel):
   id: int = 0
   pattern: str
@@ -40,6 +47,7 @@ class FeedRow(BaseModel):
   last_fetched_at: datetime | None = None
   consecutive_failures: int = 0
   last_error: str | None = None
+  health: FeedHealth = "ok"
   extraction_rules: str | None = None
   fetch_interval_min: int = 10
   next_fetch_at: datetime | None = None

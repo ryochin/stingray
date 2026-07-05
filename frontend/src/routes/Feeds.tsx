@@ -593,24 +593,19 @@ function FeedDetails({
         </button>
       </div>
       {/*
-        Degraded (stale cache) vs. hard failure heuristic: a scheduled refresh
-        that served a cached copy records a diagnostic `last_error` without
-        bumping `consecutive_failures`, so failures === 0 reads as a soft yellow
-        "Stale" warning while a real failure stays red. Known limitation: a
-        *manual* single-feed fetch failure also leaves failures untouched
-        (repo.update_feed_fetch_status), so it too shows as "Stale" until the
-        next scheduled run reclassifies it. A precise fix needs an explicit
-        backend `health` state; see task.md.
+        Degraded (stale cache / web-norules) shows a soft yellow "Stale"
+        warning; a hard failure shows red "Error". The backend `health` state
+        classifies this explicitly, so even a manual fetch failure — which
+        leaves consecutive_failures untouched — is correctly surfaced as red.
       */}
-      {feed.last_error && (
+      {feed.health !== "ok" && feed.last_error && (
         <div
           className={`text-xs mt-1 truncate ${
-            feed.consecutive_failures === 0 ? "text-yellow-400" : "text-red-400"
+            feed.health === "degraded" ? "text-yellow-400" : "text-red-400"
           }`}
           title={feed.last_error}
         >
-          {feed.consecutive_failures === 0 ? "Stale" : "Error"}:{" "}
-          {feed.last_error}
+          {feed.health === "degraded" ? "Stale" : "Error"}: {feed.last_error}
         </div>
       )}
       {feed.extraction_rules != null && onRulesUpdated && (

@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS feeds (
   last_fetched_at       TIMESTAMPTZ,
   consecutive_failures  INTEGER NOT NULL DEFAULT 0,
   last_error            TEXT,
+  health                TEXT NOT NULL DEFAULT 'ok'
+                        CONSTRAINT feeds_health_state
+                        CHECK (health IN ('ok', 'degraded', 'failing')),
   extraction_rules      TEXT,
   fetch_interval_min    INTEGER NOT NULL DEFAULT 10
                         CHECK (fetch_interval_min IN (10, 15, 30, 60, 120, 240, 360)),
@@ -89,6 +92,11 @@ ALTER TABLE feeds
 ALTER TABLE feeds DROP CONSTRAINT IF EXISTS feeds_fetch_interval_bucket;
 ALTER TABLE feeds ADD CONSTRAINT feeds_fetch_interval_bucket
   CHECK (fetch_interval_min IN (10, 15, 30, 60, 120, 240, 360));
+ALTER TABLE feeds
+  ADD COLUMN IF NOT EXISTS health TEXT NOT NULL DEFAULT 'ok';
+ALTER TABLE feeds DROP CONSTRAINT IF EXISTS feeds_health_state;
+ALTER TABLE feeds ADD CONSTRAINT feeds_health_state
+  CHECK (health IN ('ok', 'degraded', 'failing'));
 CREATE INDEX IF NOT EXISTS idx_feeds_next_fetch
   ON feeds(next_fetch_at) WHERE enabled;
 """

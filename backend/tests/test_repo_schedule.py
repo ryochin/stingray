@@ -48,7 +48,7 @@ def _read_feed(feed_id: int) -> dict:
   with db.connection() as conn:
     row = conn.execute(
       "SELECT fetch_interval_min, next_fetch_at, consecutive_failures, "
-      "last_error, last_fetched_at, enabled "
+      "last_error, last_fetched_at, enabled, health "
       "FROM feeds WHERE id = %s",
       (feed_id,),
     ).fetchone()
@@ -188,6 +188,42 @@ class TestRecordFeedAttempt:
   def test_missing_feed_is_noop(self, clean_db):
     # Should silently ignore IDs that don't exist.
     repo.record_feed_attempt(999999, "fresh")
+
+
+class TestRecordFeedAttemptHealth:
+  """Each outcome maps to an explicit health state surfaced to the API."""
+
+  def test_failure_marks_failing(self, clean_db):
+    fid = _make_feed()
+    repo.record_feed_attempt(fid, "failure", error="boom")
+    assert _read_feed(fid)["health"] == "failing"
+
+  def test_degraded_marks_degraded(self, clean_db):
+    fid = _make_feed()
+    repo.record_feed_attempt(fid, "degraded", error="stale cache")
+    assert _read_feed(fid)["health"] == "degraded"
+
+  def test_degraded_without_error_marks_degraded(self, clean_db):
+    fid = _make_feed()
+    repo.record_feed_attempt(fid, "degraded")
+    assert _read_feed(fid)["health"] == "degraded"
+
+  def test_fresh_marks_ok(self, clean_db):
+    fid = _make_feed(consecutive_failures=2, last_error="prev")
+    repo.record_feed_attempt(fid, "fresh")
+    assert _read_feed(fid)["health"] == "ok"
+
+  def test_miss_marks_ok(self, clean_db):
+    fid = _make_feed()
+    repo.record_feed_attempt(fid, "miss")
+    assert _read_feed(fid)["health"] == "ok"
+
+  def test_recovery_from_failing_to_ok(self, clean_db):
+    fid = _make_feed()
+    repo.record_feed_attempt(fid, "failure", error="boom")
+    assert _read_feed(fid)["health"] == "failing"
+    repo.record_feed_attempt(fid, "fresh")
+    assert _read_feed(fid)["health"] == "ok"
 
 
 # -- list_due_feeds --

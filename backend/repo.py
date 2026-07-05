@@ -12,7 +12,15 @@ from typing import Any, Iterator, Literal
 from psycopg import sql
 
 from models import Article
-from schemas import ArticleRow, FeedRow, FeedStats, FilterRow, FolderRow, RefreshJob
+from schemas import (
+  ArticleRow,
+  FeedHealth,
+  FeedRow,
+  FeedStats,
+  FilterRow,
+  FolderRow,
+  RefreshJob,
+)
 
 import db
 
@@ -94,7 +102,7 @@ def record_feed_attempt(
         raw_next = cur_next
       conn.execute(
         "UPDATE feeds SET next_fetch_at = %s, consecutive_failures = %s, "
-        "last_error = %s WHERE id = %s",
+        "last_error = %s, health = 'failing' WHERE id = %s",
         (raw_next, n, error, feed_id),
       )
       return
@@ -107,13 +115,13 @@ def record_feed_attempt(
       if error is not None:
         conn.execute(
           "UPDATE feeds SET next_fetch_at = %s, last_fetched_at = %s, "
-          "last_error = %s WHERE id = %s",
+          "last_error = %s, health = 'degraded' WHERE id = %s",
           (next_at, now, error, feed_id),
         )
       else:
         conn.execute(
-          "UPDATE feeds SET next_fetch_at = %s, last_fetched_at = %s "
-          "WHERE id = %s",
+          "UPDATE feeds SET next_fetch_at = %s, last_fetched_at = %s, "
+          "health = 'degraded' WHERE id = %s",
           (next_at, now, feed_id),
         )
       return
@@ -123,8 +131,8 @@ def record_feed_attempt(
     next_at = schedule_next_at(now, next_min)
     conn.execute(
       "UPDATE feeds SET fetch_interval_min = %s, next_fetch_at = %s, "
-      "consecutive_failures = 0, last_fetched_at = %s, last_error = NULL "
-      "WHERE id = %s",
+      "consecutive_failures = 0, last_fetched_at = %s, last_error = NULL, "
+      "health = 'ok' WHERE id = %s",
       (next_min, next_at, now, feed_id),
     )
 
@@ -549,26 +557,48 @@ def get_feed_stats() -> dict[int, FeedStats]:
 def update_feed_fetch_status(
   feed_id: int,
   *,
-  success: bool,
+  health: FeedHealth,
   error: str | None = None,
 ) -> None:
   """Record the outcome of a *manual* single-feed fetch.
 
-  Intentionally touches only `last_fetched_at` and `last_error` — the adaptive
-  schedule owns `consecutive_failures` / `fetch_interval_min` / `next_fetch_at`
-  via record_feed_attempt, and manual trigger failures must not pollute that
-  learning signal (it would inflate backoff on the next scheduled run).
+  Intentionally touches only `last_fetched_at` / `last_error` / `health` — the
+  adaptive schedule owns `consecutive_failures` / `fetch_interval_min` /
+  `next_fetch_at` via record_feed_attempt, and manual trigger failures must not
+  pollute that learning signal (it would inflate backoff on the next scheduled
+  run). `health` is written explicitly so a manual failure surfaces as
+  "failing" even though the failure counter is left untouched.
+
+  `last_fetched_at` is advanced for any completed attempt (ok or degraded,
+  including a served stale cache) but left untouched on a hard failure —
+  matching record_feed_attempt's scheduled-path semantics.
   """
   with db.connection() as conn:
-    if success:
+    if health == "ok":
       conn.execute(
-        "UPDATE feeds SET last_fetched_at = NOW(), last_error = NULL "
-        "WHERE id = %s",
+        "UPDATE feeds SET last_fetched_at = NOW(), last_error = NULL, "
+        "health = 'ok' WHERE id = %s",
         (feed_id,),
       )
-    else:
+    elif health == "degraded":
+      # Mirror record_feed_attempt's degraded branch: advance last_fetched_at,
+      # but only overwrite last_error when a diagnostic is supplied so a bare
+      # degraded attempt cannot wipe an existing diagnostic.
+      if error is not None:
+        conn.execute(
+          "UPDATE feeds SET last_fetched_at = NOW(), last_error = %s, "
+          "health = 'degraded' WHERE id = %s",
+          (error, feed_id),
+        )
+      else:
+        conn.execute(
+          "UPDATE feeds SET last_fetched_at = NOW(), health = 'degraded' "
+          "WHERE id = %s",
+          (feed_id,),
+        )
+    else:  # failing: a hard failure must not advance last_fetched_at
       conn.execute(
-        "UPDATE feeds SET last_error = %s WHERE id = %s",
+        "UPDATE feeds SET last_error = %s, health = 'failing' WHERE id = %s",
         (error, feed_id),
       )
 

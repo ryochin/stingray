@@ -200,23 +200,67 @@ class TestDeleteFeedCascade:
 class TestFetchStatus:
   def test_success_clears_last_error(self):
     fid = repo.add_feed(FeedRow(name="F", url="https://f.example.com/")).id
-    repo.update_feed_fetch_status(fid, success=False, error="boom")
-    repo.update_feed_fetch_status(fid, success=True)
+    repo.update_feed_fetch_status(fid, health="failing", error="boom")
+    repo.update_feed_fetch_status(fid, health="ok")
     feed = repo.get_feed_by_id(fid)
     assert feed is not None
     assert feed.last_error is None
     assert feed.last_fetched_at is not None
+    assert feed.health == "ok"
 
   def test_failure_sets_error_without_touching_failure_counter(self):
     # Manual single-feed fetch must not pollute the adaptive-schedule signal.
-    # consecutive_failures is owned by record_feed_attempt (scheduled path).
+    # consecutive_failures is owned by record_feed_attempt (scheduled path),
+    # but health is set explicitly so a manual failure still reads as "failing".
     fid = repo.add_feed(FeedRow(name="F", url="https://f.example.com/")).id
-    repo.update_feed_fetch_status(fid, success=False, error="boom")
-    repo.update_feed_fetch_status(fid, success=False, error="boom again")
+    repo.update_feed_fetch_status(fid, health="failing", error="boom")
+    repo.update_feed_fetch_status(fid, health="failing", error="boom again")
     feed = repo.get_feed_by_id(fid)
     assert feed is not None
     assert feed.consecutive_failures == 0
     assert feed.last_error == "boom again"
+    assert feed.health == "failing"
+
+  def test_manual_web_norules_marks_degraded(self):
+    # A manual fetch of a web feed with no extraction rules is a soft degraded
+    # state, not a hard failure.
+    fid = repo.add_feed(FeedRow(name="F", url="https://f.example.com/")).id
+    repo.update_feed_fetch_status(
+      fid, health="degraded", error="extraction rules not configured"
+    )
+    feed = repo.get_feed_by_id(fid)
+    assert feed is not None
+    assert feed.consecutive_failures == 0
+    assert feed.health == "degraded"
+
+  def test_degraded_advances_last_fetched_at(self):
+    # A degraded attempt (e.g. served stale cache) is still a completed fetch,
+    # so last_fetched_at must advance — matching the scheduled path.
+    fid = repo.add_feed(FeedRow(name="F", url="https://f.example.com/")).id
+    repo.update_feed_fetch_status(fid, health="degraded", error="stale cache")
+    feed = repo.get_feed_by_id(fid)
+    assert feed is not None
+    assert feed.last_fetched_at is not None
+    assert feed.last_error == "stale cache"
+
+  def test_failing_does_not_advance_last_fetched_at(self):
+    # A hard failure returned nothing, so last_fetched_at must stay null.
+    fid = repo.add_feed(FeedRow(name="F", url="https://f.example.com/")).id
+    repo.update_feed_fetch_status(fid, health="failing", error="boom")
+    feed = repo.get_feed_by_id(fid)
+    assert feed is not None
+    assert feed.last_fetched_at is None
+
+  def test_degraded_without_error_preserves_last_error(self):
+    # A bare degraded attempt must not wipe an existing diagnostic, matching
+    # record_feed_attempt's degraded semantics.
+    fid = repo.add_feed(FeedRow(name="F", url="https://f.example.com/")).id
+    repo.update_feed_fetch_status(fid, health="degraded", error="stale cache")
+    repo.update_feed_fetch_status(fid, health="degraded")
+    feed = repo.get_feed_by_id(fid)
+    assert feed is not None
+    assert feed.last_error == "stale cache"
+    assert feed.health == "degraded"
 
 
 class TestFilterCrud:

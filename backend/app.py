@@ -26,7 +26,7 @@ import lang
 import log
 import repo
 from feeds import _fetch_rss, extract_feed_candidates, probe_feed_body, read_file_url  # type: ignore[import-untyped]
-from fetcher import refresh_all, summarize_pending
+from fetcher import STALE_CACHE_DIAGNOSTICS, refresh_all, summarize_pending
 from url_cleaner import clean_url
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
 from scraper import fetch_web_page, validate_extraction_rules  # type: ignore[import-untyped]
@@ -35,6 +35,7 @@ from schemas import (
   DEFAULT_USER_AGENT,
   AppConfig,
   ArticleRow,
+  FeedHealth,
   FeedRow,
   FeedStats,
   FilterRow,
@@ -358,6 +359,19 @@ async def _probe_feed(
   return ProbeResult()
 
 
+def _manual_success_health(source_tag: str | None) -> tuple[FeedHealth, str | None]:
+  """Classify a successful manual fetch as degraded (stale cache) or ok.
+
+  Mirrors the scheduled path's stale-cache handling so a manual single-feed
+  fetch that only served a cached copy surfaces as "degraded" with the same
+  diagnostic, rather than silently looking healthy.
+  """
+  diagnostic = STALE_CACHE_DIAGNOSTICS.get(source_tag or "")
+  if diagnostic is not None:
+    return "degraded", diagnostic
+  return "ok", None
+
+
 async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
   """Fetch articles from a single feed and persist to DB."""
   start = time.perf_counter()
@@ -366,6 +380,7 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
     feed_cfg = feed.to_feed_cfg()
     kind = "web" if feed.extraction_rules else "rss"
     log.step(f"Fetching feed [{kind}]: {feed.name} ({feed.url})")
+    source_tag: str | None = None
     async with httpx.AsyncClient(
       timeout=30, follow_redirects=True,
       headers={"User-Agent": config.user_agent},
@@ -376,10 +391,10 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
         )
       elif feed.extraction_rules is not None:
         log.warn(f"  Skipping '{feed.name}': extraction rules not configured yet.")
-        repo.update_feed_fetch_status(feed.id, success=False, error="extraction rules not configured")
+        repo.update_feed_fetch_status(feed.id, health="degraded", error="extraction rules not configured")
         return
       else:
-        articles, was_cached, _tag = await _fetch_rss(
+        articles, was_cached, source_tag = await _fetch_rss(
           client, feed_cfg, clean_url_fn=clean_url_fn,
         )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
@@ -395,12 +410,13 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
       if probe.site_url:
         repo.update_feed_site_url(feed.id, probe.site_url)
         log.info(f"  Updated site_url: {probe.site_url}")
-    repo.update_feed_fetch_status(feed.id, success=True)
+    health, error = _manual_success_health(source_tag)
+    repo.update_feed_fetch_status(feed.id, health=health, error=error)
     log.success(f"  Done: {feed.name}")
   except Exception as e:
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     log.error(f"  Failed [{feed.name}] after {elapsed_ms}ms: {type(e).__name__}: {e}")
-    repo.update_feed_fetch_status(feed.id, success=False, error=str(e))
+    repo.update_feed_fetch_status(feed.id, health="failing", error=str(e))
 
 
 @app.post("/api/feeds", status_code=201)

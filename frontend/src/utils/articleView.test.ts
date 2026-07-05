@@ -25,6 +25,7 @@ function feed(id: number, overrides: Partial<Feed> = {}): Feed {
     last_fetched_at: null,
     consecutive_failures: 0,
     last_error: null,
+    health: "ok",
     extraction_rules: null,
     created_at: "2024-01-01T00:00:00Z",
     ...overrides,

@@ -19,6 +19,9 @@ export interface Feed {
   last_fetched_at: string | null
   consecutive_failures: number
   last_error: string | null
+  // Explicit most-recent-fetch state. Drives the Stale/Error split; distinct
+  // from consecutive_failures, which measures failure-streak severity.
+  health: "ok" | "degraded" | "failing"
   extraction_rules: string | null
   created_at: string
 }

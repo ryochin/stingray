@@ -1,8 +1,9 @@
 /**
- * Guards the degraded-vs-failing distinction in the expanded feed card. A feed
- * that served a stale/cached copy (a diagnostic `last_error` but no consecutive
- * failures) is a soft "Stale" warning shown in yellow, while a feed with
- * `consecutive_failures > 0` is a hard red "Error". See task.md.
+ * Guards the degraded-vs-failing distinction in the expanded feed card, driven
+ * by the backend `health` state. A `degraded` feed (stale cache / web-norules)
+ * is a soft yellow "Stale" warning; a `failing` feed is a hard red "Error".
+ * Crucially this holds even when consecutive_failures is 0 (e.g. a manual fetch
+ * failure), which the previous heuristic mis-rendered as "Stale". See task.md.
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -65,6 +66,7 @@ function makeFeed(overrides: Partial<Feed>): Feed {
     last_fetched_at: null,
     consecutive_failures: 0,
     last_error: null,
+    health: "ok",
     // null keeps the card out of the lazy ExtractionRulesEditor (Suspense).
     extraction_rules: null,
     created_at: "2026-07-05T00:00:00Z",
@@ -101,11 +103,11 @@ afterEach((): void => {
 })
 
 describe("degraded vs failing last_error display", (): void => {
-  it("shows a yellow Stale warning for a degraded feed (failures 0 + last_error)", async (): Promise<void> => {
+  it("shows a yellow Stale warning for a degraded feed", async (): Promise<void> => {
     getFeeds.mockResolvedValue([
       makeFeed({
         name: "Degraded Feed",
-        consecutive_failures: 0,
+        health: "degraded",
         last_error: "served cached copy",
       }),
     ])
@@ -120,10 +122,11 @@ describe("degraded vs failing last_error display", (): void => {
     expect(screen.queryByText(/^Error:/)).toBeNull()
   })
 
-  it("shows a red Error for a failing feed (consecutive_failures > 0)", async (): Promise<void> => {
+  it("shows a red Error for a failing feed", async (): Promise<void> => {
     getFeeds.mockResolvedValue([
       makeFeed({
         name: "Failing Feed",
+        health: "failing",
         consecutive_failures: 3,
         last_error: "net timeout",
       }),
@@ -137,11 +140,34 @@ describe("degraded vs failing last_error display", (): void => {
     expect(screen.queryByText(/^Stale:/)).toBeNull()
   })
 
-  it("shows neither Stale nor Error when there is no last_error", async (): Promise<void> => {
+  it("shows a red Error for a manual-fetch failure even when failures is 0", async (): Promise<void> => {
+    // Regression guard: a manual single-feed fetch failure leaves
+    // consecutive_failures at 0, so the old heuristic wrongly showed "Stale".
+    // The explicit `failing` health must render red "Error".
+    getFeeds.mockResolvedValue([
+      makeFeed({
+        name: "Manual Fail Feed",
+        health: "failing",
+        consecutive_failures: 0,
+        last_error: "connection refused",
+      }),
+    ])
+    renderFeeds()
+    await expandFeed("Manual Fail Feed")
+
+    const line: HTMLElement = await screen.findByText(
+      "Error: connection refused",
+    )
+    expect(line.className).toContain("text-red-400")
+    expect(line.className).not.toContain("text-yellow-400")
+    expect(screen.queryByText(/^Stale:/)).toBeNull()
+  })
+
+  it("shows neither Stale nor Error when health is ok", async (): Promise<void> => {
     getFeeds.mockResolvedValue([
       makeFeed({
         name: "Healthy Feed",
-        consecutive_failures: 0,
+        health: "ok",
         last_error: null,
       }),
     ])

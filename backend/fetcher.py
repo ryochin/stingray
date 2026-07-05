@@ -65,6 +65,17 @@ def _needs_llm(article: Article, *, translate: bool, summarize: bool) -> bool:
   return not article.summary
 
 
+# Source tags that mean "we served a stale cached copy" mapped to the
+# diagnostic recorded on the feed. Shared by the scheduled path
+# (_classify_outcome) and the manual single-feed path (app._fetch_single_feed)
+# so both classify stale cache identically.
+STALE_CACHE_DIAGNOSTICS: dict[str, str] = {
+  "5xx-cache": "serving stale cache: origin returned HTTP 4xx/5xx (blocked?)",
+  "net-cache": "serving stale cache: network error reaching origin",
+  "304-empty": "304 Not Modified but no cached copy available",
+}
+
+
 def _classify_outcome(
   source_tag: str | None,
   feed_kind: str,
@@ -85,12 +96,9 @@ def _classify_outcome(
     return "degraded", "extraction rules not configured"
   # Serving a stale cached copy: record why so the feed shows up as degraded
   # with a diagnostic instead of silently looking healthy on old content.
-  if source_tag == "5xx-cache":
-    return "degraded", "serving stale cache: origin returned HTTP 4xx/5xx (blocked?)"
-  if source_tag == "net-cache":
-    return "degraded", "serving stale cache: network error reaching origin"
-  if source_tag == "304-empty":
-    return "degraded", "304 Not Modified but no cached copy available"
+  stale_diagnostic = STALE_CACHE_DIAGNOSTICS.get(source_tag or "")
+  if stale_diagnostic is not None:
+    return "degraded", stale_diagnostic
   # Normal path: fresh body or clean 304 / unchanged / web success (None tag).
   return ("fresh" if inserted_count >= 1 else "miss"), None
 
