@@ -14,7 +14,7 @@ import log
 import repo
 from feeds import extract_site_url, fetch_all  # type: ignore[import-untyped]
 from models import Article
-from schemas import AppConfig, FeedRow
+from schemas import DEFAULT_USER_AGENT, AppConfig, FeedRow
 from seed import enrich_from_legacy_cache
 from summarizer import summarize_all  # type: ignore[import-untyped]
 from url_cleaner import clean_url
@@ -83,8 +83,14 @@ def _classify_outcome(
     return "failure", f"{type(persist_exc).__name__}: {persist_exc}"
   if feed_kind == "web-norules":
     return "degraded", "extraction rules not configured"
-  if source_tag in ("net-cache", "5xx-cache", "304-empty"):
-    return "degraded", None
+  # Serving a stale cached copy: record why so the feed shows up as degraded
+  # with a diagnostic instead of silently looking healthy on old content.
+  if source_tag == "5xx-cache":
+    return "degraded", "serving stale cache: origin returned HTTP 4xx/5xx (blocked?)"
+  if source_tag == "net-cache":
+    return "degraded", "serving stale cache: network error reaching origin"
+  if source_tag == "304-empty":
+    return "degraded", "304 Not Modified but no cached copy available"
   # Normal path: fresh body or clean 304 / unchanged / web success (None tag).
   return ("fresh" if inserted_count >= 1 else "miss"), None
 
@@ -152,6 +158,7 @@ async def _fetch_and_persist_feeds(
     max_items=config.max_items_per_feed,
     on_feed_done=_persist_feed,
     clean_url_fn=clean_url if config.url_cleanup.enabled else None,
+    user_agent=config.user_agent,
   )
   return articles, new_count_total
 
@@ -222,7 +229,9 @@ async def _run_llm_pass(
   return failures
 
 
-async def _backfill_site_urls(feeds: list[FeedRow]) -> None:
+async def _backfill_site_urls(
+  feeds: list[FeedRow], user_agent: str = DEFAULT_USER_AGENT
+) -> None:
   """Look up `site_url` for any feed missing it by fetching the feed URL and
   scraping its declared site link. Runs feeds in parallel (capped) to keep
   refresh latency from scaling linearly with the missing count.
@@ -246,7 +255,9 @@ async def _backfill_site_urls(feeds: list[FeedRow]) -> None:
       except Exception:
         return
 
-  async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+  async with httpx.AsyncClient(
+    timeout=15, follow_redirects=True, headers={"User-Agent": user_agent}
+  ) as client:
     await asyncio.gather(*(_one(client, f) for f in missing))
 
 
@@ -323,7 +334,7 @@ async def refresh_all(
           articles, feeds, feed_id_map, config,
         )
 
-      await _backfill_site_urls(feeds)
+      await _backfill_site_urls(feeds, config.user_agent)
 
       pruned = repo.prune_articles(config.article_cache_max_age_days)
       if pruned:

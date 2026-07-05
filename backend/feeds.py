@@ -19,6 +19,7 @@ import lang
 import log
 from cache import load_feed_cache, save_feed_cache
 from models import Article
+from schemas import DEFAULT_USER_AGENT
 from scraper import fetch_web_page
 
 
@@ -445,6 +446,7 @@ async def fetch_all(
   max_items: int = 200,
   on_feed_done: OnFeedDone | None = None,
   clean_url_fn: Callable[[str], str] | None = None,
+  user_agent: str = DEFAULT_USER_AGENT,
 ) -> list[Article]:
   """Fetch every feed in parallel.
 
@@ -491,6 +493,7 @@ async def fetch_all(
     timeout=httpx.Timeout(60, connect=30),
     follow_redirects=True,
     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+    headers={"User-Agent": user_agent},
   ) as client:
     tasks = [_run_one(client, feed) for feed in feeds_cfg]
     results = await asyncio.gather(*tasks)

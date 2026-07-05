@@ -104,6 +104,14 @@ class StatusResponse(BaseModel):
 # -- Config models --
 
 
+# Some origins (e.g. exblog / CDN WAFs) reject the default httpx User-Agent
+# with 403; a browser-like UA is required to fetch feeds and pages at all.
+DEFAULT_USER_AGENT = (
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+  "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0"
+)
+
+
 class OllamaConfig(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
@@ -141,6 +149,7 @@ class AppConfig(BaseModel):
   article_cache_max_age_days: int = 0
   native_lang: str = "ja"
   article_order: Literal["oldest", "newest"] = "oldest"
+  user_agent: str = DEFAULT_USER_AGENT
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)
   url_cleanup: UrlCleanupConfig = Field(default_factory=UrlCleanupConfig)
   selector_inference: SelectorInferenceConfig = Field(default_factory=SelectorInferenceConfig)

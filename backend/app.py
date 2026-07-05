@@ -31,7 +31,16 @@ from url_cleaner import clean_url
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
 from scraper import fetch_web_page, validate_extraction_rules  # type: ignore[import-untyped]
 from selector_inference import infer_and_validate
-from schemas import AppConfig, ArticleRow, FeedRow, FeedStats, FilterRow, FolderRow, StatusResponse
+from schemas import (
+  DEFAULT_USER_AGENT,
+  AppConfig,
+  ArticleRow,
+  FeedRow,
+  FeedStats,
+  FilterRow,
+  FolderRow,
+  StatusResponse,
+)
 
 # -- Globals for background refresh --
 _refresh_lock = asyncio.Lock()
@@ -298,7 +307,9 @@ def _is_html(content_type: str, body: str) -> bool:
   return False
 
 
-async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
+async def _probe_feed(
+  url: str, native_lang: str = "ja", user_agent: str = DEFAULT_USER_AGENT
+) -> ProbeResult:
   """Fetch a feed URL and extract its title, translate flag, and site URL.
 
   If the URL is not a valid RSS/Atom feed, detect it as a web page.
@@ -308,7 +319,10 @@ async def _probe_feed(url: str, native_lang: str = "ja") -> ProbeResult:
       # Debug-only: local file is always treated as RSS/Atom, skip HTML detection.
       body = read_file_url(url)
     else:
-      async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+      async with httpx.AsyncClient(
+        timeout=15, follow_redirects=True,
+        headers={"User-Agent": user_agent},
+      ) as client:
         resp = await client.get(url)
         resp.raise_for_status()
       body = resp.text
@@ -352,7 +366,10 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
     feed_cfg = feed.to_feed_cfg()
     kind = "web" if feed.extraction_rules else "rss"
     log.step(f"Fetching feed [{kind}]: {feed.name} ({feed.url})")
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+      timeout=30, follow_redirects=True,
+      headers={"User-Agent": config.user_agent},
+    ) as client:
       if feed.extraction_rules and feed.extraction_rules != "{}":
         articles, was_cached = await fetch_web_page(
           client, feed_cfg, clean_url_fn=clean_url_fn,
@@ -374,7 +391,7 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
     else:
       log.info("  No articles returned.")
     if not feed.site_url and feed.url:
-      probe = await _probe_feed(feed.url)
+      probe = await _probe_feed(feed.url, user_agent=config.user_agent)
       if probe.site_url:
         repo.update_feed_site_url(feed.id, probe.site_url)
         log.info(f"  Updated site_url: {probe.site_url}")
@@ -390,7 +407,9 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
 async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
   config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
   log.step(f"Probing feed: {body.url}")
-  probe = await _probe_feed(body.url, native_lang=config.native_lang)
+  probe = await _probe_feed(
+    body.url, native_lang=config.native_lang, user_agent=config.user_agent
+  )
   if not body.name.strip():
     body.name = probe.title or body.url
   if not body.translate:
@@ -539,7 +558,10 @@ async def infer_feed_rules(feed_id: int, request: Request) -> InferRulesResponse
   # Fetch the page, capping the download and using the final (post-redirect)
   # URL as the base for resolving relative article links.
   try:
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+    async with httpx.AsyncClient(
+      follow_redirects=True, timeout=30,
+      headers={"User-Agent": config.user_agent},
+    ) as client:
       resp = await client.get(feed.url)
       resp.raise_for_status()
       raw = resp.content[:_INFER_MAX_HTML_FETCH_BYTES]

@@ -292,27 +292,31 @@ class TestClassifyOutcome:
     assert outcome == "degraded"
     assert error == "extraction rules not configured"
 
-  def test_net_cache_is_degraded_no_error(self):
+  def test_net_cache_is_degraded_with_diagnostic(self):
+    # Serving a stale cached copy must surface a diagnostic so the feed does
+    # not silently look healthy on old content.
     outcome, error = _classify_outcome(
       source_tag="net-cache", feed_kind="rss",
       fetch_exc=None, persist_exc=None, inserted_count=0,
     )
     assert outcome == "degraded"
-    assert error is None
+    assert error is not None and "network error" in error
 
   def test_5xx_cache_is_degraded(self):
-    outcome, _ = _classify_outcome(
+    outcome, error = _classify_outcome(
       source_tag="5xx-cache", feed_kind="rss",
       fetch_exc=None, persist_exc=None, inserted_count=0,
     )
     assert outcome == "degraded"
+    assert error is not None and "stale cache" in error
 
   def test_304_empty_is_degraded(self):
-    outcome, _ = _classify_outcome(
+    outcome, error = _classify_outcome(
       source_tag="304-empty", feed_kind="rss",
       fetch_exc=None, persist_exc=None, inserted_count=0,
     )
     assert outcome == "degraded"
+    assert error is not None and "304" in error
 
   def test_fresh_with_inserts(self):
     outcome, _ = _classify_outcome(

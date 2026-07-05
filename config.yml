@@ -5,6 +5,9 @@ max_items_per_feed: 200  # Max articles to ingest per feed on each refresh
 cache_dir: "cache"                 # Cache directory
 article_cache_max_age_days: 0      # Days to keep article cache (0 = keep forever)
 article_order: "oldest"            # Article list order: "oldest" (oldest first) or "newest" (newest first)
+# User-Agent sent when fetching feeds/pages. Defaults to a browser UA because
+# some origins (e.g. exblog) reject the default httpx UA with HTTP 403.
+# user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0"
 
 # -- LLM (Ollama) --
 # The server URL lives in `.env` as OLLAMA_BASE_URL (it varies per host).
