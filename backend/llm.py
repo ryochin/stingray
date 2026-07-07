@@ -8,6 +8,46 @@ import httpx
 
 import log
 
+# Matches a maximal run of byte-fallback escapes emitted by SentencePiece-based
+# models (e.g. gemma) when a rare character cannot be decoded back to UTF-8, e.g.
+# "<0xE4><0x91><0x93>" for U+4453. Runs are decoded together so multi-byte and
+# multi-character sequences are reassembled correctly.
+_BYTE_FALLBACK_RE = re.compile(r"(?:<0x([0-9A-Fa-f]{2})>)+")
+
+
+def sanitize_byte_fallback(text: str) -> str:
+  """Reassemble literal ``<0xNN>`` byte-fallback runs into their UTF-8 chars."""
+  if "<0x" not in text:
+    return text
+
+  def _replace(match: re.Match[str]) -> str:
+    hex_bytes = re.findall(r"<0x([0-9A-Fa-f]{2})>", match.group())
+    raw = bytes(int(h, 16) for h in hex_bytes)
+    # Byte-fallback only encodes characters outside the model's vocabulary, i.e.
+    # non-ASCII ones. A pure-ASCII run is therefore not an artifact (e.g. a
+    # literal "<0x41>" in a CSS selector) and is left untouched.
+    if all(b < 0x80 for b in raw):
+      return match.group()
+    try:
+      return raw.decode("utf-8")
+    except UnicodeDecodeError:
+      # Not valid UTF-8 (truncated or malformed run): keep the original literal
+      # rather than replacing it with U+FFFD, which would be irreversible.
+      return match.group()
+
+  return _BYTE_FALLBACK_RE.sub(_replace, text)
+
+
+def _sanitize_value(value: Any) -> Any:
+  """Recursively sanitize byte-fallback artifacts in strings within JSON data."""
+  if isinstance(value, str):
+    return sanitize_byte_fallback(value)
+  if isinstance(value, dict):
+    return {k: _sanitize_value(v) for k, v in cast(dict[str, Any], value).items()}
+  if isinstance(value, list):
+    return [_sanitize_value(v) for v in cast(list[Any], value)]
+  return value
+
 
 def _extract_json(content: str) -> dict[str, Any]:
   """Extract JSON from LLM response, handling markdown fences and embedded JSON."""
@@ -80,7 +120,7 @@ async def call_ollama(
     content = str(body["message"]["content"]).strip()
 
     try:
-      return _extract_json(content)
+      return _sanitize_value(_extract_json(content))
     except ValueError as e:
       last_error = e
       log.warn(f"LLM returned non-JSON (attempt {attempt + 1}/{1 + retries}):")
