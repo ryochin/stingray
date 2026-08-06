@@ -108,6 +108,14 @@ export type Selection =
   | { type: "folder"; id: number }
   | { type: "feed"; id: number }
 
+/** Translate the sidebar selection into scope query params for bulk endpoints. */
+function scopeParams(scope: Selection): URLSearchParams {
+  const params: URLSearchParams = new URLSearchParams()
+  if (scope.type === "feed") params.set("feed_id", String(scope.id))
+  else if (scope.type === "folder") params.set("folder_id", String(scope.id))
+  return params
+}
+
 // Structured error raised by fetchJson — preserves status and the parsed JSON
 // body so callers can act on FastAPI's `detail` payload (e.g. feed candidates).
 export class ApiError extends Error {
@@ -264,11 +272,10 @@ export const api = {
     }),
 
   markAllRead: (
-    feedId?: number,
+    scope: Selection,
     olderThanHours?: number,
   ): Promise<{ marked: number }> => {
-    const params: URLSearchParams = new URLSearchParams()
-    if (feedId != null) params.set("feed_id", String(feedId))
+    const params: URLSearchParams = scopeParams(scope)
     if (olderThanHours != null)
       params.set("older_than_hours", String(olderThanHours))
     return fetchJson<{ marked: number }>(`/articles/read-all?${params}`, {
@@ -276,12 +283,11 @@ export const api = {
     })
   },
 
-  markAllUnread: (feedId?: number): Promise<{ unmarked: number }> => {
-    const params: URLSearchParams = new URLSearchParams()
-    if (feedId != null) params.set("feed_id", String(feedId))
-    return fetchJson<{ unmarked: number }>(`/articles/unread-all?${params}`, {
-      method: "POST",
-    })
+  markAllUnread: (scope: Selection): Promise<{ unmarked: number }> => {
+    return fetchJson<{ unmarked: number }>(
+      `/articles/unread-all?${scopeParams(scope)}`,
+      { method: "POST" },
+    )
   },
 
   getFilters: () => fetchJson<FilterRule[]>("/filters"),

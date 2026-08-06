@@ -831,12 +831,25 @@ def mark_unread(urls: list[str]) -> None:
     conn.execute("UPDATE articles SET read_at = NULL WHERE url = ANY(%s)", (urls,))
 
 
-def mark_all_unread(feed_id: int | None = None) -> int:
-  clauses: list[sql.Composable] = [sql.SQL("read_at IS NOT NULL")]
-  params: list[Any] = []
+def _scope_clause(
+  feed_id: int | None,
+  folder_id: int | None,
+) -> tuple[list[sql.Composable], list[Any]]:
+  """Restrict a bulk read-state update to one feed or one folder.
+
+  `feed_id` wins when both are given — a single feed is always narrower than
+  the folder holding it. Without either, the update stays global.
+  """
   if feed_id is not None:
-    clauses.append(sql.SQL("feed_id = %s"))
-    params.append(feed_id)
+    return [sql.SQL("feed_id = %s")], [feed_id]
+  if folder_id is not None:
+    return [sql.SQL("feed_id IN (SELECT id FROM feeds WHERE folder_id = %s)")], [folder_id]
+  return [], []
+
+
+def mark_all_unread(feed_id: int | None = None, folder_id: int | None = None) -> int:
+  scope_clauses, params = _scope_clause(feed_id, folder_id)
+  clauses: list[sql.Composable] = [sql.SQL("read_at IS NOT NULL"), *scope_clauses]
   query = sql.SQL("UPDATE articles SET read_at = NULL WHERE {}").format(
     sql.SQL(" AND ").join(clauses),
   )
@@ -845,14 +858,15 @@ def mark_all_unread(feed_id: int | None = None) -> int:
     return cur.rowcount
 
 
-def mark_all_read(feed_id: int | None = None, older_than_hours: int | None = None) -> int:
+def mark_all_read(
+  feed_id: int | None = None,
+  older_than_hours: int | None = None,
+  folder_id: int | None = None,
+) -> int:
   # Age is measured against COALESCE(published, fetched_at) so feeds without a
   # `published` value still age out based on when we first saw them.
-  clauses: list[sql.Composable] = [sql.SQL("read_at IS NULL")]
-  params: list[Any] = []
-  if feed_id is not None:
-    clauses.append(sql.SQL("feed_id = %s"))
-    params.append(feed_id)
+  scope_clauses, params = _scope_clause(feed_id, folder_id)
+  clauses: list[sql.Composable] = [sql.SQL("read_at IS NULL"), *scope_clauses]
   if older_than_hours is not None and older_than_hours > 0:
     cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=older_than_hours)
     clauses.append(sql.SQL("COALESCE(published, fetched_at) < %s"))

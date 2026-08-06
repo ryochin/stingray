@@ -220,19 +220,18 @@ export default function Articles(): JSX.Element {
     nextUnreadFeed,
   })
 
-  // Mark all as read mutation
-  const markAllReadFeedId: number | undefined =
-    selection.type === "feed" ? selection.id : undefined
+  // Mark all as read mutation — scoped to the current sidebar selection so a
+  // folder/feed view never marks articles outside it.
   const markAllRead = useMutation({
     mutationFn: (olderThanHours: number | null) =>
-      api.markAllRead(markAllReadFeedId, olderThanHours ?? undefined),
+      api.markAllRead(selection, olderThanHours ?? undefined),
     onSuccess: (): void => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
       queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
     },
   })
   const markAllUnread = useMutation({
-    mutationFn: () => api.markAllUnread(markAllReadFeedId),
+    mutationFn: () => api.markAllUnread(selection),
     onSuccess: (): void => {
       queryClient.invalidateQueries({ queryKey: ["articles"] })
       queryClient.invalidateQueries({ queryKey: ["feed-stats"] })

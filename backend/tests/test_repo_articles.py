@@ -205,6 +205,33 @@ class TestReadState:
     assert by_url["a1"].read_at is not None
     assert by_url["b1"].read_at is None
 
+  def test_mark_all_read_scoped_to_folder(self):
+    folder = repo.create_folder("Tech")
+    f1 = _make_feed(name="A")
+    f2 = _make_feed(name="B")
+    repo.move_feed_to_folder(f1, folder.id)
+    repo.upsert_articles([_art(url="a1", source="A")], {"A": f1})
+    repo.upsert_articles([_art(url="b1", source="B")], {"B": f2})
+    n = repo.mark_all_read(folder_id=folder.id)
+    assert n == 1
+    by_url = {r.url: r for r in repo.list_articles()}
+    assert by_url["a1"].read_at is not None
+    assert by_url["b1"].read_at is None
+
+  def test_mark_all_unread_scoped_to_folder(self):
+    folder = repo.create_folder("Tech")
+    f1 = _make_feed(name="A")
+    f2 = _make_feed(name="B")
+    repo.move_feed_to_folder(f1, folder.id)
+    repo.upsert_articles([_art(url="a1", source="A")], {"A": f1})
+    repo.upsert_articles([_art(url="b1", source="B")], {"B": f2})
+    repo.mark_read(["a1", "b1"])
+    n = repo.mark_all_unread(folder_id=folder.id)
+    assert n == 1
+    by_url = {r.url: r for r in repo.list_articles()}
+    assert by_url["a1"].read_at is None
+    assert by_url["b1"].read_at is not None
+
   def test_mark_all_read_global(self):
     fid = _make_feed()
     repo.upsert_articles([_art(url="u1"), _art(url="u2")], {"F": fid})

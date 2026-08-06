@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest"
-import { api, type Feed, faviconUrl } from "./client"
+import { api, type Feed, faviconUrl, type Selection } from "./client"
 
 function makeFeed(overrides: Partial<Feed> = {}): Feed {
   return {
@@ -149,6 +149,77 @@ describe("api fetchJson behavior", () => {
     expect(result.status).toBe("ok")
     expect(result.rules.item).toBe("li.entry")
     expect(result.sample_articles[0].title).toBe("First")
+  })
+
+  it("markAllRead scopes the request to the current selection", async () => {
+    const spy: Mock<(input: string, init: RequestInit) => Promise<Response>> =
+      vi.fn(
+        (_input: string, _init: RequestInit): Promise<Response> =>
+          Promise.resolve(
+            new Response(JSON.stringify({ marked: 1 }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+      )
+    vi.stubGlobal("fetch", spy)
+    const cases: readonly [Selection, string][] = [
+      [{ type: "all" }, "/api/articles/read-all?"],
+      [{ type: "feed", id: 7 }, "/api/articles/read-all?feed_id=7"],
+      [{ type: "folder", id: 3 }, "/api/articles/read-all?folder_id=3"],
+    ]
+    for (const [scope] of cases) {
+      await api.markAllRead(scope)
+    }
+    const urls: string[] = spy.mock.calls.map(
+      (call: [string, RequestInit]): string => call[0],
+    )
+    expect(urls).toEqual(
+      cases.map(([, expected]: [Selection, string]) => expected),
+    )
+  })
+
+  it("markAllRead keeps the age cutoff alongside the scope", async () => {
+    const spy: Mock<(input: string, init: RequestInit) => Promise<Response>> =
+      vi.fn(
+        (_input: string, _init: RequestInit): Promise<Response> =>
+          Promise.resolve(
+            new Response(JSON.stringify({ marked: 0 }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+      )
+    vi.stubGlobal("fetch", spy)
+    await api.markAllRead({ type: "folder", id: 3 }, 48)
+    const call: [string, RequestInit] = spy.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(call[0]).toBe(
+      "/api/articles/read-all?folder_id=3&older_than_hours=48",
+    )
+  })
+
+  it("markAllUnread scopes the request to the current selection", async () => {
+    const spy: Mock<(input: string, init: RequestInit) => Promise<Response>> =
+      vi.fn(
+        (_input: string, _init: RequestInit): Promise<Response> =>
+          Promise.resolve(
+            new Response(JSON.stringify({ unmarked: 1 }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+      )
+    vi.stubGlobal("fetch", spy)
+    await api.markAllUnread({ type: "folder", id: 3 })
+    const call: [string, RequestInit] = spy.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(call[0]).toBe("/api/articles/unread-all?folder_id=3")
+    expect(call[1].method).toBe("POST")
   })
 
   it("markRead POSTs url array as JSON", async () => {

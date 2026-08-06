@@ -180,17 +180,19 @@ def mark_articles_unread(body: ArticleUrls) -> None:
 @app.post("/api/articles/read-all")
 def mark_all_articles_read(
   feed_id: int | None = Query(None),
+  folder_id: int | None = Query(None),
   older_than_hours: int | None = Query(None, ge=1),
 ) -> dict[str, int]:
-  count = repo.mark_all_read(feed_id, older_than_hours)
+  count = repo.mark_all_read(feed_id, older_than_hours, folder_id)
   return {"marked": count}
 
 
 @app.post("/api/articles/unread-all")
 def mark_all_articles_unread(
   feed_id: int | None = Query(None),
+  folder_id: int | None = Query(None),
 ) -> dict[str, int]:
-  count = repo.mark_all_unread(feed_id)
+  count = repo.mark_all_unread(feed_id, folder_id)
   return {"unmarked": count}
 
 
