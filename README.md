@@ -2,45 +2,47 @@
 
 # Stingray
 
-**RSS/Atom フィードを一つのタイムラインに集約する、セルフホスト型の Web リーダーです。<br>ローカル LLM が翻訳と要約を自動で付けます。**
+**A self-hosted web reader that pulls your RSS/Atom feeds into a single timeline,<br>with translation and summarization from a local LLM.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-<img src="docs/screenshot@2x.png" alt="スクリーンショット" width="1300">
+**English** | [日本語](README.ja.md)
+
+<img src="docs/screenshot_en@2x.webp" alt="Screenshot" width="1300">
 
 </div>
 
 ---
 
-購読しているフィードの新着を一本のタイムラインにまとめ、購読履歴を外部サービスに預けることなく、すべてを手元のサーバに置いておけます。外国語の記事には、ローカル LLM（[Ollama](https://ollama.com/)）が設定した母語への翻訳と要約を自動で付与します。
+Stingray collects everything new from the feeds you subscribe to into one timeline and keeps all of it on your own server, so your reading history never sits with a third-party service. Articles in another language get a translation and a summary from a local LLM ([Ollama](https://ollama.com/)) in whichever language you set as your own.
 
 > [!NOTE]
-> **このプロジェクトのコードは、すべて AI によって書かれています。**
-> 改善点があれば PR を歓迎しますが、それ以上に期待しているのは、各自がこれを **AI で自由に拡張するためのベース** として使ってもらうことです。欲しい機能を本家に取り込んでもらうのを待つのではなく、自分の AI に頼んで、自分の手元で好きなように作り変える ── そんな出発点になれば、と考えています。
+> **Every line of code in this project was written by AI.**
+> Pull requests are welcome, but what I hope for more is that you treat this as **a base to extend with AI however you like**. Rather than waiting for a feature to land upstream, ask your own AI and reshape it on your own machine — I would like this to be a starting point for exactly that.
 
-## 目次
+## Contents
 
-- [主な機能](#主な機能)
-- [必要環境](#必要環境)
-- [クイックスタート](#クイックスタート)
-- [環境変数（`.env`）](#環境変数env)
-- [LLM（Ollama）](#llmollama)
-- [アプリ設定（`config.yml`）](#アプリ設定configyml)
-- [バックアップとリストア](#バックアップとリストア)
-- [トラブルシューティング](#トラブルシューティング)
-- [ライセンス](#ライセンス)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Environment variables (`.env`)](#environment-variables-env)
+- [LLM (Ollama)](#llm-ollama)
+- [Application settings (`config.yml`)](#application-settings-configyml)
+- [Backup and restore](#backup-and-restore)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
-## 主な機能
+## Features
 
-### 📚 フィードをまとめて読む
+### 📚 Read every feed in one place
 
-**RSS / Atom**（RDF や JSON Feed も含む）を購読できます。登録はフィードの URL を直接指定するほか、**サイトのトップページ URL を貼れば、ページ内のフィードリンクを自動検出**して取り込めます。フィード名と言語も、取得したフィード情報や URL などから自動で判別されます。購読中のフィードは **フォルダ** でまとめて整理でき、フォルダはドラッグ＆ドロップで並び替えられます。サイドバーからはフォルダ単位・フィード単位で記事を絞り込めます。新しく追加したフィードは一覧の **一番上** に表示され、カードはそのまま展開状態になるので、続けて名前やルールをすぐ編集できます。
+Subscribe to **RSS / Atom** feeds, including RDF and JSON Feed. Add a feed by its URL directly, or **paste a site's homepage URL and Stingray finds the feed links on the page** for you. Feed names and languages are detected automatically from the feed metadata and the URL. Organize subscriptions into **folders**, reorder them by drag and drop, and narrow the article list by folder or by feed from the sidebar. A newly added feed appears at the **top** of the list with its card already expanded, so you can edit its name and rules right away.
 
-### 🔎 フィードのないページもフィードにする
+### 🔎 Turn any page into a feed
 
-RSS を提供していない Web ページでも、Stingray なら購読対象にできます。フィードに **CSS セレクタの抽出ルール** を与えると、ページ内のどこを記事の単位（`item`）とみなし、どこからタイトル・リンク・日付・サムネイルを取るかを指定でき、通常のフィードと同じように新着を一覧へ流し込めます。抽出ルールはフィードごとに JSON で設定します。
+A web page that offers no RSS can still become a subscription. Give a feed a set of **CSS selector extraction rules** to say which element on the page is one article (`item`) and where to read its title, link, date, and thumbnail from, and new entries flow into the same list as any ordinary feed. Extraction rules are configured per feed as JSON.
 
-たとえば、各記事が `<li class="entry">` で並び、その中にタイトルリンクと日付を持つページなら、次のようなルールになります。
+For example, a page whose articles are `<li class="entry">` elements containing a title link and a date needs rules like this:
 
 ```json
 {
@@ -53,181 +55,182 @@ RSS を提供していない Web ページでも、Stingray なら購読対象�
 }
 ```
 
-- `item`（必須）— 記事 1 件に対応する要素のセレクタ。ページ全体に対して評価されます。
-- `title`（必須）— アイテム内のタイトル要素。そのテキストを記事タイトルにします。
-- `link`（必須）/ `link_attr` — リンク要素のセレクタと、URL を読む属性（既定 `href`）。アイテム自身が `<a>` の場合は `"_self"` を指定します。
-- `date` / `date_attr` — 日付要素と、属性から読む場合の属性名（省略時は要素のテキスト）。ISO 8601 や `2026年4月10日` などを解釈します。
-- `thumbnail` / `thumbnail_attr` — サムネイル画像の要素と属性（既定 `src`）。
+- `item` (required) — selector for the element that represents a single article. Evaluated against the whole page.
+- `title` (required) — the title element inside an item. Its text becomes the article title.
+- `link` (required) / `link_attr` — selector for the link element and the attribute to read the URL from (`href` by default). Use `"_self"` when the item itself is an `<a>`.
+- `date` / `date_attr` — the date element and, when reading from an attribute, its name (falls back to the element's text). ISO 8601 is understood, as are common written forms such as `2026-04-10`, `April 10, 2026`, and `10 Apr 2026`.
+- `thumbnail` / `thumbnail_attr` — the thumbnail image element and attribute (`src` by default).
 
-必須は `item` / `title` / `link` の 3 つで、`date` 系・`thumbnail` 系は任意です。`item` 以外のセレクタは各アイテム内で評価され、相対 URL は自動的に絶対 URL へ補完されます。ルールは Web UI の `/feeds` でフィードごとに設定し、保存後の手動更新または次回巡回時から適用されます（不正なセレクタは保存時ではなく取得時に失敗します）。
+Only `item`, `title`, and `link` are required; the `date` and `thumbnail` families are optional. Every selector other than `item` is evaluated inside each item, and relative URLs are resolved to absolute ones automatically. Rules are set per feed under `/feeds` in the web UI and take effect on the next manual refresh or scheduled crawl after saving. An invalid selector fails at fetch time rather than at save time.
 
-### 🧹 ノイズを減らすフィルタ
+### 🧹 Filter out the noise
 
-読みたくない記事を自動でふるい落とすルールフィルタを備えています。記事の **タイトル** あるいは **本文** に対してパターンを設定し、マッチした記事を一覧から除外します。パターンは単純なキーワード（部分一致・大文字小文字を区別しない）のほか、`/.../` で囲めば正規表現としても書けます。ルールはフィルタ画面で編集でき、JSON での import / export にも対応します。
+Rule-based filters drop articles you would rather not see. Set a pattern against an article's **title** or **body** and matching articles are excluded from the list. A pattern is a plain keyword by default — substring match, case-insensitive — or a regular expression when wrapped in `/.../`. Rules are edited on the filter screen and can be imported and exported as JSON.
 
-### 🤖 LLM による翻訳と要約
+### 🤖 Translation and summarization with an LLM
 
-ローカルの Ollama を使い、外国語の記事には **タイトルの翻訳** を付け、本文は短ければ全文を翻訳し、長ければネイティブ言語（`native_lang`）の **要約** に置き換えます。翻訳（translate）と要約（summarize）はフィード単位の独立したスイッチで、Web UI（`/feeds`）で個別に切り替えられます。実際の生成内容は、この 2 つと本文の長さの組み合わせで決まります（全文がそのまま翻訳されるのは短い記事だけです）。
+Using a local Ollama instance, articles in another language get a **translated title**, and the body is either translated in full when it is short or replaced with a **summary** when it is long. Translation and summarization are independent per-feed switches, toggled individually in the web UI under `/feeds`. What actually gets generated depends on those two switches and the length of the body — only short articles are translated in full.
 
-| 翻訳 | 要約 | 短い記事（300 字未満） | 長い記事（300 字以上） |
+| Translate | Summarize | Short article (< 300 chars) | Long article (>= 300 chars) |
 |:---:|:---:|---|---|
-| ON | ON | タイトル＋本文を全文翻訳 | タイトルを翻訳し、本文はネイティブ言語の要約に置換 |
-| ON | OFF | タイトル＋本文を全文翻訳 | **タイトルのみ翻訳**（本文は原語のまま・要約なし） |
-| OFF | ON | LLM なし | ネイティブ言語の要約（タイトルは原語のまま） |
-| OFF | OFF | LLM なし | LLM なし |
+| ON | ON | Title and body translated in full | Title translated, body replaced with a summary in your language |
+| ON | OFF | Title and body translated in full | **Title only** (body left in the original language, no summary) |
+| OFF | ON | No LLM | Summary in your language (title left in the original language) |
+| OFF | OFF | No LLM | No LLM |
 
-登録時に RSS/Atom フィードの言語を判定し、ネイティブ言語（`native_lang`）と異なると判定されたフィードは **翻訳・要約をともに自動で有効** にします（外国語フィードは追加するだけで、タイトルが翻訳され、本文も短ければ全文翻訳・長ければ要約が付きます）。母語と判定されたフィードはどちらも無効のままなので、要約が欲しい場合は `/feeds` で要約を ON にしてください。
+When a feed is added, Stingray detects the language of the RSS/Atom feed, and a feed detected as something other than your native language (`native_lang`) gets **both translation and summarization enabled automatically**. Adding a foreign-language feed is all it takes: titles are translated, and bodies are either translated in full when short or summarized when long. A feed detected as your own language keeps both switches off, so turn summarization on under `/feeds` if you want summaries there.
 
-言語を判定できなかったフィードの扱いは、ネイティブ言語自体を判定できるかどうかで決まります。日本語のように固有の文字体系や TLD を持つ言語がネイティブなら、「判定されなかった＝母語ではない」とみなして翻訳を有効にします。一方、英語のように判定手段を持たない言語がネイティブの場合は、無効のままにします（そうしないと `<language>` タグのないフィードがすべて英語から英語へ翻訳され続けてしまうため）。いずれも `/feeds` でフィードごとに切り替えられます。
+What happens to a feed whose language could not be determined depends on whether your native language is itself detectable. If it is — Japanese, for instance, has a script and a TLD of its own — then "not detected" is read as "not my language" and translation is enabled. If it is not, as with English, both switches are left off; otherwise every feed without a `<language>` tag would be translated from English into English forever. Either way you can flip the switches per feed under `/feeds`.
 
-これらはフェッチの段階でまとめて生成され、記事に保存されるため、記事を開いたときにはあらかじめ用意されています。
+All of this is generated during the fetch and stored with the article, so it is already there by the time you open it.
 
-### 📖 読む・追いつく
+### 📖 Read and catch up
 
-- **既読 / 未読管理** — 記事の既読・未読をトグルでき、「○時間より古いものだけ」といった条件付きでフォルダ・フィードをまとめて一括既読にできます。
-- **キーボード操作** — `j` / `k` で記事を送り、`Space` で次の未読フィードへジャンプ、といったキーボード中心の読み進めができます。ショートカット一覧は `?` で表示します。
-- **OPML import / export** — 他のリーダーからの移行や、購読リストのバックアップに。フォルダ構成や翻訳・要約の設定、抽出ルールまで含めて入出力します。
-- **リッチな表示** — 記事中のサムネイルや画像を取り込んで一覧に表示し、Twitter / X の埋め込みは読みやすいカードに整形します。
+- **Read / unread tracking** — toggle an article between read and unread, and mark a whole folder or feed as read at once, optionally scoped to "only items older than N hours".
+- **Keyboard-driven reading** — move through articles with `j` / `k`, jump to the next unread feed with `Space`, and so on. Press `?` for the full list of shortcuts.
+- **OPML import / export** — for migrating from another reader or backing up your subscription list. Folder structure, translation and summarization settings, and extraction rules all travel with it.
+- **Rich rendering** — thumbnails and images from articles are pulled into the list, and Twitter / X embeds are reformatted as readable cards.
 
-### ⏱️ 自動で集めてくる
+### ⏱️ Fetch on its own
 
-フィードの取得はバックグラウンドで自動的に行われます。取得間隔はフィードごとに **自動で調整** され、新着が続くフィードは短い間隔で、更新の乏しいフィードは次第に長い間隔（おおむね 10 分〜6 時間）で巡回します。スケジューラ（cron）は 15 分おきに起動し、その時点で取得期限の来たフィードだけを取りに行きます。もちろん画面からの手動更新も可能です。
+Feeds are fetched automatically in the background. The interval is **tuned per feed**: one that keeps publishing is crawled often, while a quiet one backs off gradually, roughly between 10 minutes and 6 hours. The scheduler (cron) wakes every 15 minutes and fetches only the feeds that are due at that moment. Manual refresh from the UI is available too, of course.
 
-取り込み時には、記事リンクから `utm_*` や `fbclid` などの**トラッキングパラメータを自動で除去**し、クリーンな URL として保存します。
+At ingest time, **tracking parameters such as `utm_*` and `fbclid` are stripped** from article links so that clean URLs are what get stored.
 
-## 必要環境
+## Requirements
 
-- **Docker / Docker Compose**（v2 以降）— PostgreSQL 17 を含むすべてのサービスがコンテナ内で完結するため、DB を別途インストールする必要はありません。
-- **Ollama** — ホスト側で起動します（推奨モデル `gemma4:e4b`）。翻訳・要約を有効にしたフィードがあるときに使います。LLM をまったく使わない場合は `config.yml` で `ollama.enabled: false` を設定してください。
+- **Docker / Docker Compose** (v2 or later) — every service including PostgreSQL 17 runs inside containers, so there is no database to install separately.
+- **Ollama** — runs on the host (`gemma4:e4b` recommended). Needed only when some feed has translation or summarization enabled. To skip the LLM entirely, set `ollama.enabled: false` in `config.yml`.
 
-## クイックスタート
+## Quick start
 
 ```bash
-cp .env.example .env                # 環境設定をコピー（必要に応じて編集）
-cp config.yml.example config.yml    # アプリ設定をコピー（必要に応じて編集）
-docker compose up -d                # 起動
+cp .env.example .env                # Copy the environment settings (edit as needed)
+cp config.yml.example config.yml    # Copy the application settings (edit as needed)
+docker compose up -d                # Start
 ```
 
 - **Web UI**: http://localhost:20080
-- **稼働確認**: http://localhost:20080/api/health
+- **Health check**: http://localhost:20080/api/health
 
 > [!IMPORTANT]
-> Stingray には認証機構がありません。`WEB_PORT` に到達できる相手は誰でも記事の閲覧・購読操作が可能です。万が一 LAN 外やインターネットに公開する場合は、リバースプロキシでの Basic 認証や VPN などで前段を保護するか、公開ポートをループバックに限定してください。
+> Stingray has no authentication. Anyone who can reach `WEB_PORT` can read articles and change subscriptions. If you ever expose it beyond your LAN or to the internet, put something in front of it — basic auth on a reverse proxy, a VPN — or bind the published port to loopback only.
 >
 > ```yaml
-> # compose.yml の web サービス
+> # the web service in compose.yml
 > ports:
 >   - "127.0.0.1:${WEB_PORT:-20080}:20080"
 > ```
 
-初回起動後、Web UI の `/feeds` から RSS URL を直接追加するか、OPML インポートで一括追加します。フィード名と言語は、取得したフィード情報や URL などから自動検出されます。
+After the first start, add feeds under `/feeds` in the web UI, either by RSS URL or in bulk via OPML import. Feed names and languages are detected automatically from the feed metadata and the URL.
 
 ```bash
-docker compose down            # 停止
-docker compose logs -f         # ログ確認
-docker compose up -d --build   # 再ビルド
+docker compose down            # Stop
+docker compose logs -f         # Follow logs
+docker compose up -d --build   # Rebuild
 ```
 
-## 環境変数（`.env`）
+## Environment variables (`.env`)
 
-`.env.example` を `.env` にコピーして使用します。主な変数は次のとおりです。
+Copy `.env.example` to `.env` and edit it. The main variables are:
 
-| 変数 | デフォルト | 用途 |
+| Variable | Default | Purpose |
 |---|---|---|
-| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Ollama サーバ URL |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `stingray` | DB 認証情報 |
-| `DATABASE_URL` | `POSTGRES_*` から構築 | 完全な DSN（注） |
-| `WEB_PORT` | `20080` | Web のホスト公開ポート |
+| `TZ` | `UTC` | Container timezone (affects log timestamps only) |
+| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Ollama server URL |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `stingray` | Database credentials |
+| `DATABASE_URL` | built from `POSTGRES_*` | Full DSN (see note) |
+| `WEB_PORT` | `20080` | Host port the web service is published on |
 
-> 注: `.env.example` は `DATABASE_URL` の明示値を同梱しています。DB 認証情報を変える場合は `POSTGRES_*` と `DATABASE_URL` を必ず揃えてください（`DATABASE_URL` を未設定にすれば、compose が `POSTGRES_*` から組み立てます）。
+> Note: `.env.example` ships an explicit `DATABASE_URL`. If you change the database credentials, keep `POSTGRES_*` and `DATABASE_URL` consistent with each other — or leave `DATABASE_URL` unset and let compose assemble it from `POSTGRES_*`.
 
-## LLM（Ollama）
+## LLM (Ollama)
 
-Ollama.app を起動するか、CLI で `ollama serve` を実行してサーバを立ち上げ、別ターミナルでモデルを取得します（`ollama serve` はフォアグラウンドで起動し続けます）。
+Start the server by launching Ollama.app or running `ollama serve` from the CLI, then pull the model from another terminal (`ollama serve` stays in the foreground).
 
 ```bash
 ollama pull gemma4:e4b
 ```
 
-macOS の Docker Desktop では `host.docker.internal` 経由で自動的に接続されます。Linux や別ホストで動かす場合は、`.env` の `OLLAMA_BASE_URL` をホストの LAN IP などに書き換えてください。Ollama は既定でループバックのみを待ち受けるため、コンテナや LAN からの接続を許可するには待ち受けアドレスの公開設定が必要です。これは Ollama API を LAN に開放する設定なので、信頼できるネットワーク内に限定し、インターネットへ直接公開しないでください。
+On Docker Desktop for macOS the connection goes through `host.docker.internal` automatically. On Linux, or when Ollama runs on a different host, point `OLLAMA_BASE_URL` in `.env` at that host's LAN IP. Ollama listens on loopback only by default, so accepting connections from containers or the LAN means changing the address it binds to. That opens the Ollama API to your LAN, so keep it to a network you trust and never expose it directly to the internet.
 
-macOS の場合:
+On macOS:
 
 ```bash
 launchctl setenv OLLAMA_HOST 0.0.0.0:11434
 ```
 
-Linux（systemd）の場合は `sudo systemctl edit ollama` で次を追記し、`sudo systemctl restart ollama` で再起動します。
+On Linux with systemd, run `sudo systemctl edit ollama`, add the following, and restart with `sudo systemctl restart ollama`.
 
 ```ini
 [Service]
 Environment="OLLAMA_HOST=0.0.0.0:11434"
 ```
 
-## アプリ設定（`config.yml`）
+## Application settings (`config.yml`)
 
-`config.yml.example` を `config.yml` にコピーして使用します（`config.yml` 自体はリポジトリに含まれません）。
+Copy `config.yml.example` to `config.yml` and edit it — `config.yml` itself is not part of the repository. The main keys are:
 
 ```yaml
-native_lang: "en"                 # ネイティブ言語（他言語フィードは翻訳対象になる）
-max_age_hours: 48                 # 取得する記事の時間幅
-max_items_per_feed: 200           # 1 回の更新で取り込む最大記事数（フィード単位）
-cache_dir: "cache"                # フィード本文のキャッシュ
-article_cache_max_age_days: 0     # 記事キャッシュ保持日数（0 = 無制限）
-article_order: "oldest"           # 記事一覧の並び順（"oldest" = 古い順 / "newest" = 新しい順）
+native_lang: "en"                 # Your language (feeds in other languages get translated)
+max_age_hours: 48                 # How far back to include articles
+max_items_per_feed: 200           # Max articles to ingest per feed on each refresh
+cache_dir: "cache"                # Cache for feed bodies
+article_cache_max_age_days: 0     # Days to keep the article cache (0 = keep forever)
+article_order: "oldest"           # Article list order ("oldest" or "newest" first)
 
 ollama:
-  enabled: true            # 翻訳・要約の有効/無効（false で LLM を使わない）
+  enabled: true            # Translation and summarization on/off (false disables all LLM calls)
   model: "gemma4:e4b"
-  timeout: 120              # LLM 1 リクエストあたりの秒数
+  timeout: 120             # Seconds per LLM request
 
 url_cleanup:
-  enabled: true            # 取り込み時に既知のトラッキングパラメータ（utm_* など）を除去
+  enabled: true            # Strip known tracking params (utm_*, ...) at ingest time
 ```
 
-設定は、その性質に応じて 2 種類のファイルに分けています。ホストごとに変わる**接続情報や秘密**（DB 認証・`OLLAMA_BASE_URL`・公開ポート等）は `.env` に、環境に依らない**アプリの挙動**（モデル名・タイムアウト・取得期間・ネイティブ言語等）は `config.yml` に置きます。たとえば Ollama サーバの URL は接続情報なので、`config.yml` ではなく `.env` の `OLLAMA_BASE_URL` で指定します。同じ値を両方に書くことはありません。
+Settings are split across two files by their nature. Anything that varies per host — **connection details and secrets** such as database credentials, `OLLAMA_BASE_URL`, and the published port — lives in `.env`, while **application behaviour** that does not depend on the environment — model name, timeouts, fetch window, your language — lives in `config.yml`. The Ollama server URL, for example, is a connection detail, so it goes in `OLLAMA_BASE_URL` in `.env` rather than in `config.yml`. No value is ever written in both.
 
-フィード定義は DB が正本です（Web UI から追加・編集します）。
+Feed definitions live in the database, which is the source of truth for them; add and edit those from the web UI.
 
 > [!NOTE]
-> `config.yml` の変更は、Web コンテナを再起動（`docker compose restart web`）すると反映されます。
+> Changes to `config.yml` take effect once the web container is restarted (`docker compose restart web`).
 
-## バックアップとリストア
+## Backup and restore
 
-購読フィード・記事・既読状態・フォルダ・フィルタなど、利用データはすべて PostgreSQL（`./data/postgres`）に保存されます。`./cache` は再生成可能なキャッシュなのでバックアップ不要です。なお、同じ環境を丸ごと復元したい場合は、利用データ（DB）に加えて `.env` と `config.yml` も別途保管してください。
+Everything you accumulate — subscriptions, articles, read state, folders, filters — is stored in PostgreSQL under `./data/postgres`. `./cache` is regenerable and needs no backup. To be able to restore an environment as a whole, keep `.env` and `config.yml` alongside the database dump.
 
-退避は、コンテナ起動中に `pg_dump` の出力を bzip2 で固めます（ホスト側に `bzip2` が必要です）。
+Take a dump while the containers are running and compress it with bzip2 (`bzip2` needs to be available on the host).
 
 ```bash
 docker compose exec -T postgres pg_dump -U stingray stingray | bzip2 > backup.sql.bz2
 ```
 
-リストアは**空の DB** へ流し込みます。Web / Fetcher が起動するとスキーマが自動作成されダンプと衝突するため、**PostgreSQL だけを起動した状態**で実行してください。
+Restore into an **empty database**. The web and fetcher services create the schema on startup and would collide with the dump, so run this with **only PostgreSQL up**.
 
 ```bash
-docker compose down                    # 全サービス停止
-rm -rf data/postgres                   # 既存データを破棄（まっさらに戻す）
-docker compose up -d postgres          # DB だけ起動
+docker compose down                    # Stop every service
+rm -rf data/postgres                   # Discard existing data (back to a clean slate)
+docker compose up -d postgres          # Start the database only
 bunzip2 -c backup.sql.bz2 | docker compose exec -T postgres psql -U stingray -v ON_ERROR_STOP=1 stingray
-docker compose up -d                   # 残りのサービスを起動
+docker compose up -d                   # Start the remaining services
 ```
 
-`.env` で DB 認証情報を変えている場合は、`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` と `DATABASE_URL` の 4 項目を矛盾なく揃えたうえで、上記コマンドの `-U`・データベース名もその値に合わせてください。
+If you changed the database credentials in `.env`, make sure `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, and `DATABASE_URL` all agree, and match `-U` and the database name in the commands above to those values.
 
-## トラブルシューティング
+## Troubleshooting
 
-**翻訳・要約が付かない**
+**No translations or summaries appear**
 
-Ollama に接続できていない可能性があります。`docker compose logs -f web` で接続エラーの有無を確認したうえで、ホスト側で `ollama serve` が起動しているか、`OLLAMA_BASE_URL` がコンテナから到達できるアドレスか、モデルを `ollama pull gemma4:e4b` で取得済みかを確認してください。そもそも LLM を使わない場合は `config.yml` で `ollama.enabled: false` を設定します。
+Stingray probably cannot reach Ollama. Check `docker compose logs -f web` for connection errors, then confirm that `ollama serve` is running on the host, that `OLLAMA_BASE_URL` is an address the containers can actually reach, and that the model has been pulled with `ollama pull gemma4:e4b`. If you do not want to use an LLM at all, set `ollama.enabled: false` in `config.yml`.
 
-**新着が増えない**
+**Nothing new is coming in**
 
-スケジューラは取得期限の来たフィードだけを巡回します（「自動で集めてくる」を参照）。すぐ確認したいときは Web UI から手動更新してください。また `config.yml` の `max_age_hours` より古い記事は取り込まれません。
+The scheduler only visits feeds that are due — see "Fetch on its own". Use manual refresh in the web UI when you want to check right away. Note also that articles older than `max_age_hours` in `config.yml` are never ingested.
 
-**`config.yml` の変更が反映されない**
+**Changes to `config.yml` have no effect**
 
-Web コンテナの再起動が必要です（`docker compose restart web`）。
+The web container needs a restart (`docker compose restart web`).
 
-## ライセンス
+## License
 
-MIT — [`LICENSE`](LICENSE) を参照。
+MIT — see [`LICENSE`](LICENSE).
