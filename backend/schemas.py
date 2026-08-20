@@ -155,7 +155,7 @@ class AppConfig(BaseModel):
   max_age_hours: float = 48
   cache_dir: str = "cache"
   article_cache_max_age_days: int = 0
-  native_lang: str = "ja"
+  native_lang: str = "en"
   article_order: Literal["oldest", "newest"] = "oldest"
   user_agent: str = DEFAULT_USER_AGENT
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)

@@ -38,14 +38,14 @@ def _folder(*, id: int = 1, name: str = "Folder", position: int = 0) -> FolderRo
 
 
 class TestParseOpmlTranslateInference:
-  def test_japanese_name_infers_translate_false_for_ja_native(self):
+  def test_kanji_only_name_infers_translate_true_for_ja_native(self):
     xml = """<?xml version="1.0"?>
     <opml version="2.0"><body>
       <outline type="rss" text="朝日新聞" xmlUrl="https://example.com/asahi"/>
     </body></opml>"""
     _, uncat = opml.parse_opml(xml, native_lang="ja")
-    # Kanji-only name + .com URL → script detect=None, tld detect=None → source=None → translate=True.
-    # This is the conservative default; document it.
+    # Kanji-only name + .com URL → script detect=None, tld detect=None → source=None.
+    # Japanese is script-detectable, so "not detected" is read as "not Japanese".
     assert uncat[0].translate is True
 
   def test_kana_name_infers_translate_false_for_ja_native(self):
@@ -73,6 +73,32 @@ class TestParseOpmlTranslateInference:
     _, uncat = opml.parse_opml(xml, native_lang="ja")
     assert uncat[0].translate is True
 
+  def test_english_feed_with_com_does_not_translate_for_en_native(self):
+    # The first-run path for an English speaker: an untagged .com feed must not
+    # be queued for English-to-English translation.
+    xml = """<?xml version="1.0"?>
+    <opml version="2.0"><body>
+      <outline type="rss" text="Hacker News" xmlUrl="https://news.ycombinator.com/rss"/>
+    </body></opml>"""
+    _, uncat = opml.parse_opml(xml, native_lang="en")
+    assert uncat[0].translate is False
+
+  def test_jp_tld_infers_translate_true_for_en_native(self):
+    xml = """<?xml version="1.0"?>
+    <opml version="2.0"><body>
+      <outline type="rss" text="News" xmlUrl="https://example.jp/rss"/>
+    </body></opml>"""
+    _, uncat = opml.parse_opml(xml, native_lang="en")
+    assert uncat[0].translate is True
+
+  def test_kana_name_infers_translate_true_for_en_native(self):
+    xml = """<?xml version="1.0"?>
+    <opml version="2.0"><body>
+      <outline type="rss" text="はてブ 人気エントリ" xmlUrl="https://example.com/rss"/>
+    </body></opml>"""
+    _, uncat = opml.parse_opml(xml, native_lang="en")
+    assert uncat[0].translate is True
+
   def test_explicit_translate_attr_overrides_heuristic(self):
     xml = """<?xml version="1.0"?>
     <opml version="2.0"><body>
@@ -91,7 +117,7 @@ class TestParseOpmlStructure:
         <outline type="rss" text="F2" xmlUrl="https://b.example.com/"/>
       </outline>
     </body></opml>"""
-    folders, uncat = opml.parse_opml(xml)
+    folders, uncat = opml.parse_opml(xml, native_lang="en")
     assert len(folders) == 1
     assert folders[0].name == "Tech"
     assert [f.name for f in folders[0].feeds] == ["F1", "F2"]
@@ -102,7 +128,7 @@ class TestParseOpmlStructure:
     <opml version="2.0"><body>
       <outline text="Empty"></outline>
     </body></opml>"""
-    folders, uncat = opml.parse_opml(xml)
+    folders, uncat = opml.parse_opml(xml, native_lang="en")
     assert folders == []
     assert uncat == []
 
@@ -111,7 +137,7 @@ class TestParseOpmlStructure:
     <opml version="2.0"><body>
       <outline type="rss" text="No URL"/>
     </body></opml>"""
-    folders, uncat = opml.parse_opml(xml)
+    folders, uncat = opml.parse_opml(xml, native_lang="en")
     assert folders == []
     assert uncat == []
 
@@ -123,7 +149,7 @@ class TestParseOpmlStructure:
         <outline type="web" text="Scraped" htmlUrl="https://example.com/page" data-extraction-rules='{"selector":"article"}'/>
       </outline>
     </body></opml>"""
-    folders, _ = opml.parse_opml(xml)
+    folders, _ = opml.parse_opml(xml, native_lang="en")
     assert len(folders) == 1 and len(folders[0].feeds) == 1
     f = folders[0].feeds[0]
     assert f.url == "https://example.com/page"
@@ -136,7 +162,7 @@ class TestParseOpmlStructure:
         <outline type="web" text="Scraped" htmlUrl="https://example.com/page"/>
       </outline>
     </body></opml>"""
-    folders, _ = opml.parse_opml(xml)
+    folders, _ = opml.parse_opml(xml, native_lang="en")
     assert folders[0].feeds[0].extraction_rules == "{}"
 
   def test_top_level_web_feed_imported_as_uncategorized(self):
@@ -146,7 +172,7 @@ class TestParseOpmlStructure:
     <opml version="2.0"><body>
       <outline type="web" text="Top" htmlUrl="https://example.com/page"/>
     </body></opml>"""
-    folders, uncat = opml.parse_opml(xml)
+    folders, uncat = opml.parse_opml(xml, native_lang="en")
     assert folders == []
     assert len(uncat) == 1
     assert uncat[0].url == "https://example.com/page"
@@ -161,7 +187,7 @@ class TestParseOpmlStructure:
         <outline type="rss" text="Child" xmlUrl="https://example.com/rss"/>
       </outline>
     </body></opml>"""
-    folders, uncat = opml.parse_opml(xml)
+    folders, uncat = opml.parse_opml(xml, native_lang="en")
     assert uncat == []
     assert len(folders) == 1
     assert folders[0].name == "Folder"
@@ -233,7 +259,7 @@ class TestExportOpml:
     rules = '{"item": ".x", "title": ".t", "link": ".t"}'
     feeds = [_feed(name="W", url="https://example.com/page", extraction_rules=rules)]
     xml = opml.export_opml([], feeds)
-    folders, uncat = opml.parse_opml(xml)
+    folders, uncat = opml.parse_opml(xml, native_lang="en")
     assert folders == []
     assert len(uncat) == 1
     assert uncat[0].url == "https://example.com/page"
@@ -252,7 +278,7 @@ class TestExportOpml:
       ),
     ]
     xml = opml.export_opml([], feeds)
-    _, uncat = opml.parse_opml(xml)
+    _, uncat = opml.parse_opml(xml, native_lang="en")
     assert len(uncat) == 1
     assert uncat[0].url == "https://example.com/articles"
     assert uncat[0].extraction_rules == rules

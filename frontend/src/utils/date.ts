@@ -1,26 +1,29 @@
-// Shared date/time formatters. All output uses the Asia/Tokyo timezone.
-
-const TIMEZONE = "Asia/Tokyo"
+// Shared date/time formatters. Absolute times follow the browser's locale and
+// timezone; an explicit `undefined` locale is what selects the browser default.
+// `hourCycle: "h23"` keeps the compact 24-hour form everywhere — note that the
+// obvious-looking `hour12: false` is not equivalent and renders midnight as
+// "24:00".
 
 export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString("ja-JP", {
-    timeZone: TIMEZONE,
+  return new Date(iso).toLocaleString(undefined, {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
   })
 }
 
 export function formatDate(iso: string): string {
-  return `${new Date(iso).toLocaleString("ja-JP", {
-    timeZone: TIMEZONE,
+  return new Date(iso).toLocaleString(undefined, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  })} JST`
+    hourCycle: "h23",
+    timeZoneName: "short",
+  })
 }
 
 // Compact relative time used by the Feeds page badges: "just now", "32m ago",

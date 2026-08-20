@@ -311,7 +311,7 @@ def _is_html(content_type: str, body: str) -> bool:
 
 
 async def _probe_feed(
-  url: str, native_lang: str = "ja", user_agent: str = DEFAULT_USER_AGENT
+  url: str, *, native_lang: str, user_agent: str = DEFAULT_USER_AGENT
 ) -> ProbeResult:
   """Fetch a feed URL and extract its title, translate flag, and site URL.
 
@@ -408,7 +408,9 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
     else:
       log.info("  No articles returned.")
     if not feed.site_url and feed.url:
-      probe = await _probe_feed(feed.url, user_agent=config.user_agent)
+      probe = await _probe_feed(
+        feed.url, native_lang=config.native_lang, user_agent=config.user_agent
+      )
       if probe.site_url:
         repo.update_feed_site_url(feed.id, probe.site_url)
         log.info(f"  Updated site_url: {probe.site_url}")
@@ -435,6 +437,8 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
   # Foreign feeds detected by the probe also get summarize enabled so the body
   # is rendered in the native language right after adding — translate alone only
   # translates titles for long articles. Native feeds keep summarize opt-in.
+  # The probe only claims "foreign" on a positive detection, so a feed whose
+  # language cannot be determined lands here with both flags left untouched.
   if probe.translate:
     body.summarize = True
 

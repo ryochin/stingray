@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
       environment: "happy-dom",
       include: ["src/**/*.test.{ts,tsx}"],
       globals: false,
-      setupFiles: ["src/test-setup.ts"],
+      setupFiles: ["src/test-timezone.ts", "src/test-setup.ts"],
     },
   }
 })

@@ -79,15 +79,25 @@ class TestNormalize:
 
 
 class TestShouldTranslate:
-  def test_unknown_source_translates(self):
-    # Conservative: if source is unknown, translate (safer than skipping).
+  def test_unknown_source_translates_for_detectable_native(self):
+    # Japanese is script-detectable, so "not detected" implies "not Japanese".
     assert lang.should_translate(None, "ja") is True
+
+  def test_unknown_source_skips_for_undetectable_native(self):
+    # English has no script or TLD of its own; an untagged feed must not be
+    # assumed foreign, or every such feed would be translated forever.
+    assert lang.should_translate(None, "en") is False
+
+  def test_unknown_source_skips_for_unregistered_native(self):
+    assert lang.should_translate(None, "fr") is False
 
   def test_same_as_native_does_not_translate(self):
     assert lang.should_translate("ja", "ja") is False
+    assert lang.should_translate("en", "en") is False
 
   def test_different_from_native_translates(self):
     assert lang.should_translate("en", "ja") is True
+    assert lang.should_translate("ja", "en") is True
 
 
 class TestDisplayName:

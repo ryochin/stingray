@@ -1,5 +1,18 @@
+# Stingray — application settings
+# Copy this file to `config.yml` and adjust values for your setup.
+# The web and fetcher containers bind-mount `config.yml` read-only, so the file
+# must exist before `docker compose up`. Connection details and secrets live in
+# `.env` instead; this file holds application behaviour only.
+
 # -- General --
-native_lang: "ja"        # Your native language (feeds in other languages will be translated)
+# Your native language as an ISO 639-1 two-letter code. The LLM translates and
+# summarizes into it. A feed's own language is read from its <language> tag for
+# any language; Japanese is additionally detected from kana or a .jp domain.
+# A feed whose language cannot be determined is translated only when the native
+# language is itself detectable (true for "ja", not for "en") — otherwise every
+# untagged feed would be translated into its own language. Use the per-feed
+# toggle in the Feeds view to override either way.
+native_lang: "en"
 max_age_hours: 48        # How far back to include articles
 max_items_per_feed: 200  # Max articles to ingest per feed on each refresh
 cache_dir: "cache"                 # Cache directory

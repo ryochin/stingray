@@ -3,7 +3,7 @@ services:
     image: postgres:17-alpine
     container_name: stingray-postgres
     environment:
-      TZ: Asia/Tokyo
+      TZ: ${TZ:-UTC}
       POSTGRES_USER: ${POSTGRES_USER:-stingray}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stingray}
       POSTGRES_DB: ${POSTGRES_DB:-stingray}
@@ -25,7 +25,7 @@ services:
     command: ["/app/.venv/bin/uvicorn", "app:app", "--host", "0.0.0.0", "--port", "20080"]
     working_dir: /app
     environment:
-      TZ: Asia/Tokyo
+      TZ: ${TZ:-UTC}
       PYTHONPATH: /app/backend
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-stingray}:${POSTGRES_PASSWORD:-stingray}@postgres:5432/${POSTGRES_DB:-stingray}}
@@ -33,7 +33,14 @@ services:
       - "${WEB_PORT:-20080}:20080"
     volumes:
       - ./backend:/app/backend:ro
-      - ./config.yml:/app/config.yml:ro
+      # Long syntax so create_host_path can be disabled: without it a missing
+      # config.yml is silently created as a directory instead of failing.
+      - type: bind
+        source: ./config.yml
+        target: /app/config.yml
+        read_only: true
+        bind:
+          create_host_path: false
       - ./cache:/app/cache
       - ./debug-feeds:/app/debug-feeds:ro
     depends_on:
@@ -55,13 +62,20 @@ services:
     container_name: stingray-fetcher
     command: ["/usr/local/bin/supercronic", "-passthrough-logs", "/app/crontab"]
     environment:
-      TZ: Asia/Tokyo
+      TZ: ${TZ:-UTC}
       PYTHONPATH: /app/backend
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-stingray}:${POSTGRES_PASSWORD:-stingray}@postgres:5432/${POSTGRES_DB:-stingray}}
     volumes:
       - ./backend:/app/backend:ro
-      - ./config.yml:/app/config.yml:ro
+      # Long syntax so create_host_path can be disabled: without it a missing
+      # config.yml is silently created as a directory instead of failing.
+      - type: bind
+        source: ./config.yml
+        target: /app/config.yml
+        read_only: true
+        bind:
+          create_host_path: false
       - ./cache:/app/cache
       - ./debug-feeds:/app/debug-feeds:ro
     depends_on:

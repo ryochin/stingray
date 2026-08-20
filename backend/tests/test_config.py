@@ -59,9 +59,14 @@ class TestAppConfigLoad:
     assert AppConfig.load(path).ollama.enabled is False
 
   def test_default_path_relative_to_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    (tmp_path / "config.yml").write_text("native_lang: en\n", encoding="utf-8")
+    # Override with a non-default value so this actually proves the file is read.
+    (tmp_path / "config.yml").write_text("native_lang: ja\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    assert AppConfig.load().native_lang == "en"
+    assert AppConfig.load().native_lang == "ja"
+
+  def test_native_lang_defaults_to_en(self, tmp_path: Path):
+    config = AppConfig.load(tmp_path / "nope.yml")
+    assert config.native_lang == "en"
 
   def test_article_order_defaults_to_oldest(self, tmp_path: Path):
     config = AppConfig.load(tmp_path / "nope.yml")

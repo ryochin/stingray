@@ -332,6 +332,9 @@ tsconfig.tsbuildinfo
 # Database dumps — root-level backups in any compression (.sql / .sql.bz2 / .sql.gz)
 /backup*.sql*
 
+# Local application settings — copied from config.yml.example on first setup
+/config.yml
+
 # Private working notes — kept out of the public repository
 /plans/
 /task.md

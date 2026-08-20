@@ -94,7 +94,8 @@ def _should_translate(name: str, url: str | None, native_lang: str) -> bool:
 
 def parse_opml(
   xml_content: str,
-  native_lang: str = "ja",
+  *,
+  native_lang: str,
 ) -> tuple[list[ImportFolder], list[ImportFeed]]:
   """Parse OPML XML. Returns (folders_with_feeds, uncategorized_feeds)."""
   root = SafeET.fromstring(xml_content)

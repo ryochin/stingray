@@ -1,31 +1,53 @@
 import { describe, expect, it } from "vitest"
 import { formatDate, formatRelative, formatTime } from "./date"
 
-// These formatters always render in Asia/Tokyo, independent of the host TZ.
-// ICU zone data must be present (Node 18+).
+// These formatters follow the browser's locale and timezone. test-timezone.ts
+// pins TZ=UTC, but the locale cannot be pinned from inside Node — ICU reads it
+// once at init and later LC_ALL reassignment has no effect. So these assertions
+// are locale-tolerant: they check the 24-hour time, which is locale-invariant
+// under hourCycle "h23", and the day, which is read back through Intl rather
+// than hard-coded. What they never check is the order of the date components,
+// which is Intl's business rather than ours.
+
+// Throws rather than returning a fallback: a silently empty expectation would
+// make every `toContain` below pass vacuously.
+function expectedDay(iso: string): string {
+  const parts: Intl.DateTimeFormatPart[] = new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+  }).formatToParts(new Date(iso))
+  const day: Intl.DateTimeFormatPart | undefined = parts.find(
+    (p: Intl.DateTimeFormatPart) => p.type === "day",
+  )
+  if (!day?.value) throw new Error(`no day part for ${iso}`)
+  return day.value
+}
 
 describe("formatTime", () => {
-  it("renders MM/DD HH:mm in JST", () => {
-    // 2024-01-02T00:00:00Z = 2024-01-02 09:00 JST
+  it("renders the time in 24-hour form", () => {
     const out: string = formatTime("2024-01-02T00:00:00Z")
-    expect(out).toMatch(/01\/02/)
-    expect(out).toMatch(/09:00/)
+    expect(out).toContain("00:00")
   })
 
-  it("wraps midnight UTC to next-day in JST", () => {
-    // 2024-06-15T15:30:00Z = 2024-06-16 00:30 JST
-    const out: string = formatTime("2024-06-15T15:30:00Z")
-    expect(out).toMatch(/06\/16/)
-    expect(out).toMatch(/00:30/)
+  it("keeps date and time paired across a midnight boundary", () => {
+    const before: string = "2024-06-15T23:30:00Z"
+    const after: string = "2024-06-16T00:30:00Z"
+    expect(formatTime(before)).toContain("23:30")
+    expect(formatTime(before)).toContain(expectedDay(before))
+    expect(formatTime(after)).toContain("00:30")
+    expect(formatTime(after)).toContain(expectedDay(after))
+    // Keeps the fixtures honest: east of UTC these two instants fall on the
+    // same day, and the day assertions above would then compare a day to
+    // itself rather than to the one across the boundary.
+    expect(expectedDay(before)).not.toBe(expectedDay(after))
   })
 })
 
 describe("formatDate", () => {
-  it("includes year and JST suffix", () => {
+  it("includes the year and a timezone name", () => {
     const out: string = formatDate("2024-01-02T00:00:00Z")
     expect(out).toContain("2024")
-    expect(out).toContain("01/02")
-    expect(out.endsWith("JST")).toBe(true)
+    expect(out).toContain("00:00")
+    expect(out).toMatch(/UTC|GMT/)
   })
 })
 
@@ -78,6 +100,8 @@ describe("formatRelative", () => {
     const old: string = new Date(
       now.getTime() - 200 * 86400 * 1000,
     ).toISOString()
-    expect(formatRelative(old, now)).toContain("JST")
+    // 200 days before 2024-06-15 lands in 2023, so this asserts the fallback
+    // to an absolute date without coupling to any format.
+    expect(formatRelative(old, now)).toContain("2023")
   })
 })

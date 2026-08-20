@@ -27,6 +27,11 @@ PROFILES: dict[str, LangProfile] = {
     scripts=(re.compile(r"[\u3040-\u309F\u30A0-\u30FF]"),),
     tlds=(".jp",),
   ),
+  # English is registered for naming only, not for detection: there is no
+  # script or TLD that identifies English without also matching many other
+  # languages. `display_name` needs this entry so the summarizer prompts read
+  # "into English" rather than "into en"; `should_translate` reads the empty
+  # `scripts`/`tlds` as "cannot detect this language".
   "en": LangProfile(code="en", name="English"),
 }
 
@@ -55,7 +60,7 @@ def detect_lang_by_tld(url: str | None) -> str | None:
 
 
 def normalize_lang_code(raw: str | None) -> str | None:
-  """`en-US` → `en` のような BCP47 タグを 2 文字コードへ正規化。"""
+  """Normalize a BCP47 tag to a two-letter code, e.g. `en-US` -> `en`."""
   if not raw:
     return None
   code = raw.split("-")[0].strip().lower()
@@ -63,9 +68,27 @@ def normalize_lang_code(raw: str | None) -> str | None:
 
 
 def should_translate(source_lang: str | None, native_lang: str) -> bool:
-  if source_lang is None:
-    return True
-  return source_lang != native_lang
+  """Decide whether a feed in `source_lang` needs translating into `native_lang`.
+
+  When the source language is unknown, fall back on whether the native
+  language is detectable at all:
+
+  | source | native | result                                    |
+  |--------|--------|-------------------------------------------|
+  | `ja`   | `en`   | translate                                 |
+  | `en`   | `en`   | skip                                      |
+  | `None` | `ja`   | translate (kana/`.jp` would have matched) |
+  | `None` | `en`   | skip (English is undetectable)            |
+  | `None` | `fr`   | skip (unregistered)                       |
+
+  The asymmetry is deliberate. Assuming "foreign" for an undetectable native
+  language burns the LLM on every article of every untagged feed forever,
+  while the opposite mistake costs one toggle in the feeds view.
+  """
+  if source_lang is not None:
+    return source_lang != native_lang
+  profile = PROFILES.get(native_lang)
+  return bool(profile and (profile.scripts or profile.tlds))
 
 
 def display_name(lang_code: str) -> str:

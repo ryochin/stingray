@@ -12,7 +12,8 @@ FROM ghcr.io/astral-sh/uv:0.11.7-python3.12-trixie-slim@sha256:760df02ce4a80b395
 ARG SUPERCRONIC_VERSION=v0.2.33
 ARG TARGETARCH
 
-# Install supercronic (cron designed for containers) + tzdata for JST.
+# Install supercronic (cron designed for containers) + tzdata for zone-aware
+# timestamps.
 # curl is kept at runtime — used by container healthchecks.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl tzdata \
@@ -21,7 +22,7 @@ RUN apt-get update \
   && chmod +x /usr/local/bin/supercronic \
   && rm -rf /var/lib/apt/lists/*
 
-ENV TZ=Asia/Tokyo \
+ENV TZ=UTC \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/backend \
     UV_LINK_MODE=copy \

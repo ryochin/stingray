@@ -126,7 +126,7 @@ async def summarize_all(
   translate_set: set[str] | None = None,
   summarize_set: set[str] | None = None,
   short_set: set[str] | None = None,
-  native_lang: str = "ja",
+  native_lang: str,
 ) -> int:
   """Process articles with LLM. Returns the number of failures.
 
