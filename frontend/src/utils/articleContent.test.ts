@@ -3,17 +3,17 @@ import { parseSummary } from "./articleContent"
 
 describe("parseSummary", () => {
   it("returns plain text and empty image list when no markers", () => {
-    expect(parseSummary("ただの要約です")).toEqual({
-      text: "ただの要約です",
+    expect(parseSummary("Just a summary")).toEqual({
+      text: "Just a summary",
       imageUrls: [],
     })
   })
 
   it("extracts a single image URL and strips the marker from text", () => {
     const { text, imageUrls } = parseSummary(
-      "前段<image>https://example.com/a.png</image>後段",
+      "head<image>https://example.com/a.png</image>tail",
     )
-    expect(text).toBe("前段後段")
+    expect(text).toBe("headtail")
     expect(imageUrls).toEqual(["https://example.com/a.png"])
   })
 

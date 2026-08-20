@@ -8,6 +8,8 @@ import lang
 
 
 class TestDetectByScript:
+  # The Japanese samples are the subject under test, not placeholders: detection
+  # keys off the script itself, so ASCII text would void every case here.
   def test_hiragana(self):
     assert lang.detect_lang_by_script("これはテスト") == "ja"
 

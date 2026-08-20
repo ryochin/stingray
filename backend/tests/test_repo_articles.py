@@ -151,7 +151,14 @@ class TestUpsertArticles:
     # must NOT wipe an existing translated/summary field.
     fid = _make_feed(name="F")
     repo.upsert_articles(
-      [_art(url="u1", title_translated="訳1", summary="要約1", content_snippet="a")],
+      [
+        _art(
+          url="u1",
+          title_translated="Translated title 1",
+          summary="Summary text 1",
+          content_snippet="a",
+        )
+      ],
       {"F": fid},
     )
     # Second pass: empty summary/translation must be preserved; content_html gets filled.
@@ -162,8 +169,8 @@ class TestUpsertArticles:
     rows = repo.list_articles()
     assert len(rows) == 1
     a = rows[0]
-    assert a.title_translated == "訳1"
-    assert a.summary == "要約1"
+    assert a.title_translated == "Translated title 1"
+    assert a.summary == "Summary text 1"
     assert a.content_html == "<p>hi</p>"
 
   def test_feed_id_mapping_links_article_to_feed(self):

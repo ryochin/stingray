@@ -38,6 +38,8 @@ def _folder(*, id: int = 1, name: str = "Folder", position: int = 0) -> FolderRo
 
 
 class TestParseOpmlTranslateInference:
+  # The Japanese feed names below are the subject under test, not placeholders:
+  # the inference reads the script of the name, so ASCII would void these cases.
   def test_kanji_only_name_infers_translate_true_for_ja_native(self):
     xml = """<?xml version="1.0"?>
     <opml version="2.0"><body>
@@ -92,6 +94,7 @@ class TestParseOpmlTranslateInference:
     assert uncat[0].translate is True
 
   def test_kana_name_infers_translate_true_for_en_native(self):
+    # Katakana in name → source=ja → differs from native en → translate=True.
     xml = """<?xml version="1.0"?>
     <opml version="2.0"><body>
       <outline type="rss" text="はてブ 人気エントリ" xmlUrl="https://example.com/rss"/>
@@ -100,9 +103,11 @@ class TestParseOpmlTranslateInference:
     assert uncat[0].translate is True
 
   def test_explicit_translate_attr_overrides_heuristic(self):
+    # The .jp URL would infer translate=False for a ja native; data-translate
+    # must win over that.
     xml = """<?xml version="1.0"?>
     <opml version="2.0"><body>
-      <outline type="rss" text="はてブ" xmlUrl="https://b.hatena.ne.jp/rss" data-translate="1"/>
+      <outline type="rss" text="Hatena Bookmark" xmlUrl="https://b.hatena.ne.jp/rss" data-translate="1"/>
     </body></opml>"""
     _, uncat = opml.parse_opml(xml, native_lang="ja")
     assert uncat[0].translate is True

@@ -64,6 +64,8 @@ class TestFeedCache:
     assert cache.load_feed_cache(url) is None
 
   def test_unicode_body_roundtrip(self, cache_dir: Path):
+    # The non-ASCII body is the subject under test: it guards the encoding of
+    # the cache file across a write/read cycle, including a non-BMP emoji.
     cache.save_feed_cache("https://example.jp/", None, None, "日本語🎌")
     loaded = cache.load_feed_cache("https://example.jp/")
     assert loaded is not None

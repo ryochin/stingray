@@ -5,6 +5,11 @@ function parse(html: string): Document {
   return new DOMParser().parseFromString(`<body>${html}</body>`, "text/html")
 }
 
+// Verbatim Twitter oEmbed output. Two parts are deliberately non-ASCII and must
+// not be simplified: the em dash starts the meta line and is the only case that
+// exercises the `[—–-]` character class in META_RE, and the author name holds a
+// surrogate pair (U+29E3D), which is the only guard that a non-BMP character
+// survives from the regex capture through to the card's textContent.
 const sample = `
 <blockquote class="twitter-tweet">
 <p dir="ltr" lang="ja">松下がパナソニックに変換される話<br />笑った <a href="https://t.co/abc">pic.twitter.com/abc</a></p>

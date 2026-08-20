@@ -32,7 +32,10 @@ describe("pendingProcessing", () => {
   it("translate short article with content_translated → null", () => {
     expect(
       pendingProcessing(
-        article({ content_snippet: SHORT, content_translated: "訳文" }),
+        article({
+          content_snippet: SHORT,
+          content_translated: "Translated body",
+        }),
         true,
         false,
       ),
@@ -54,7 +57,10 @@ describe("pendingProcessing", () => {
   it("translate long article, summarize on, content_translated present but no summary → 'summary' (no false-negative)", () => {
     expect(
       pendingProcessing(
-        article({ content_snippet: LONG, content_translated: "訳文" }),
+        article({
+          content_snippet: LONG,
+          content_translated: "Translated body",
+        }),
         true,
         true,
       ),
@@ -85,7 +91,7 @@ describe("pendingProcessing", () => {
   it("summarize-only long article with summary present → null (no stale placeholder)", () => {
     expect(
       pendingProcessing(
-        article({ content_snippet: LONG, summary: "要約" }),
+        article({ content_snippet: LONG, summary: "Summary text" }),
         false,
         true,
       ),

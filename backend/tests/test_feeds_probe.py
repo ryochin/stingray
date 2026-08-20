@@ -12,12 +12,14 @@ from __future__ import annotations
 from feeds import extract_feed_candidates, extract_site_url, probe_feed_body
 
 
+# Titles are deliberately ASCII: <language> alone must drive the detection, so
+# kana here would mask a broken language tag by falling back to inference.
 RSS_JA = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel>
-  <title>日刊ニュース</title>
+  <title>Japanese Daily</title>
   <link>https://example.jp/</link>
   <language>ja</language>
-  <item><title>今日の記事</title><link>https://example.jp/1</link></item>
+  <item><title>Article one</title><link>https://example.jp/1</link></item>
 </channel></rss>
 """
 
@@ -30,7 +32,8 @@ RSS_EN_US = """<?xml version="1.0" encoding="UTF-8"?>
 </channel></rss>
 """
 
-# No <language> attribute; kana in an entry title should drive detection.
+# No <language> attribute; kana in an entry title should drive detection. The
+# Japanese text is the subject under test here and cannot be replaced.
 RSS_KANA_INFERRED = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel>
   <title>Untagged</title>
@@ -49,11 +52,12 @@ RSS_NO_LANG = """<?xml version="1.0" encoding="UTF-8"?>
 </channel></rss>
 """
 
+# ASCII titles for the same reason as RSS_JA: xml:lang is what is under test.
 ATOM_JA = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xml:lang="ja">
-  <title>はてブ</title>
+  <title>Hatena Bookmark</title>
   <link href="https://b.hatena.ne.jp/"/>
-  <entry><title>エントリ</title><link href="https://b.hatena.ne.jp/1"/></entry>
+  <entry><title>Entry one</title><link href="https://b.hatena.ne.jp/1"/></entry>
 </feed>
 """
 
@@ -67,7 +71,7 @@ EMPTY_RSS = """<?xml version="1.0" encoding="UTF-8"?>
 class TestProbeFeedBody:
   def test_ja_rss_extracts_all_fields(self):
     title, site_url, lang_code, has_entries = probe_feed_body(RSS_JA)
-    assert title == "日刊ニュース"
+    assert title == "Japanese Daily"
     assert site_url == "https://example.jp/"
     assert lang_code == "ja"
     assert has_entries is True
@@ -87,7 +91,7 @@ class TestProbeFeedBody:
 
   def test_atom_ja(self):
     title, site_url, lang_code, has_entries = probe_feed_body(ATOM_JA)
-    assert title == "はてブ"
+    assert title == "Hatena Bookmark"
     assert site_url == "https://b.hatena.ne.jp/"
     assert lang_code == "ja"
     assert has_entries is True

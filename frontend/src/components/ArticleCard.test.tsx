@@ -31,9 +31,11 @@ describe("ArticleCard", () => {
 
   it("shows translated title prominently and original as subtext when translation differs", () => {
     render(
-      <ArticleCard article={article({ title_translated: "翻訳タイトル" })} />,
+      <ArticleCard
+        article={article({ title_translated: "Translated title" })}
+      />,
     )
-    expect(screen.getByText("翻訳タイトル")).toBeInTheDocument()
+    expect(screen.getByText("Translated title")).toBeInTheDocument()
     expect(screen.getByText("Original Title")).toBeInTheDocument()
   })
 
@@ -46,10 +48,10 @@ describe("ArticleCard", () => {
 
   it("renders summary text extracted from <image> markers", () => {
     const a = article({
-      summary: "要約本文<image>https://img.example.com/x.png</image>",
+      summary: "Summary body<image>https://img.example.com/x.png</image>",
     })
     const { container } = render(<ArticleCard article={a} />)
-    expect(screen.getByText("要約本文")).toBeInTheDocument()
+    expect(screen.getByText("Summary body")).toBeInTheDocument()
     const img = container.querySelector(
       "img[src='https://img.example.com/x.png']",
     )
@@ -58,7 +60,7 @@ describe("ArticleCard", () => {
 
   it("hides summary image list when sanitizedHtml is present (avoid duplicate)", () => {
     const a = article({
-      summary: "要約<image>https://img.example.com/x.png</image>",
+      summary: "Summary text<image>https://img.example.com/x.png</image>",
       content_html: "<p>body</p>",
     })
     const { container } = render(<ArticleCard article={a} />)
@@ -86,8 +88,10 @@ describe("ArticleCard", () => {
   })
 
   it("shows content_snippet only when no summary / html / translation exist", () => {
-    render(<ArticleCard article={article({ content_snippet: "短い抜粋" })} />)
-    expect(screen.getByText("短い抜粋")).toBeInTheDocument()
+    render(
+      <ArticleCard article={article({ content_snippet: "Short snippet" })} />,
+    )
+    expect(screen.getByText("Short snippet")).toBeInTheDocument()
   })
 
   it("suppresses content_snippet when sanitized HTML is available (deduplication)", () => {
@@ -96,14 +100,14 @@ describe("ArticleCard", () => {
     render(
       <ArticleCard
         article={article({
-          content_snippet: "同じ本文",
-          content_html: "<p>同じ本文</p>",
+          content_snippet: "Same body text",
+          content_html: "<p>Same body text</p>",
         })}
       />,
     )
-    expect(screen.queryByText("同じ本文")).toBeInTheDocument()
+    expect(screen.queryByText("Same body text")).toBeInTheDocument()
     // Only one occurrence because snippet path is suppressed.
-    expect(screen.getAllByText("同じ本文")).toHaveLength(1)
+    expect(screen.getAllByText("Same body text")).toHaveLength(1)
   })
 
   it("renders feed name and favicon when provided", () => {

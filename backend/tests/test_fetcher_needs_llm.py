@@ -40,33 +40,37 @@ def _art(
 class TestTranslateAndSummarize:
   def test_missing_title_translation_needs_llm(self):
     assert _needs_llm(
-      _art(summary="要約", content_snippet=LONG), translate=True, summarize=True
+      _art(summary="Summary text", content_snippet=LONG), translate=True, summarize=True
     )
 
   def test_long_title_without_summary_needs_llm(self):
     assert _needs_llm(
-      _art(title_translated="訳", content_snippet=LONG),
+      _art(title_translated="Translated title", content_snippet=LONG),
       translate=True,
       summarize=True,
     )
 
   def test_long_title_and_summary_satisfies(self):
     assert not _needs_llm(
-      _art(title_translated="訳", summary="要約", content_snippet=LONG),
+      _art(title_translated="Translated title", summary="Summary text", content_snippet=LONG),
       translate=True,
       summarize=True,
     )
 
   def test_short_title_and_content_translated_satisfies(self):
     assert not _needs_llm(
-      _art(title_translated="訳", content_translated="翻訳本文", content_snippet=SHORT),
+      _art(
+        title_translated="Translated title",
+        content_translated="Translated body",
+        content_snippet=SHORT,
+      ),
       translate=True,
       summarize=True,
     )
 
   def test_short_title_without_content_translated_needs_llm(self):
     assert _needs_llm(
-      _art(title_translated="訳", content_snippet=SHORT),
+      _art(title_translated="Translated title", content_snippet=SHORT),
       translate=True,
       summarize=True,
     )
@@ -80,19 +84,23 @@ class TestTranslateOnly:
     # Key anti-loop guarantee: a translated title is enough for a long
     # translate-only article (no summary / content_translated expected).
     assert not _needs_llm(
-      _art(title_translated="訳", content_snippet=LONG),
+      _art(title_translated="Translated title", content_snippet=LONG),
       translate=True,
       summarize=False,
     )
 
   def test_short_still_requires_full_translation(self):
     assert _needs_llm(
-      _art(title_translated="訳", content_snippet=SHORT),
+      _art(title_translated="Translated title", content_snippet=SHORT),
       translate=True,
       summarize=False,
     )
     assert not _needs_llm(
-      _art(title_translated="訳", content_translated="翻訳本文", content_snippet=SHORT),
+      _art(
+        title_translated="Translated title",
+        content_translated="Translated body",
+        content_snippet=SHORT,
+      ),
       translate=True,
       summarize=False,
     )
@@ -108,12 +116,12 @@ class TestEmptyBodyTranslate:
 
   def test_empty_body_with_title_satisfies(self):
     assert not _needs_llm(
-      _art(title_translated="訳", content_snippet=""),
+      _art(title_translated="Translated title", content_snippet=""),
       translate=True,
       summarize=True,
     )
     assert not _needs_llm(
-      _art(title_translated="訳", content_snippet=""),
+      _art(title_translated="Translated title", content_snippet=""),
       translate=True,
       summarize=False,
     )

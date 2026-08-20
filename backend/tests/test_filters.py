@@ -68,8 +68,10 @@ class TestMatchesFilterSubstring:
     assert not _article_matches_filter(_article(title="x"), [])
 
   def test_target_title_checks_translated(self):
-    art = _article(title="foo", title_translated="日本語タイトル")
-    assert _article_matches_filter(art, [_filter("日本語")])
+    # The pattern must match the translated title only, so a filter that hit
+    # the original title would not prove anything.
+    art = _article(title="foo", title_translated="Translated title")
+    assert _article_matches_filter(art, [_filter("translated")])
 
   def test_target_title_ignores_body_fields(self):
     # target="title" must NOT peek into content_snippet/summary.
@@ -164,6 +166,9 @@ class TestListArticlesFilterIntegration:
     assert [r.url for r in rows] == ["u2"]
 
   def test_filter_substring_case_insensitive_unicode(self):
+    # The Japanese text is the subject under test: this is the only case that
+    # feeds a multi-byte pattern through the SQL ILIKE path, guarding against
+    # database encoding and collation regressions.
     fid = _feed()
     _insert_article(fid, url="u1", title="日本語のニュース")
     _insert_article(fid, url="u2", title="English news")

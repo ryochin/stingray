@@ -35,6 +35,8 @@ class TestSanitizeByteFallback:
     assert sanitize_byte_fallback("<0xe4><0x91><0x93>") == "䑓"
 
   def test_plain_string_unchanged(self):
+    # Non-ASCII text without any <0x escape must pass through untouched; ASCII
+    # here would only exercise the early return.
     assert sanitize_byte_fallback("plain タイトル") == "plain タイトル"
 
   def test_empty_string_unchanged(self):
@@ -91,6 +93,8 @@ class _FakeClient:
 
 
 def test_call_ollama_sanitizes_return_value():
+  # The Japanese payload is the subject under test: it round-trips multi-byte
+  # characters through the JSON response on the way out of the client.
   import asyncio
 
   payload = json.dumps({"title_translated": "。<0xE3><0x80><0x80><0xE4><0x91><0x93>原蓉子"})

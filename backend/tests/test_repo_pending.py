@@ -76,14 +76,14 @@ class TestTranslateOnlyFeed:
     # translate-only article (no summary / content_translated expected).
     fid = _make_feed(translate=True, summarize=False)
     _make_article(
-      feed_id=fid, url="u1", title_translated="訳", content_snippet="x" * 500
+      feed_id=fid, url="u1", title_translated="Translated title", content_snippet="x" * 500
     )
     assert repo.list_pending_summaries() == []
 
   def test_short_article_with_title_but_no_content_is_pending(self):
     fid = _make_feed(translate=True, summarize=False)
     _make_article(
-      feed_id=fid, url="u1", title_translated="訳", content_snippet="短い"
+      feed_id=fid, url="u1", title_translated="Translated title", content_snippet="short"
     )
     assert _urls(repo.list_pending_summaries()) == {"u1"}
 
@@ -91,7 +91,9 @@ class TestTranslateOnlyFeed:
     fid = _make_feed(translate=True, summarize=False)
     _make_article(
       feed_id=fid, url="u1",
-      title_translated="訳", content_translated="翻訳本文", content_snippet="短い",
+      title_translated="Translated title",
+      content_translated="Translated body",
+      content_snippet="short",
     )
     assert repo.list_pending_summaries() == []
 
@@ -99,7 +101,7 @@ class TestTranslateOnlyFeed:
     # Anti-loop: an empty body can never fill content_translated, so the title
     # translation alone must complete it (otherwise it requeues forever).
     fid = _make_feed(translate=True, summarize=False)
-    _make_article(feed_id=fid, url="u1", title_translated="訳", content_snippet=None)
+    _make_article(feed_id=fid, url="u1", title_translated="Translated title", content_snippet=None)
     assert repo.list_pending_summaries() == []
 
 
@@ -113,7 +115,7 @@ class TestTranslatingFeed:
     fid = _make_feed(translate=True, summarize=True)
     _make_article(
       feed_id=fid, url="u1",
-      title_translated="訳", content_snippet="any",
+      title_translated="Translated title", content_snippet="any",
     )
     assert _urls(repo.list_pending_summaries()) == {"u1"}
 
@@ -122,14 +124,14 @@ class TestTranslatingFeed:
     fid = _make_feed(translate=True, summarize=True)
     _make_article(
       feed_id=fid, url="u1",
-      title_translated="訳", content_translated="翻訳済み本文",
+      title_translated="Translated title", content_translated="Translated body",
     )
     assert repo.list_pending_summaries() == []
 
   def test_empty_body_with_title_not_pending(self):
     # Even with summarize on, an empty body completes on the title alone.
     fid = _make_feed(translate=True, summarize=True)
-    _make_article(feed_id=fid, url="u1", title_translated="訳", content_snippet=None)
+    _make_article(feed_id=fid, url="u1", title_translated="Translated title", content_snippet=None)
     assert repo.list_pending_summaries() == []
 
   def test_long_title_translated_and_summary_not_pending(self):
@@ -138,7 +140,7 @@ class TestTranslatingFeed:
     fid = _make_feed(translate=True, summarize=True)
     _make_article(
       feed_id=fid, url="u1",
-      title_translated="訳", summary="要約", content_snippet="x" * 400,
+      title_translated="Translated title", summary="Summary text", content_snippet="x" * 400,
     )
     assert repo.list_pending_summaries() == []
 
@@ -147,7 +149,7 @@ class TestNonTranslatingFeed:
   def test_short_article_without_summary_not_pending(self):
     # Length < 300 → skipped by _needs_llm; pending query must agree.
     fid = _make_feed(translate=False, summarize=True)
-    _make_article(feed_id=fid, url="u1", content_snippet="短い")
+    _make_article(feed_id=fid, url="u1", content_snippet="short")
     assert repo.list_pending_summaries() == []
 
   def test_long_article_without_summary_is_pending(self):

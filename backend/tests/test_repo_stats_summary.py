@@ -89,14 +89,14 @@ class TestFeedStats:
       conn.execute(
         """INSERT INTO articles (url, feed_id, title, source) VALUES
            (%s, %s, %s, 'F'), (%s, %s, %s, 'F')""",
-        ("ng-1", fid, "ネタバレ注意 something", "ng-2", fid, "another ネタバレ注意"),
+        ("ng-1", fid, "Spoiler alert something", "ng-2", fid, "another Spoiler alert"),
       )
       conn.execute(
         "INSERT INTO articles (url, feed_id, title, source) VALUES (%s, %s, 'clean', 'F')",
         ("clean", fid),
       )
       conn.execute(
-        "INSERT INTO filters (pattern, target) VALUES ('ネタバレ注意', 'title')",
+        "INSERT INTO filters (pattern, target) VALUES ('Spoiler alert', 'title')",
       )
     stats = repo.get_feed_stats()
     assert stats[fid].article_count == 1
@@ -129,31 +129,31 @@ class TestUpdateArticleSummary:
 
   def test_updates_all_fields(self):
     url = self._base()
-    repo.update_article_summary(url, "訳", "要約", "翻訳本文")
+    repo.update_article_summary(url, "Translated title", "Summary text", "Translated body")
     rows = repo.list_articles()
-    assert rows[0].title_translated == "訳"
-    assert rows[0].summary == "要約"
-    assert rows[0].content_translated == "翻訳本文"
+    assert rows[0].title_translated == "Translated title"
+    assert rows[0].summary == "Summary text"
+    assert rows[0].content_translated == "Translated body"
 
   def test_none_preserves_existing(self):
     # COALESCE(%s, existing): passing None must not overwrite existing values.
     url = self._base()
-    repo.update_article_summary(url, "訳1", "要約1", "翻訳1")
+    repo.update_article_summary(url, "Translated title 1", "Summary text 1", "Translated body 1")
     repo.update_article_summary(url, None, None, None)
     rows = repo.list_articles()
-    assert rows[0].title_translated == "訳1"
-    assert rows[0].summary == "要約1"
-    assert rows[0].content_translated == "翻訳1"
+    assert rows[0].title_translated == "Translated title 1"
+    assert rows[0].summary == "Summary text 1"
+    assert rows[0].content_translated == "Translated body 1"
 
   def test_partial_update(self):
     url = self._base()
-    repo.update_article_summary(url, "訳", None, None)
+    repo.update_article_summary(url, "Translated title", None, None)
     rows = repo.list_articles()
-    assert rows[0].title_translated == "訳"
+    assert rows[0].title_translated == "Translated title"
     assert rows[0].summary is None
     assert rows[0].content_translated is None
 
   def test_unknown_url_silently_updates_nothing(self):
     # UPDATE with no matching WHERE is not an error in SQL; document the behavior.
-    repo.update_article_summary("does-not-exist", "訳", "要約", None)
+    repo.update_article_summary("does-not-exist", "Translated title", "Summary text", None)
     assert repo.list_articles() == []
