@@ -34,6 +34,20 @@ function adjustScrollOnlyWhenIdle(
   return item.start < (instance.scrollOffset ?? 0) + scrollAdjustments
 }
 
+// Synchronous stand-in for an IntersectionObserver's first (asynchronous)
+// delivery: does `el` overlap the scroll root's rect vertically? Only the
+// vertical axis is checked — the list is a single column that always spans
+// the container's width. Falls back to the viewport when the root is not
+// attached yet, mirroring the observer's own `root: null` semantics. Pure
+// over its args, so it lives at module scope.
+function intersectsRoot(el: Element, root: HTMLElement | null): boolean {
+  const rect: DOMRect = el.getBoundingClientRect()
+  const rootRect: DOMRect | null = root ? root.getBoundingClientRect() : null
+  const top: number = rootRect ? rootRect.top : 0
+  const bottom: number = rootRect ? rootRect.bottom : window.innerHeight
+  return rect.bottom > top && rect.top < bottom
+}
+
 interface UseArticleListControllerInput {
   filtered: Article[]
   focusIndex: number
@@ -116,10 +130,12 @@ export function useArticleListController({
   const programmaticScrollRef = useRef<boolean>(false)
 
   const [caughtUpPulseKey, setCaughtUpPulseKey] = useState<number>(0)
-  // Sub-text hint shown under "All caught up" on a second consecutive
-  // j-at-end press. "jump" advertises the space shortcut to the next unread
-  // feed; "end" reports that no further unread feed exists.
-  const [caughtUpHint, setCaughtUpHint] = useState<CaughtUpHint>(null)
+  // Whether the sub-text hint under "All caught up" is showing. Armed by a
+  // second consecutive j-at-end press. Only *whether* to show it is state —
+  // which variant ("jump" vs "end") is derived below from the current
+  // `nextUnreadFeed`, so the hint can never advertise a jump that
+  // `goToNextFeed` would refuse.
+  const [caughtUpArmed, setCaughtUpArmed] = useState<boolean>(false)
   // Whether the caught-up sentinel is intersecting the scroll viewport.
   // Driven by an IntersectionObserver attached via `caughtUpSentinelRef`
   // so the Space-key shortcut can be disarmed the moment the sentinel
@@ -140,6 +156,7 @@ export function useArticleListController({
         setCaughtUpVisible(false)
         return
       }
+      const root: HTMLElement | null = mainRef.current
       if (caughtUpObserverRef.current == null) {
         caughtUpObserverRef.current = new IntersectionObserver(
           (entries: IntersectionObserverEntry[]): void => {
@@ -149,10 +166,15 @@ export function useArticleListController({
               }
             }
           },
-          { root: mainRef.current, threshold: 0 },
+          { root, threshold: 0 },
         )
       }
       caughtUpObserverRef.current.observe(el)
+      // Observers only report asynchronously, so visibility would stay false
+      // for at least a frame after the sentinel mounts — long enough to drop
+      // a Space press made the moment the hint appears. Seed it synchronously;
+      // the observer overwrites this on its first delivery.
+      setCaughtUpVisible(intersectsRoot(el, root))
     },
     [mainRef],
   )
@@ -172,7 +194,7 @@ export function useArticleListController({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `focusIndex` is a change trigger; the body only resets state and doesn't read it.
   useEffect((): void => {
     setCaughtUpPulseKey(0)
-    setCaughtUpHint(null)
+    setCaughtUpArmed(false)
   }, [focusIndex])
 
   // Include the "All caught up" sentinel as the last virtual item so its
@@ -378,9 +400,7 @@ export function useArticleListController({
     // press only pulses; pulseKey > 0 here means the user already saw the
     // pulse and pressed j again without moving focus.
     setCaughtUpPulseKey((key: number): number => {
-      if (key > 0) {
-        setCaughtUpHint(nextUnreadFeed != null ? "jump" : "end")
-      }
+      if (key > 0) setCaughtUpArmed(true)
       return key + 1
     })
     const main: HTMLElement | null = mainRef.current
@@ -392,7 +412,7 @@ export function useArticleListController({
     // those writes to jump main.scrollTop mid-animation, producing a
     // visible up/down jitter instead of a clean scroll to the bottom.
     virtualizer.scrollToOffset(main.scrollHeight, { behavior: "smooth" })
-  }, [virtualizer, nextUnreadFeed, mainRef])
+  }, [virtualizer, mainRef])
 
   // When k is pressed while the focused card's top has scrolled above the
   // sticky header (e.g. after j-at-end scrolled to the bottom), re-align the
@@ -442,15 +462,19 @@ export function useArticleListController({
   )
 
   // A feed with zero unread renders no article cards, so the j-at-end flow
-  // that surfaces the jump hint can't run. In the unread-only empty state,
-  // derive it from whether another unread feed exists; the empty-state
-  // indicator mounts the same sentinel, so `caughtUpVisible` still gates Space.
-  const effectiveCaughtUpHint: CaughtUpHint =
-    showUnreadOnly && filtered.length === 0
-      ? nextUnreadFeed != null
-        ? "jump"
-        : "end"
-      : caughtUpHint
+  // that arms the hint can't run. In the unread-only empty state the hint is
+  // always armed instead; the empty-state indicator mounts the same sentinel,
+  // so `caughtUpVisible` still gates Space.
+  const caughtUpHintArmed: boolean =
+    (showUnreadOnly && filtered.length === 0) || caughtUpArmed
+  // Derived from the *current* next-unread feed, not frozen at arming time:
+  // a stale "jump" kept `canJumpToNextFeed` true, so Space got preventDefault-ed
+  // (killing the native scroll too) for a `goToNextFeed` that then refused.
+  const effectiveCaughtUpHint: CaughtUpHint = caughtUpHintArmed
+    ? nextUnreadFeed != null
+      ? "jump"
+      : "end"
+    : null
 
   return {
     virtualizer,

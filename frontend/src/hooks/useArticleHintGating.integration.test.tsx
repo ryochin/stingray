@@ -90,6 +90,7 @@ function triggerIntersection(target: Element, isIntersecting: boolean): void {
 interface HarnessHandle {
   sentinelRef: (el: HTMLDivElement | null) => void
   fireJAtEnd: () => void
+  caughtUpHint: "jump" | "end" | null
 }
 
 interface HarnessProps {
@@ -148,6 +149,7 @@ function Harness({
   onReady({
     sentinelRef: controller.caughtUpSentinelRef,
     fireJAtEnd: controller.onJAtEnd,
+    caughtUpHint: controller.caughtUpHint,
   })
 
   return (
@@ -226,6 +228,63 @@ describe("Space-key gating wires through controller + keyboard", (): void => {
     event = pressSpace()
     expect(event.defaultPrevented).toBe(true)
     expect(goToNextFeed).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-derives the hint variant when nextUnreadFeed disappears after arming", (): void => {
+    // Regression: the hint used to freeze its "jump"/"end" variant at arming
+    // time. When the next unread feed went away afterwards, the sub-text kept
+    // advertising the jump while `canJumpToNextFeed` stayed true — so Space
+    // was preventDefault-ed (killing the native scroll too) for a
+    // `goToNextFeed` that then refused. The key went dead under an on-screen
+    // prompt telling the user to press it, and stayed that way because
+    // neither focus nor the hint moved.
+    let handle: HarnessHandle | undefined
+    const goToNextFeed = vi.fn((): boolean => false)
+    const onReady = (h: HarnessHandle): void => {
+      handle = h
+    }
+    const articles: Article[] = [makeArticle({ url: "a", read_at: null })]
+    const { rerender } = render(
+      <Harness
+        articles={articles}
+        initialFocus={0}
+        nextUnreadFeed={42}
+        goToNextFeed={goToNextFeed}
+        onReady={onReady}
+      />,
+    )
+
+    const sentinel: HTMLDivElement = document.createElement("div")
+    document.body.appendChild(sentinel)
+    act((): void => {
+      handle?.sentinelRef(sentinel)
+    })
+    triggerIntersection(sentinel, true)
+
+    act((): void => {
+      handle?.fireJAtEnd()
+    })
+    act((): void => {
+      handle?.fireJAtEnd()
+    })
+    expect(handle?.caughtUpHint).toBe("jump")
+
+    // The last unread feed drains (stats refetch / session reads) while the
+    // hint stays armed — focus never moved, so nothing resets it.
+    rerender(
+      <Harness
+        articles={articles}
+        initialFocus={0}
+        nextUnreadFeed={null}
+        goToNextFeed={goToNextFeed}
+        onReady={onReady}
+      />,
+    )
+
+    expect(handle?.caughtUpHint).toBe("end")
+    const event: KeyboardEvent = pressSpace()
+    expect(event.defaultPrevented).toBe(false)
+    expect(goToNextFeed).not.toHaveBeenCalled()
   })
 
   it("with nextUnreadFeed=null, the 'end' hint never enables Space", (): void => {
