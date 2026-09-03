@@ -57,6 +57,12 @@ describe("useTabShortcuts", (): void => {
     expect(navigate).toHaveBeenCalledWith("/feeds")
   })
 
+  it("'t' navigates to /filters", (): void => {
+    renderWithRouter()
+    press("t")
+    expect(navigate).toHaveBeenCalledWith("/filters")
+  })
+
   it("other keys do nothing", (): void => {
     renderWithRouter()
     press("z")
@@ -87,6 +93,43 @@ describe("useTabShortcuts", (): void => {
     press("f", ta)
     expect(navigate).not.toHaveBeenCalled()
     ta.remove()
+  })
+
+  it("does not navigate while a modal owns the keyboard", (): void => {
+    renderWithRouter()
+    const modal: HTMLDivElement = document.createElement("div")
+    modal.setAttribute("aria-modal", "true")
+    document.body.appendChild(modal)
+    // Trying a key read off the ShortcutsHelp cheatsheet must not navigate
+    // behind the still-open overlay.
+    press("t")
+    expect(navigate).not.toHaveBeenCalled()
+    modal.remove()
+  })
+
+  it("ignores keystrokes an IME composition owns", (): void => {
+    renderWithRouter()
+    press("t", document.body, { isComposing: true })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("ignores an event another handler already claimed", (): void => {
+    renderWithRouter()
+    const claimer = (e: KeyboardEvent): void => e.preventDefault()
+    document.body.addEventListener("keydown", claimer)
+    press("t")
+    expect(navigate).not.toHaveBeenCalled()
+    document.body.removeEventListener("keydown", claimer)
+  })
+
+  it("typing inside a contenteditable does not trigger", (): void => {
+    renderWithRouter()
+    const box: HTMLDivElement = document.createElement("div")
+    box.contentEditable = "true"
+    document.body.appendChild(box)
+    press("t", box)
+    expect(navigate).not.toHaveBeenCalled()
+    box.remove()
   })
 
   it("cleans up the listener on unmount", (): void => {

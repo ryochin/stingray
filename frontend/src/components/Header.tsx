@@ -6,6 +6,8 @@ import type { RefreshStatus } from "../api/client"
 import { api } from "../api/client"
 import { useRefreshSync } from "../hooks/useRefreshSync"
 import { formatTime } from "../utils/date"
+import type { NavItem } from "./navItems"
+import { NAV_ITEMS } from "./navItems"
 
 export default function Header(): JSX.Element {
   const queryClient: QueryClient = useQueryClient()
@@ -46,21 +48,19 @@ export default function Header(): JSX.Element {
           Stingray
         </Link>
         <nav className="relative top-0.5 flex gap-4 text-sm">
-          <Link to="/" className="text-text-muted hover:text-text no-underline">
-            Articles
-          </Link>
-          <Link
-            to="/feeds"
-            className="text-text-muted hover:text-text no-underline"
-          >
-            Feeds
-          </Link>
-          <Link
-            to="/filters"
-            className="text-text-muted hover:text-text no-underline"
-          >
-            Filters
-          </Link>
+          {NAV_ITEMS.map(
+            ({ path, label, shortcut }: NavItem): JSX.Element => (
+              <Link
+                key={path}
+                to={path}
+                title={shortcut ? `${label} (${shortcut})` : label}
+                aria-keyshortcuts={shortcut}
+                className="text-text-muted hover:text-text no-underline"
+              >
+                {label}
+              </Link>
+            ),
+          )}
         </nav>
       </div>
       <div className="flex items-center gap-3 text-sm">

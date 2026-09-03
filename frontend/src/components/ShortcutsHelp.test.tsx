@@ -8,10 +8,27 @@
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { NavItem } from "./navItems"
+import { NAV_ITEMS } from "./navItems"
 import ShortcutsHelp from "./ShortcutsHelp"
 
 afterEach((): void => {
   document.body.innerHTML = ""
+})
+
+describe("ShortcutsHelp nav entries", (): void => {
+  it("lists every navigable tab with its shortcut key", (): void => {
+    render(<ShortcutsHelp onClose={vi.fn()} />)
+    const navigable: readonly (readonly [string, string])[] = NAV_ITEMS.flatMap(
+      (item: NavItem): (readonly [string, string])[] =>
+        item.shortcut ? [[item.shortcut, item.label]] : [],
+    )
+    expect(navigable.length).toBeGreaterThan(0)
+    for (const [shortcut, label] of navigable) {
+      expect(screen.getByText(shortcut)).toBeInTheDocument()
+      expect(screen.getByText(`Go to ${label}`)).toBeInTheDocument()
+    }
+  })
 })
 
 describe("ShortcutsHelp focus management", (): void => {

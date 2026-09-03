@@ -1,9 +1,17 @@
 import type { JSX, KeyboardEvent, MouseEvent } from "react"
 import { useEffect, useRef } from "react"
+import type { NavItem } from "./navItems"
+import { NAV_ITEMS } from "./navItems"
 
 interface Props {
   onClose: () => void
 }
+
+// Derived from NAV_ITEMS so the cheatsheet cannot drift from the real bindings.
+const NAV_SHORTCUTS: readonly (readonly [string, string])[] = NAV_ITEMS.flatMap(
+  (item: NavItem): (readonly [string, string])[] =>
+    item.shortcut ? [[item.shortcut, `Go to ${item.label}`]] : [],
+)
 
 const SHORTCUTS: readonly (readonly [string, string])[] = [
   ["j", "Next article"],
@@ -14,8 +22,7 @@ const SHORTCUTS: readonly (readonly [string, string])[] = [
   ["Shift+A", "Mark all as read"],
   ["u", "Toggle Unread / All"],
   ["?", "Show/hide this help"],
-  ["a", "Go to Articles"],
-  ["f", "Go to Feeds"],
+  ...NAV_SHORTCUTS,
 ]
 
 /** Keyboard shortcut cheatsheet shown when the user presses `?`. */
