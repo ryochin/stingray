@@ -1,4 +1,5 @@
 import { act, render } from "@testing-library/react"
+import type { Dispatch, SetStateAction } from "react"
 import { useState } from "react"
 import type { Mock } from "vitest"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -22,11 +23,15 @@ function makeArticle(overrides: Partial<Article> & { url: string }): Article {
   }
 }
 
-function press(key: string): KeyboardEvent {
+function press(
+  key: string,
+  modifiers: Partial<KeyboardEventInit> = {},
+): KeyboardEvent {
   const event: KeyboardEvent = new KeyboardEvent("keydown", {
     key,
     bubbles: true,
     cancelable: true,
+    ...modifiers,
   })
   act((): void => {
     document.body.dispatchEvent(event)
@@ -45,6 +50,9 @@ interface HarnessProps {
   onMarkRead?: (i: number) => void
   onJAtEnd?: () => void
   toggleUnreadFilter?: () => void
+  toggleRead?: (url: string, isRead: boolean) => void
+  markAllRead?: () => void
+  setShowHelp?: Dispatch<SetStateAction<boolean>>
 }
 
 function Harness({
@@ -56,6 +64,9 @@ function Harness({
   onMarkRead,
   onJAtEnd,
   toggleUnreadFilter,
+  toggleRead,
+  markAllRead,
+  setShowHelp,
 }: HarnessProps): null {
   const [focusIndex, setFocusIndex] = useState<number>(initialFocus)
   onFocus?.(focusIndex)
@@ -71,13 +82,13 @@ function Harness({
     markFocusedAsRead,
     canJumpToNextFeed,
     scheduleRead: (): void => {},
-    toggleRead: (): void => {},
-    markAllRead: (): void => {},
+    toggleRead: toggleRead ?? ((): void => {}),
+    markAllRead: markAllRead ?? ((): void => {}),
     goToNextFeed,
     onJAtEnd: onJAtEnd ?? ((): void => {}),
     onKBeforeMove: (): boolean => false,
     toggleUnreadFilter: toggleUnreadFilter ?? ((): void => {}),
-    setShowHelp: (): void => {},
+    setShowHelp: setShowHelp ?? ((): void => {}),
   })
   return null
 }
@@ -403,6 +414,191 @@ describe("useArticleKeyboard — u key (toggle Unread/All)", (): void => {
     act(() => {
       input.dispatchEvent(event)
     })
+
+    expect(toggle).not.toHaveBeenCalled()
+  })
+})
+
+describe("useArticleKeyboard — Enter on a focused card", (): void => {
+  it("still opens the article after ArticleCard preventDefaults its own Enter", (): void => {
+    // ArticleCard handles Enter itself (preventDefault + onClick) purely to
+    // move focus to the card; opening in a new tab is this hook's job and must
+    // survive that. A blanket defaultPrevented guard here would break the
+    // documented "v / o / Enter — Open in new tab" binding.
+    const open: Mock = vi.fn()
+    vi.stubGlobal("open", open)
+    render(
+      <Harness
+        filtered={[makeArticle({ url: "https://example.com/a" })]}
+        initialFocus={0}
+        goToNextFeed={(): boolean => false}
+      />,
+    )
+
+    const card: HTMLDivElement = document.createElement("div")
+    card.setAttribute("role", "button")
+    card.addEventListener("keydown", (e: Event): void => e.preventDefault())
+    document.body.appendChild(card)
+    act((): void => {
+      card.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    })
+
+    expect(open).toHaveBeenCalledWith(
+      "https://example.com/a",
+      "_blank",
+      "noopener",
+    )
+    vi.unstubAllGlobals()
+  })
+})
+
+describe("useArticleKeyboard — while a modal owns the keyboard", (): void => {
+  // The ShortcutsHelp overlay handles only Enter/Space/Escape itself, so every
+  // other key bubbles to this window handler. Reading a key off the cheatsheet
+  // and trying it must not drive the article list behind the overlay.
+  function openModal(): HTMLDivElement {
+    const modal: HTMLDivElement = document.createElement("div")
+    modal.setAttribute("aria-modal", "true")
+    document.body.appendChild(modal)
+    return modal
+  }
+
+  interface SuppressedCase {
+    key: string
+    modifiers?: Partial<KeyboardEventInit>
+    /** The observable this key would drive if the guard failed. */
+    effect: (spies: ListSpies) => unknown
+  }
+
+  interface ListSpies {
+    focus: Mock
+    markAll: Mock
+    toggle: Mock
+    toggleUnread: Mock
+    nextFeed: Mock
+    open: Mock
+  }
+
+  const SUPPRESSED: readonly SuppressedCase[] = [
+    { key: "j", effect: (s: ListSpies): unknown => s.focus.mock.lastCall },
+    { key: "k", effect: (s: ListSpies): unknown => s.focus.mock.lastCall },
+    { key: "m", effect: (s: ListSpies): unknown => s.toggle.mock.calls.length },
+    {
+      key: "u",
+      effect: (s: ListSpies): unknown => s.toggleUnread.mock.calls.length,
+    },
+    { key: "v", effect: (s: ListSpies): unknown => s.open.mock.calls.length },
+    { key: "o", effect: (s: ListSpies): unknown => s.open.mock.calls.length },
+    {
+      key: "Enter",
+      effect: (s: ListSpies): unknown => s.open.mock.calls.length,
+    },
+    {
+      key: "A",
+      modifiers: { shiftKey: true },
+      effect: (s: ListSpies): unknown => s.markAll.mock.calls.length,
+    },
+    {
+      key: " ",
+      effect: (s: ListSpies): unknown => s.nextFeed.mock.calls.length,
+    },
+  ]
+
+  it.each(SUPPRESSED)("suppresses $key while the overlay is open", ({
+    key,
+    modifiers,
+    effect,
+  }: SuppressedCase): void => {
+    const spies: ListSpies = {
+      focus: vi.fn(),
+      markAll: vi.fn(),
+      toggle: vi.fn(),
+      toggleUnread: vi.fn(),
+      nextFeed: vi.fn((): boolean => true),
+      open: vi.fn(),
+    }
+    vi.stubGlobal("open", spies.open)
+    render(
+      <Harness
+        filtered={[
+          makeArticle({ url: "a", read_at: null }),
+          makeArticle({ url: "b", read_at: null }),
+        ]}
+        initialFocus={1}
+        canJumpToNextFeed={true}
+        goToNextFeed={spies.nextFeed}
+        onFocus={spies.focus}
+        markAllRead={spies.markAll}
+        toggleRead={spies.toggle}
+        toggleUnreadFilter={spies.toggleUnread}
+      />,
+    )
+    const before: unknown = effect(spies)
+    openModal()
+
+    const event: KeyboardEvent = press(key, modifiers)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(effect(spies)).toEqual(before)
+    vi.unstubAllGlobals()
+  })
+
+  it("still lets ? and Esc dismiss the overlay", (): void => {
+    const setShowHelp: Mock = vi.fn()
+    render(
+      <Harness
+        filtered={[makeArticle({ url: "a", read_at: null })]}
+        initialFocus={0}
+        goToNextFeed={(): boolean => false}
+        setShowHelp={setShowHelp}
+      />,
+    )
+    openModal()
+
+    expect(press("?").defaultPrevented).toBe(true)
+    press("Escape")
+
+    expect(setShowHelp).toHaveBeenCalledTimes(2)
+    expect(setShowHelp).toHaveBeenLastCalledWith(false)
+  })
+
+  it("resumes the list shortcuts once the modal is gone", (): void => {
+    const markAll: Mock = vi.fn()
+    render(
+      <Harness
+        filtered={[makeArticle({ url: "a", read_at: null })]}
+        initialFocus={0}
+        goToNextFeed={(): boolean => false}
+        markAllRead={markAll}
+      />,
+    )
+    const modal: HTMLDivElement = openModal()
+    press("A", { shiftKey: true })
+    expect(markAll).not.toHaveBeenCalled()
+
+    modal.remove()
+    press("A", { shiftKey: true })
+    expect(markAll).toHaveBeenCalledTimes(1)
+  })
+
+  it("ignores keystrokes an IME composition owns", (): void => {
+    const toggle: Mock = vi.fn()
+    render(
+      <Harness
+        filtered={[]}
+        initialFocus={-1}
+        goToNextFeed={(): boolean => false}
+        toggleUnreadFilter={toggle}
+      />,
+    )
+
+    press("u", { isComposing: true })
 
     expect(toggle).not.toHaveBeenCalled()
   })

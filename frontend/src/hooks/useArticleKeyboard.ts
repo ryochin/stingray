@@ -5,6 +5,7 @@ import {
   useEffect,
 } from "react"
 import type { Article } from "../api/client"
+import { isModalOpen, isShortcutSuppressed } from "../utils/keyboardGuards"
 
 interface Options {
   filtered: Article[]
@@ -39,10 +40,13 @@ interface Options {
  *   ?     — show/hide help
  *   Esc   — close help
  *
- * Typing inside input/textarea/select is never intercepted. `setFocusIndex` is
- * the functional setter from `useState`; keeping the functional-update form
- * inside the hook makes focus advancement atomic with the read-marking it
- * triggers.
+ * Text entry is never intercepted. While the help overlay is open, the only
+ * keys this hook still acts on are ? and Esc, which dismiss it; ShortcutsHelp
+ * itself additionally owns Enter/Space/Escape while focused. See
+ * `utils/keyboardGuards`.
+ * `setFocusIndex` is the functional setter from `useState`; keeping the
+ * functional-update form inside the hook makes focus advancement atomic with
+ * the read-marking it triggers.
  */
 export function useArticleKeyboard({
   filtered,
@@ -60,10 +64,10 @@ export function useArticleKeyboard({
 }: Options): void {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent): void => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      const tag: string = (e.target as HTMLElement).tagName
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
+      if (isShortcutSuppressed(e)) return
 
+      // ? and Esc address the help overlay itself, so they run before the
+      // modal check below — they are the way out of it.
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
         e.preventDefault()
         setShowHelp((v: boolean): boolean => !v)
@@ -74,16 +78,21 @@ export function useArticleKeyboard({
         return
       }
 
+      // Everything past this point drives the article list, which sits behind
+      // the overlay while it is open.
+      if (isModalOpen()) return
+
       if (e.key === " ") {
         // Leave Shift+Space (PageUp) and events another handler already
-        // processed (e.g. ShortcutsHelp overlay close) to their owners.
+        // processed to their owners. Unlike Enter — which ArticleCard
+        // preventDefaults on its way through and still expects to be opened
+        // by this handler — a consumed Space is never ours.
         if (e.shiftKey || e.defaultPrevented) return
         // Respect focus on a native <button>: its browser-default Space
         // activation (Unread/All toggle, MarkAllReadMenu items, etc.) must
         // win over the feed-jump shortcut. role="button" divs are not
         // matched here on purpose — ArticleCard wants Space to fall through
-        // to this handler, and ShortcutsHelp overlays self-handle Space
-        // via preventDefault and are covered by the guard above.
+        // to this handler.
         const targetEl = e.target as HTMLElement | null
         if (targetEl?.closest("button")) return
         // Only steal Space while the caught-up hint advertising the

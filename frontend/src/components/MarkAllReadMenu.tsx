@@ -1,5 +1,6 @@
 import type { JSX } from "react"
 import { useEffect, useRef, useState } from "react"
+import { isModalOpen } from "../utils/keyboardGuards"
 
 interface Props {
   disabled?: boolean
@@ -32,6 +33,9 @@ export default function MarkAllReadMenu({
       if (!wrapRef.current?.contains(event.target as Node)) setOpen(false)
     }
     const handleKey = (event: KeyboardEvent): void => {
+      // An open modal owns Escape: it should dismiss the overlay only, leaving
+      // this dropdown for the next press rather than collapsing both at once.
+      if (isModalOpen()) return
       if (event.key === "Escape") setOpen(false)
     }
     window.addEventListener("mousedown", handleClick)
