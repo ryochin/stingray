@@ -3,6 +3,28 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2026-09-03
+
+Range: (`d8f3d25`, 2026-08-20) – (`d3d123d`, 2026-09-03) / 7 commits
+
+### Keyboard shortcuts
+
+The tab bindings had drifted across three surfaces — hardcoded in the key handler, hand-written again in the cheatsheet, and missing from the nav itself. They now come from one table, and no key acts on the article list while the help overlay is up.
+
+- **The header nav, the key handler and the `?` cheatsheet all derive from `NAV_ITEMS`**, so a binding and its documentation cannot disagree. Each nav link advertises its key through a tooltip and `aria-keyshortcuts` ([`6eef723`](https://github.com/ryochin/stingray/commit/6eef723))
+- **Filters gained a binding**: <kbd>t</kbd>, the remaining letter of its label now that <kbd>f</kbd> belongs to Feeds ([`6eef723`](https://github.com/ryochin/stingray/commit/6eef723))
+- **Global shortcuts no longer reach the UI behind an open modal** — the help overlay handles only <kbd>Enter</kbd>/<kbd>Space</kbd>/<kbd>Esc</kbd> itself, so every other key bubbled through and drove the article list underneath. Trying out a key read off the cheatsheet is the natural way to use it, and <kbd>Shift</kbd>+<kbd>A</kbd> marking everything read from there was the worst case. `utils/keyboardGuards` now answers "is this text entry" and "may I touch what is behind the dialog" for both window handlers, with <kbd>?</kbd> and <kbd>Esc</kbd> running between the two so the overlay keeps its exits. The mark-all-read dropdown also ignores <kbd>Esc</kbd> while a modal is open, so it no longer collapses on the same keypress that closes the overlay ([`d3d123d`](https://github.com/ryochin/stingray/commit/d3d123d))
+- The article handler picked up the IME-composition and `contenteditable` guards it never had ([`d3d123d`](https://github.com/ryochin/stingray/commit/d3d123d))
+
+### Fixed
+
+- **<kbd>Space</kbd> no longer goes dead under the prompt telling you to press it** — the hint below "All caught up" froze its jump/end variant when a second j-at-end armed it. If the next unread feed disappeared afterwards, the sub-text kept advertising the jump while <kbd>Space</kbd> was still being `preventDefault`-ed, killing the native scroll too, only for the jump to be refused. Nothing moved, so pressing again never recovered. The variant is now derived on every render, so the prompt always matches what <kbd>Space</kbd> will do. Sentinel visibility is also seeded synchronously on ref attach, since an `IntersectionObserver` reports only asynchronously ([`6778381`](https://github.com/ryochin/stingray/commit/6778381))
+
+### Changed
+
+- Article titles drop from 16pt to 15pt ([`09b28a2`](https://github.com/ryochin/stingray/commit/09b28a2))
+- Remaining Japanese assumptions are out of the repository: the CHANGELOG is rewritten in English, test fixtures use English placeholders, and the package description no longer describes a Japanese-only reader ([`d8f3d25`](https://github.com/ryochin/stingray/commit/d8f3d25), [`e36bc8b`](https://github.com/ryochin/stingray/commit/e36bc8b), [`0784892`](https://github.com/ryochin/stingray/commit/0784892))
+
 ## 2026-08-20
 
 Range: (`7efde57`, 2026-07-07) – (`70ca7ed`, 2026-08-20) / 4 commits
