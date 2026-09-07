@@ -9,6 +9,7 @@ import { formatDate, formatRelative } from "../utils/date"
 type ParsedSummary = { text: string; imageUrls: string[] }
 
 import { useNow } from "../hooks/useNow"
+import { unwrapFormControls } from "../utils/formControls"
 import { transformTwitterBlockquotes } from "../utils/twitterCard"
 
 interface Props {
@@ -73,6 +74,9 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       if (!article.content_html) return null
       const clean: string = DOMPurify.sanitize(article.content_html)
       const doc: Document = new DOMParser().parseFromString(clean, "text/html")
+      // Run first: a stray `<textarea>` hides the rest of the body as its own
+      // value, so every later pass would otherwise walk a truncated tree.
+      unwrapFormControls(doc)
       transformTwitterBlockquotes(doc)
       const seen: Set<string> = new Set<string>()
       // Strip dimension/layout attrs so the CSS `max-width: 100%` clamp can
