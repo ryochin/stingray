@@ -60,7 +60,8 @@ export function applyUnreadFilter(
 }
 
 // Time range filter keyed by a stable string id so sessionStorage / <select>
-// values stay robust against malformed input. `"all"` disables filtering.
+// values stay robust against malformed input. `"all"` disables filtering;
+// see `DEFAULT_TIME_RANGE_ID` below for the value a fresh session starts on.
 export type TimeRangeId = "1d" | "3d" | "7d" | "14d" | "30d" | "all"
 
 export interface TimeRangeOption {
@@ -82,12 +83,16 @@ const TIME_RANGE_IDS: ReadonlySet<TimeRangeId> = new Set(
   TIME_RANGE_OPTIONS.map((o: TimeRangeOption): TimeRangeId => o.id),
 )
 
+// Starting range for a fresh session. Kept narrow because the filter only
+// takes effect once the reader switches from unread-only to all articles,
+// where "all" would pull the entire history in one query.
+export const DEFAULT_TIME_RANGE_ID: TimeRangeId = "3d"
+
 // Coerce arbitrary input (sessionStorage, select onChange) into a known id.
-// Falls back to "all" — the widest/safest behavior — for anything unknown.
 export function parseTimeRangeId(input: unknown): TimeRangeId {
   return typeof input === "string" && TIME_RANGE_IDS.has(input as TimeRangeId)
     ? (input as TimeRangeId)
-    : "all"
+    : DEFAULT_TIME_RANGE_ID
 }
 
 export function timeRangeDays(id: TimeRangeId): number | null {

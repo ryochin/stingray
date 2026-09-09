@@ -3,6 +3,7 @@ import type { Article, Feed, FeedStats, Selection } from "../api/client"
 import {
   applyUnreadFilter,
   computeFolderFeedOrder,
+  DEFAULT_TIME_RANGE_ID,
   deriveUnreadCounts,
   nextUnreadFeedId,
   parseTimeRangeId,
@@ -190,14 +191,19 @@ describe("parseTimeRangeId", () => {
     expect(parseTimeRangeId("all")).toBe("all")
   })
 
-  it("falls back to 'all' for unknown or malformed input", () => {
-    expect(parseTimeRangeId("")).toBe("all")
-    expect(parseTimeRangeId("2d")).toBe("all")
-    expect(parseTimeRangeId("foo")).toBe("all")
-    expect(parseTimeRangeId(null)).toBe("all")
-    expect(parseTimeRangeId(undefined)).toBe("all")
-    expect(parseTimeRangeId(7)).toBe("all")
-    expect(parseTimeRangeId({ id: "7d" })).toBe("all")
+  it("falls back to the default range for unknown or malformed input", () => {
+    expect(parseTimeRangeId("")).toBe(DEFAULT_TIME_RANGE_ID)
+    expect(parseTimeRangeId("2d")).toBe(DEFAULT_TIME_RANGE_ID)
+    expect(parseTimeRangeId("foo")).toBe(DEFAULT_TIME_RANGE_ID)
+    expect(parseTimeRangeId(null)).toBe(DEFAULT_TIME_RANGE_ID)
+    expect(parseTimeRangeId(undefined)).toBe(DEFAULT_TIME_RANGE_ID)
+    expect(parseTimeRangeId(7)).toBe(DEFAULT_TIME_RANGE_ID)
+    expect(parseTimeRangeId({ id: "7d" })).toBe(DEFAULT_TIME_RANGE_ID)
+  })
+
+  it("defaults to a bounded range rather than the whole history", () => {
+    expect(DEFAULT_TIME_RANGE_ID).toBe("3d")
+    expect(timeRangeDays(DEFAULT_TIME_RANGE_ID)).toBe(3)
   })
 })
 

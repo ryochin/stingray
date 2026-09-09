@@ -19,10 +19,12 @@ import { usePendingReads } from "../hooks/usePendingReads"
 import { useSelectionHeader } from "../hooks/useSelectionHeader"
 import { useStickyHeader } from "../hooks/useStickyHeader"
 import {
+  DEFAULT_TIME_RANGE_ID,
   nextUnreadFeedId,
   parseTimeRangeId,
   TIME_RANGE_OPTIONS,
   type TimeRangeId,
+  timeRangeDays,
 } from "../utils/articleView"
 import { totalUnread } from "../utils/sidebarView"
 
@@ -61,7 +63,7 @@ export default function Articles(): JSX.Element {
       try {
         return parseTimeRangeId(sessionStorage.getItem("time-range"))
       } catch {
-        return "all"
+        return DEFAULT_TIME_RANGE_ID
       }
     },
   )
@@ -435,7 +437,14 @@ export default function Articles(): JSX.Element {
                   ref={caughtUpSentinelRef}
                 />
               ) : (
-                <div className="text-text-muted">No articles</div>
+                // A bounded range is the default, so say so: otherwise an
+                // empty list reads as "this feed has nothing" when older
+                // articles are merely filtered out.
+                <div className="text-text-muted">
+                  {timeRangeDays(timeRangeId) == null
+                    ? "No articles"
+                    : "No articles in the selected time range"}
+                </div>
               )
             ) : (
               <ArticleList
