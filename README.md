@@ -4,9 +4,10 @@
 
 **A self-hosted web reader that pulls your RSS/Atom feeds into a single timeline,<br>with translation and summarization from a local LLM.**
 
+[![CI](https://github.com/ryochin/stingray/actions/workflows/ci.yml/badge.svg)](https://github.com/ryochin/stingray/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**English** | [日本語](README.ja.md)
+**English** | [Japanese](README.ja.md)
 
 <img src="docs/screenshot_en@2x.webp" alt="Screenshot" width="1300">
 
@@ -105,6 +106,9 @@ At ingest time, **tracking parameters such as `utm_*` and `fbclid` are stripped*
 ## Quick start
 
 ```bash
+git clone https://github.com/ryochin/stingray.git
+cd stingray
+
 cp .env.example .env                # Copy the environment settings (edit as needed)
 cp config.yml.example config.yml    # Copy the application settings (edit as needed)
 docker compose up -d                # Start

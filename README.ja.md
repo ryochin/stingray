@@ -4,9 +4,10 @@
 
 **RSS/Atom フィードを一つのタイムラインに集約する、セルフホスト型の Web リーダーです。<br>ローカル LLM が翻訳と要約を自動で付けます。**
 
+[![CI](https://github.com/ryochin/stingray/actions/workflows/ci.yml/badge.svg)](https://github.com/ryochin/stingray/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[English](README.md) | **日本語**
+[英語](README.md) | **日本語**
 
 <img src="docs/screenshot_ja@2x.webp" alt="スクリーンショット" width="1300">
 
@@ -105,6 +106,9 @@ RSS を提供していない Web ページでも、Stingray なら購読対象�
 ## クイックスタート
 
 ```bash
+git clone https://github.com/ryochin/stingray.git
+cd stingray
+
 cp .env.example .env                # 環境設定をコピー（必要に応じて編集）
 cp config.yml.example config.yml    # アプリ設定をコピー（必要に応じて編集）
 docker compose up -d                # 起動
