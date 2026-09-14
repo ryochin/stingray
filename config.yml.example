@@ -2,7 +2,7 @@
 # Copy this file to `config.yml` and adjust values for your setup.
 # The web and fetcher containers bind-mount `config.yml` read-only, so the file
 # must exist before `docker compose up`. Connection details and secrets live in
-# `.env` instead; this file holds application behaviour only.
+# `.env` instead; this file holds application behavior only.
 
 # -- General --
 # Your native language as an ISO 639-1 two-letter code. The LLM translates and
@@ -32,7 +32,7 @@ ollama:
 # -- LLM selector inference (the "Infer with LLM" button for feed-less sites) --
 selector_inference:
   max_html_bytes: 150000   # Max preprocessed HTML (bytes) sent to the LLM
-  max_attempts: 4          # Retries to locate the article list (temperature stays high for diversity)
+  max_attempts: 4          # Attempts to locate the article list, first one included (temperature stays high for diversity)
   num_ctx: 65536           # Ollama context window for inference (model must support it)
   min_articles: 3          # Min extracted articles to accept (rejects small related/ranking side-lists)
 

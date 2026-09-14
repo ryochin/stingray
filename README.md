@@ -37,7 +37,7 @@ Stingray collects everything new from the feeds you subscribe to into one timeli
 
 ### 📚 Read every feed in one place
 
-Subscribe to **RSS / Atom** feeds, including RDF and JSON Feed. Add a feed by its URL directly, or **paste a site's homepage URL and Stingray finds the feed links on the page** for you. Feed names and languages are detected automatically from the feed metadata and the URL. Organize subscriptions into **folders**, reorder them by drag and drop, and narrow the article list by folder or by feed from the sidebar. A newly added feed appears at the **top** of the list with its card already expanded, so you can edit its name and rules right away.
+Subscribe to **RSS / Atom** feeds, including RDF and JSON Feed. Add a feed by its URL directly, or **paste a site's homepage URL and Stingray finds the feed links on the page** for you. Feed names and languages are detected automatically from the feed metadata and the URL. Organize subscriptions into **folders**, reorder both the folders and the feeds inside them by drag and drop, and narrow the article list by folder or by feed from the sidebar. A newly added feed appears at the **top** of the list with its card already expanded, so you can edit its name and rules right away. A feed that stops behaving is flagged in place — **Stale** when it is being served from cache or has no extraction rules yet, **Error** when it failed outright — along with its latest error message, and any feed can be fetched on demand or switched off without unsubscribing.
 
 ### 🔎 Turn any page into a feed
 
@@ -62,15 +62,17 @@ For example, a page whose articles are `<li class="entry">` elements containing 
 - `date` / `date_attr` — the date element and, when reading from an attribute, its name (falls back to the element's text). ISO 8601 is understood, as are common written forms such as `2026-04-10`, `April 10, 2026`, and `10 Apr 2026`.
 - `thumbnail` / `thumbnail_attr` — the thumbnail image element and attribute (`src` by default).
 
-Only `item`, `title`, and `link` are required; the `date` and `thumbnail` families are optional. Every selector other than `item` is evaluated inside each item, and relative URLs are resolved to absolute ones automatically. Rules are set per feed under `/feeds` in the web UI and take effect on the next manual refresh or scheduled crawl after saving. An invalid selector fails at fetch time rather than at save time.
+Only `item`, `title`, and `link` are required; the `date` and `thumbnail` families are optional. Every selector other than `item` is evaluated inside each item, and relative URLs are resolved to absolute ones automatically. Rules are set per feed under `/feeds` in the web UI and take effect on the next manual refresh or scheduled crawl after saving. An invalid CSS selector, an unknown key, or an over-long value is rejected when you save the rules, not at fetch time.
+
+Writing the selectors by hand is optional. Press **✨ Infer with LLM** in the rules editor and Stingray hands the page's preprocessed HTML to Ollama, has it propose a rule set, then checks that guess by actually running the scraper against the page. Whatever it settles on comes back as an editable **preview**, next to the articles those rules actually matched, so even a guess that came up empty is a starting point to correct by hand — nothing is saved until you say so. How hard it tries is tuned under `selector_inference:` in `config.yml`.
 
 ### 🧹 Filter out the noise
 
-Rule-based filters drop articles you would rather not see. Set a pattern against an article's **title** or **body** and matching articles are excluded from the list. A pattern is a plain keyword by default — substring match, case-insensitive — or a regular expression when wrapped in `/.../`. Rules are edited on the filter screen and can be imported and exported as JSON.
+Rule-based filters drop articles you would rather not see. Set a pattern and choose whether it is matched against the article's **title** only or against **both** title and body; matching articles are excluded from the list. Titles are matched in their original and translated forms alike. A pattern is a plain keyword by default — substring match, case-insensitive — or a regular expression when wrapped in `/.../`. Rules are edited on the filter screen and can be imported and exported as JSON.
 
 ### 🤖 Translation and summarization with an LLM
 
-Using a local Ollama instance, articles in another language get a **translated title**, and the body is either translated in full when it is short or replaced with a **summary** when it is long. Translation and summarization are independent per-feed switches, toggled individually in the web UI under `/feeds`. What actually gets generated depends on those two switches and the length of the body — only short articles are translated in full.
+Using a local Ollama instance, articles in another language get a **translated title**, and the body is either translated in full when it is short or replaced with a **summary** in your language (`native_lang`) when it is long. Translation and summarization are independent per-feed switches, toggled individually in the web UI under `/feeds`. What actually gets generated depends on those two switches and the length of the body — only short articles are translated in full.
 
 | Translate | Summarize | Short article (< 300 chars) | Long article (>= 300 chars) |
 |:---:|:---:|---|---|
@@ -87,21 +89,22 @@ All of this is generated during the fetch and stored with the article, so it is 
 
 ### 📖 Read and catch up
 
-- **Read / unread tracking** — toggle an article between read and unread, and mark a whole folder or feed as read at once, optionally scoped to "only items older than N hours".
-- **Keyboard-driven reading** — move through articles with `j` / `k`, jump to the next unread feed with `Space`, and so on. Press `?` for the full list of shortcuts.
+- **Read / unread tracking** — toggle an article between read and unread, and mark a whole folder or feed as read at once, optionally scoped to "only items older than N hours". Everything can be marked unread again in one go. `u` switches between unread-only and all articles, and unread counts appear in the sidebar and in the browser tab title.
+- **Time range** — the article list covers the last **3 days** by default, switchable to 24 hours, 1 week, 2 weeks, 30 days, or the whole history. The range applies while you are looking at all articles; unread-only mode ignores it.
+- **Keyboard-driven reading** — move through articles with `j` / `k`, toggle read state with `m`, and, while the "caught up" hint at the end of a feed is showing, jump to the next unread feed with `Space`. Press `?` for the full list of shortcuts.
 - **OPML import / export** — for migrating from another reader or backing up your subscription list. Folder structure, translation and summarization settings, and extraction rules all travel with it.
 - **Rich rendering** — thumbnails and images from articles are pulled into the list, and Twitter / X embeds are reformatted as readable cards.
 
 ### ⏱️ Fetch on its own
 
-Feeds are fetched automatically in the background. The interval is **tuned per feed**: one that keeps publishing is crawled often, while a quiet one backs off gradually, roughly between 10 minutes and 6 hours. The scheduler (cron) wakes every 15 minutes and fetches only the feeds that are due at that moment. Manual refresh from the UI is available too, of course.
+Feeds are fetched automatically in the background. The interval is **tuned automatically per feed**: one that keeps publishing is crawled often, while a quiet one backs off gradually, roughly between 10 minutes and 6 hours. The scheduler (cron) wakes every 15 minutes and fetches only the feeds that are due at that moment. Manual refresh from the UI is available too, of course.
 
 At ingest time, **tracking parameters such as `utm_*` and `fbclid` are stripped** from article links so that clean URLs are what get stored.
 
 ## Requirements
 
 - **Docker / Docker Compose** (v2 or later) — every service including PostgreSQL 17 runs inside containers, so there is no database to install separately.
-- **Ollama** — runs on the host (`gemma4:e4b` recommended). Needed only when some feed has translation or summarization enabled. To skip the LLM entirely, set `ollama.enabled: false` in `config.yml`.
+- **Ollama** — runs on the host (`gemma4:e4b` recommended). Needed for translation, summarization, and the **Infer with LLM** button. To skip the LLM entirely, set `ollama.enabled: false` in `config.yml`.
 
 ## Quick start
 
@@ -118,7 +121,7 @@ docker compose up -d                # Start
 - **Health check**: http://localhost:20080/api/health
 
 > [!IMPORTANT]
-> Stingray has no authentication. Anyone who can reach `WEB_PORT` can read articles and change subscriptions. If you ever expose it beyond your LAN or to the internet, put something in front of it — basic auth on a reverse proxy, a VPN — or bind the published port to loopback only.
+> Stingray has no authentication. Anyone who can reach `WEB_PORT` can read articles and change subscriptions. If you ever expose it beyond your LAN or to the internet, put something in front of it — Basic auth on a reverse proxy, or a VPN — or bind the published port to loopback only.
 >
 > ```yaml
 > # the web service in compose.yml
@@ -182,17 +185,24 @@ max_items_per_feed: 200           # Max articles to ingest per feed on each refr
 cache_dir: "cache"                # Cache for feed bodies
 article_cache_max_age_days: 0     # Days to keep the article cache (0 = keep forever)
 article_order: "oldest"           # Article list order ("oldest" or "newest" first)
+# user_agent: "Mozilla/5.0 ..."   # UA used when fetching (defaults to a browser UA; override if needed)
 
 ollama:
   enabled: true            # Translation and summarization on/off (false disables all LLM calls)
   model: "gemma4:e4b"
   timeout: 120             # Seconds per LLM request
 
+selector_inference:        # The "Infer with LLM" button
+  max_html_bytes: 150000   # Max preprocessed HTML sent to the LLM
+  max_attempts: 4          # Attempts allowed to locate the article list (the first one included)
+  num_ctx: 65536           # Ollama context window (the model must support it)
+  min_articles: 3          # Min articles a rule set must extract to be accepted
+
 url_cleanup:
   enabled: true            # Strip known tracking params (utm_*, ...) at ingest time
 ```
 
-Settings are split across two files by their nature. Anything that varies per host — **connection details and secrets** such as database credentials, `OLLAMA_BASE_URL`, and the published port — lives in `.env`, while **application behaviour** that does not depend on the environment — model name, timeouts, fetch window, your language — lives in `config.yml`. The Ollama server URL, for example, is a connection detail, so it goes in `OLLAMA_BASE_URL` in `.env` rather than in `config.yml`. No value is ever written in both.
+Settings are split across two files by their nature. Anything that varies per host — **connection details and secrets** such as database credentials, `OLLAMA_BASE_URL`, and the published port — lives in `.env`, while **application behavior** that does not depend on the environment — model name, timeouts, fetch window, your language — lives in `config.yml`. The Ollama server URL, for example, is a connection detail, so it goes in `OLLAMA_BASE_URL` in `.env` rather than in `config.yml`. No value is ever written in both.
 
 Feed definitions live in the database, which is the source of truth for them; add and edit those from the web UI.
 
@@ -229,7 +239,7 @@ Stingray probably cannot reach Ollama. Check `docker compose logs -f web` for co
 
 **Nothing new is coming in**
 
-The scheduler only visits feeds that are due — see "Fetch on its own". Use manual refresh in the web UI when you want to check right away. Note also that articles older than `max_age_hours` in `config.yml` are never ingested.
+The scheduler only visits feeds that are due — see "Fetch on its own". Use manual refresh in the web UI when you want to check right away. Note also that the scheduled crawl and the bulk refresh skip articles older than `max_age_hours` in `config.yml`; refreshing a single feed does not apply that limit.
 
 **Changes to `config.yml` have no effect**
 
