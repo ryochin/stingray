@@ -3,6 +3,27 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2026-09-14
+
+Range: (`3e1228b`, 2026-09-03) – (`99bf035`, 2026-09-14) / 6 commits
+
+### Fixed
+
+- **The scheduler could never deliver its shortest fetch interval.** `schedule_next_at` ceils the next fetch to a `CRON_TICK_MIN` boundary so a feed lands on a tick rather than just after one, but cron fired every 15 minutes while that constant was 10. The two grids met only at :00 and :30, so a feed in the smallest bucket came back after 15 or 30 minutes instead of the 10 that `MIN_INTERVAL_MIN` advertises — the change that lowered the bucket from 15 to 10 moved the constant and left the crontab behind. A test now reads the crontab and compares all five cron fields against the constant, since nothing else tied the deployed file to the value it has to track. Rebuild the fetcher image to pick this up, as the crontab is baked in at build time ([`99bf035`](https://github.com/ryochin/stingray/commit/99bf035))
+- **An article could swallow the rest of its own body into an editable box.** A feed entry wrote `textarea` as a bare unescaped tag in its prose; that element's content model is RCDATA, so the parser handed it everything that followed and the whole article rendered inside a control that reads as an embedded iframe from the outside. DOMPurify does not cover this on its own — it keeps `textarea`, and `FORBID_TAGS` removes only the outermost forbidden element of each subtree, so `select`/`option`, `form`/`input` and `fieldset`/`legend` all survive a sanitize pass. `unwrapFormControls` now does the whole job in a single walk, unwrapping rather than removing so the swallowed prose is rescued instead of deleted along with its container. DOMPurify still owns XSS; this pass is display hygiene only ([`f86a869`](https://github.com/ryochin/stingray/commit/f86a869))
+
+### Changed
+
+- **The article list opens on the last 3 days** rather than the entire history. The time filter only takes effect once you leave unread-only mode, so the old `all` default made that switch pull everything in one query. A wider range chosen per session still persists in `sessionStorage`, and the empty state now distinguishes a bounded range from a feed that genuinely has nothing ([`5a0c819`](https://github.com/ryochin/stingray/commit/5a0c819))
+
+### Documentation
+
+The README was checked line by line against the source. Several claims had drifted away from the code, and two shipped features had never been written down at all.
+
+- **Corrected**: extraction rules are rejected when you save them, not at fetch time; filters match Title or Both rather than title or body; <kbd>Space</kbd> jumps to the next unread feed only while the caught-up hint is showing; drag and drop reorders folders as well as the feeds inside them; the age cutoff applies to the scheduled crawl and the bulk refresh but not to a single-feed refresh ([`ded2a0d`](https://github.com/ryochin/stingray/commit/ded2a0d))
+- **Newly documented**: the LLM selector inference behind **✨ Infer with LLM**, which had left hand-written selectors looking like the only way to follow a page with no feed; the article time range, whose new 3-day default otherwise makes articles look lost; feed health labels, mark-all-unread, the unread/all toggle, and the `user_agent` and `selector_inference` keys in `config.yml` ([`ded2a0d`](https://github.com/ryochin/stingray/commit/ded2a0d))
+- A CI badge, and the `git clone` step the quick start never had ([`c54a12c`](https://github.com/ryochin/stingray/commit/c54a12c))
+
 ## 2026-09-03
 
 Range: (`d8f3d25`, 2026-08-20) – (`d3d123d`, 2026-09-03) / 7 commits
