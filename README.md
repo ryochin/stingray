@@ -4,7 +4,8 @@
 
 **A self-hosted web reader that pulls your RSS/Atom feeds into a single timeline,<br>with translation and summarization from a local LLM.**
 
-[![CI](https://github.com/ryochin/stingray/actions/workflows/ci.yml/badge.svg)](https://github.com/ryochin/stingray/actions/workflows/ci.yml)
+[![Backend CI](https://github.com/ryochin/stingray/actions/workflows/ci-backend.yml/badge.svg)](https://github.com/ryochin/stingray/actions/workflows/ci-backend.yml)
+[![Frontend CI](https://github.com/ryochin/stingray/actions/workflows/ci-frontend.yml/badge.svg)](https://github.com/ryochin/stingray/actions/workflows/ci-frontend.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **English** | [Japanese](README.ja.md)

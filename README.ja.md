@@ -4,7 +4,8 @@
 
 **RSS/Atom フィードを一つのタイムラインに集約する、セルフホスト型の Web リーダーです。<br>ローカル LLM が翻訳と要約を自動で付けます。**
 
-[![CI](https://github.com/ryochin/stingray/actions/workflows/ci.yml/badge.svg)](https://github.com/ryochin/stingray/actions/workflows/ci.yml)
+[![Backend CI](https://github.com/ryochin/stingray/actions/workflows/ci-backend.yml/badge.svg)](https://github.com/ryochin/stingray/actions/workflows/ci-backend.yml)
+[![Frontend CI](https://github.com/ryochin/stingray/actions/workflows/ci-frontend.yml/badge.svg)](https://github.com/ryochin/stingray/actions/workflows/ci-frontend.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [英語](README.md) | **日本語**

@@ -1,15 +1,24 @@
-name: CI
+name: Backend CI
 
+# Only run when something the backend build actually depends on changes.
 on:
   push:
     branches: [main]
+    paths: &paths
+      - "backend/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      # test_tick_matches_the_deployed_cron_cadence reads this file.
+      - "crontab"
+      - ".github/workflows/ci-backend.yml"
   pull_request:
+    paths: *paths
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-backend-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -45,24 +54,3 @@ jobs:
           # wiring is actually exercised in CI.
           REQUIRE_DB: "1"
         run: uv run pytest backend
-
-  frontend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Lint (Biome)
-        run: npm run lint
-      - name: Type check (tsc)
-        run: npx tsc -b
-      - name: Run tests (Vitest)
-        run: npm test
