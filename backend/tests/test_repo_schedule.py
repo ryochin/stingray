@@ -9,6 +9,7 @@ and the outcome classifier in fetcher._classify_outcome.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -100,6 +101,28 @@ class TestScheduleNextAt:
       delta = repo.schedule_next_at(now, 60) - now
       # 60 min ± 10% jitter, then ceil to next 10-min tick → range [60, 70].
       assert timedelta(minutes=59) <= delta <= timedelta(minutes=71)
+
+  def test_tick_matches_the_deployed_cron_cadence(self):
+    """The crontab step and CRON_TICK_MIN must agree.
+
+    schedule_next_at ceils to a CRON_TICK_MIN boundary so a feed lands on a
+    tick instead of just after one. That only holds while cron actually fires
+    on the same grid: a coarser crontab parks feeds between ticks and quietly
+    stretches the shortest interval past MIN_INTERVAL_MIN. The two drifted
+    apart once already, hence this test.
+    """
+    crontab = Path(__file__).resolve().parents[2] / "crontab"
+    # Match on the command so env-var lines and any unrelated job added later
+    # do not turn this into a false alarm.
+    jobs = [
+      line.split()
+      for line in crontab.read_text().splitlines()
+      if "backend/main.py" in line and not line.lstrip().startswith("#")
+    ]
+    assert len(jobs) == 1
+    # All five fields, not just the minute step: an hour or weekday
+    # restriction would starve the schedule just as effectively.
+    assert jobs[0][:5] == [f"*/{repo.CRON_TICK_MIN}", "*", "*", "*", "*"]
 
 
 # -- record_feed_attempt --

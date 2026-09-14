@@ -1,3 +1,6 @@
-# News aggregation every 15 minutes
+# News aggregation every 10 minutes.
+# Must stay in step with repo.CRON_TICK_MIN: schedule_next_at() ceils the next
+# fetch to a CRON_TICK_MIN boundary, so a coarser cron here would park feeds
+# between ticks and stretch the shortest adaptive interval past MIN_INTERVAL_MIN.
 # Fields: minute hour day-of-month month day-of-week command
-*/15 * * * * /app/.venv/bin/python /app/backend/main.py --config /app/config.yml
+*/10 * * * * /app/.venv/bin/python /app/backend/main.py --config /app/config.yml

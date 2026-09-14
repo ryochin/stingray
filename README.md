@@ -97,7 +97,7 @@ All of this is generated during the fetch and stored with the article, so it is 
 
 ### ⏱️ Fetch on its own
 
-Feeds are fetched automatically in the background. The interval is **tuned automatically per feed**: one that keeps publishing is crawled often, while a quiet one backs off gradually, roughly between 10 minutes and 6 hours. The scheduler (cron) wakes every 15 minutes and fetches only the feeds that are due at that moment. Manual refresh from the UI is available too, of course.
+Feeds are fetched automatically in the background. The interval is **tuned automatically per feed**: one that keeps publishing is crawled often, while a quiet one backs off gradually, roughly between 10 minutes and 6 hours. The scheduler (cron) wakes every 10 minutes and fetches only the feeds that are due at that moment. Manual refresh from the UI is available too, of course.
 
 At ingest time, **tracking parameters such as `utm_*` and `fbclid` are stripped** from article links so that clean URLs are what get stored.
 
