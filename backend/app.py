@@ -48,6 +48,7 @@ from schemas import (
 _refresh_lock = asyncio.Lock()
 _refresh_task: asyncio.Task[None] | None = None
 _summarize_lock = asyncio.Lock()
+_opml_import_lock = asyncio.Lock()
 _background_tasks: set[asyncio.Task[object]] = set()
 # Limit concurrent LLM selector inference so button mashing cannot flood Ollama.
 _infer_semaphore = asyncio.Semaphore(2)
@@ -779,26 +780,19 @@ def export_filters() -> Response:
   )
 
 
-@app.post("/api/filters/import")
-async def import_filters(file: UploadFile) -> dict[str, int]:
-  try:
-    content = (await file.read()).decode("utf-8")
-    data: object = json.loads(content)
-  except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-    raise HTTPException(400, f"Invalid JSON: {exc}")
-  if not isinstance(data, list):
-    raise HTTPException(400, "Expected a JSON array")
+def _persist_filters(items: list[tuple[str, str]]) -> tuple[int, int]:
+  """Insert filter rules, skipping ones equivalent to a rule already stored.
+
+  Returns (created, skipped). Mirrors _persist_opml_feeds: a plain loop of
+  individual INSERTs pulled out so the caller can hand it to a worker thread.
+  Needs no lock of its own — repo.add_filter rejects duplicates with an
+  advisory lock and a UNIQUE index, and DuplicateFilterError is counted as a
+  skip. Not one transaction either: each add_filter commits on its own.
+  """
   existing = {repo.filter_key(f.pattern, f.target) for f in repo.list_filters()}
   created = 0
   skipped = 0
-  for raw_item in cast(list[object], data):
-    if not isinstance(raw_item, dict) or "pattern" not in raw_item:
-      continue
-    item = cast(dict[str, object], raw_item)
-    pattern = str(item["pattern"]).strip()
-    target = str(item.get("target", "title")).strip()
-    if not pattern or target not in get_args(FilterTarget):
-      continue
+  for pattern, target in items:
     key = repo.filter_key(pattern, target)
     if key in existing:
       skipped += 1
@@ -810,6 +804,31 @@ async def import_filters(file: UploadFile) -> dict[str, int]:
       continue
     existing.add(key)
     created += 1
+  return created, skipped
+
+
+@app.post("/api/filters/import")
+async def import_filters(file: UploadFile) -> dict[str, int]:
+  try:
+    content = (await file.read()).decode("utf-8")
+    data: object = json.loads(content)
+  except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    raise HTTPException(400, f"Invalid JSON: {exc}")
+  if not isinstance(data, list):
+    raise HTTPException(400, "Expected a JSON array")
+  # Malformed entries are dropped here rather than counted: they were never
+  # rules, so they are neither created nor skipped.
+  items: list[tuple[str, str]] = []
+  for raw_item in cast(list[object], data):
+    if not isinstance(raw_item, dict) or "pattern" not in raw_item:
+      continue
+    item = cast(dict[str, object], raw_item)
+    pattern = str(item["pattern"]).strip()
+    target = str(item.get("target", "title")).strip()
+    if not pattern or target not in get_args(FilterTarget):
+      continue
+    items.append((pattern, target))
+  created, skipped = await asyncio.to_thread(_persist_filters, items)
   return {"created": created, "skipped": skipped}
 
 
@@ -883,6 +902,32 @@ def _persist_opml_feeds(
   return folders_created, feeds_created, feeds_skipped
 
 
+async def _persist_opml_import(
+  imported_folders: list[ImportFolder],
+  uncategorized: list[ImportFeed],
+) -> tuple[int, int, int]:
+  """Persist a parsed OPML import, serialized against other imports.
+
+  _persist_opml_feeds reads the existing URL/folder sets before writing them.
+  While that ran on the event loop it was implicitly exclusive; now that it
+  runs in a worker thread, two concurrent imports would interleave and
+  double-register, and feeds.url has no UNIQUE constraint to fall back on.
+  Guards a single process only — a multi-worker deployment needs the DB to
+  enforce it.
+
+  Callers must shield this: the lock has to outlive the request, or cancelling
+  it would free the lock while the worker is still inserting. Shielding the
+  to_thread call alone would not do — the `async with` would still unwind.
+
+  The lock does not make this one transaction; every repo.add_feed inside
+  still commits on its own.
+  """
+  async with _opml_import_lock:
+    return await asyncio.to_thread(
+      _persist_opml_feeds, imported_folders, uncategorized,
+    )
+
+
 async def _start_refresh(config: AppConfig, *, trigger: str, force: bool = False) -> None:
   """Create the refresh_jobs row and spawn the refresh task as one unit.
 
@@ -926,8 +971,8 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
   except _ET.ParseError as e:
     raise HTTPException(400, f"Invalid OPML XML: {e}")
 
-  folders_created, feeds_created, feeds_skipped = _persist_opml_feeds(
-    imported_folders, uncategorized,
+  folders_created, feeds_created, feeds_skipped = await asyncio.shield(
+    _persist_opml_import(imported_folders, uncategorized)
   )
   await _maybe_trigger_opml_refresh(request, feeds_created)
   return {
