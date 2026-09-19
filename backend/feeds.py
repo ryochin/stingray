@@ -169,11 +169,13 @@ async def _fetch_with_cache(
     - "file"      : body read from a local file (debug-only file:// URL)
   """
   if url.startswith("file://"):
-    body = read_file_url(url)
+    body = await asyncio.to_thread(read_file_url, url)
     log.dim(f"    FILE {url} → {len(body.encode('utf-8')) / 1024:.1f}KB")
     return body, False, "file"
 
-  cached = load_feed_cache(url)
+  # Cache bodies run to hundreds of KB and every feed fetches concurrently, so
+  # reading or writing them on the event loop serialises the whole refresh.
+  cached = await asyncio.to_thread(load_feed_cache, url)
   if cached and "body" not in cached:
     cached = None
   req_headers = dict(headers or {})
@@ -219,7 +221,7 @@ async def _fetch_with_cache(
 
   etag = resp.headers.get("etag")
   last_modified = resp.headers.get("last-modified")
-  save_feed_cache(url, etag, last_modified, body)
+  await asyncio.to_thread(save_feed_cache, url, etag, last_modified, body)
   log.dim(
     f"    GET {url} → {resp.status_code} {size_kb:.1f}KB ({elapsed_ms}ms"
     f"{', conditional' if conditional else ''})"

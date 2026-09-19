@@ -281,7 +281,7 @@ async def refresh_all(
 
   Single entry point used by both CLI (`main.py`) and Web (`POST /api/refresh`).
   When `job_id` is provided the caller already created the `refresh_jobs` row
-  synchronously (so clients observe running=true immediately after the HTTP
+  before returning (so clients observe running=true immediately after the HTTP
   response); otherwise it is created here.
 
   `force=True` bypasses the due-time filter and fetches every enabled feed
@@ -293,7 +293,7 @@ async def refresh_all(
   "skipped" and returns immediately.
   """
   if job_id is None:
-    job_id = repo.create_refresh_job(source)
+    job_id = await asyncio.to_thread(repo.create_refresh_job, source)
   result = RefreshResult()
 
   # The try/except wraps the advisory_lock context itself so a failure while
@@ -302,8 +302,8 @@ async def refresh_all(
     with repo.advisory_lock() as got_lock:
       if not got_lock:
         log.info("Refresh skipped: another refresh is already running.")
-        repo.finish_refresh_job(
-          job_id, "skipped", 0, "another refresh is running",
+        await asyncio.to_thread(
+          repo.finish_refresh_job, job_id, "skipped", 0, "another refresh is running",
         )
         return result
 
@@ -313,7 +313,7 @@ async def refresh_all(
           log.warn("No enabled feeds found.")
         else:
           log.info("No feeds are due for fetch.")
-        repo.finish_refresh_job(job_id, "completed", 0, None)
+        await asyncio.to_thread(repo.finish_refresh_job, job_id, "completed", 0, None)
         return result
 
       feeds_cfg = [f.to_feed_cfg() for f in feeds]
@@ -329,10 +329,12 @@ async def refresh_all(
 
       if not articles:
         log.warn("No articles found.")
-        repo.finish_refresh_job(job_id, "completed", 0, None)
+        await asyncio.to_thread(repo.finish_refresh_job, job_id, "completed", 0, None)
         return result
 
-      articles = enrich_from_legacy_cache(articles, Path(config.cache_dir))
+      articles = await asyncio.to_thread(
+        enrich_from_legacy_cache, articles, Path(config.cache_dir),
+      )
 
       if no_summary or not config.ollama.enabled:
         if not no_summary:
@@ -344,15 +346,15 @@ async def refresh_all(
 
       await _backfill_site_urls(feeds, config.user_agent)
 
-      pruned = repo.prune_articles(config.article_cache_max_age_days)
+      pruned = await asyncio.to_thread(repo.prune_articles, config.article_cache_max_age_days)
       if pruned:
         log.info(f"  Pruned {pruned} old articles.")
 
-      repo.finish_refresh_job(job_id, "completed", new_count, None)
+      await asyncio.to_thread(repo.finish_refresh_job, job_id, "completed", new_count, None)
       return result
 
   except Exception as exc:
-    repo.finish_refresh_job(job_id, "failed", 0, str(exc))
+    await asyncio.to_thread(repo.finish_refresh_job, job_id, "failed", 0, str(exc))
     raise
 
 

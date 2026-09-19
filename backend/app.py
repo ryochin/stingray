@@ -444,7 +444,10 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
         )
       elif feed.extraction_rules is not None:
         log.warn(f"  Skipping '{feed.name}': extraction rules not configured yet.")
-        repo.update_feed_fetch_status(feed.id, health="degraded", error="extraction rules not configured")
+        await asyncio.to_thread(
+          repo.update_feed_fetch_status, feed.id,
+          health="degraded", error="extraction rules not configured",
+        )
         return
       else:
         articles, was_cached, source_tag = await _fetch_rss(
@@ -454,7 +457,7 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
     source = "cache" if was_cached else "fresh"
     log.info(f"  [{source}] {len(articles)} items fetched in {elapsed_ms}ms.")
     if articles:
-      new_count = repo.upsert_articles(articles, {feed.name: feed.id})
+      new_count = await asyncio.to_thread(repo.upsert_articles, articles, {feed.name: feed.id})
       log.info(f"  Saved: {new_count} new / {len(articles)} total (existing skipped).")
     else:
       log.info("  No articles returned.")
@@ -463,15 +466,15 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
         feed.url, native_lang=config.native_lang, user_agent=config.user_agent
       )
       if probe.site_url:
-        repo.update_feed_site_url(feed.id, probe.site_url)
+        await asyncio.to_thread(repo.update_feed_site_url, feed.id, probe.site_url)
         log.info(f"  Updated site_url: {probe.site_url}")
     health, error = _manual_success_health(source_tag)
-    repo.update_feed_fetch_status(feed.id, health=health, error=error)
+    await asyncio.to_thread(repo.update_feed_fetch_status, feed.id, health=health, error=error)
     log.success(f"  Done: {feed.name}")
   except Exception as e:
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     log.error(f"  Failed [{feed.name}] after {elapsed_ms}ms: {type(e).__name__}: {e}")
-    repo.update_feed_fetch_status(feed.id, health="failing", error=str(e))
+    await asyncio.to_thread(repo.update_feed_fetch_status, feed.id, health="failing", error=str(e))
 
 
 @app.post("/api/feeds", status_code=201)
@@ -516,7 +519,7 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
     log.info(f"  RSS feed: {probe.title or '(no title)'}")
 
   feed = FeedRow(**body.model_dump(), site_url=probe.site_url, extraction_rules=extraction_rules)
-  created = repo.add_feed(feed)
+  created = await asyncio.to_thread(repo.add_feed, feed)
   log.info(f"  Feed created: id={created.id}, name={created.name}")
   # Web-scrape feeds are created with empty rules ("{}"); fetching now would
   # just fail (no "item" selector) and record an error. Defer the first fetch
@@ -526,8 +529,7 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
   return created
 
 
-@app.delete("/api/feeds", status_code=204)
-async def delete_all_data() -> None:
+async def _delete_all_data_locked() -> None:
   # Cancel any in-flight refresh first. Otherwise it would keep processing
   # the pre-delete feed list (wasted work, potential FK errors on upsert),
   # and its refresh_jobs row could stay 'running' if it crashes before
@@ -539,18 +541,35 @@ async def delete_all_data() -> None:
       task.cancel()
       try:
         await task
-      except (asyncio.CancelledError, Exception):
+      except asyncio.CancelledError:
         pass
+      except Exception as e:
+        log.warn(f"Cancelled refresh raised while clearing data: {type(e).__name__}: {e}")
     _refresh_task = None
-  repo.delete_all_data()
-  purged = cache.purge_feed_cache()
+    # Deleting inside the lock: to_thread keeps the event loop free, so a
+    # concurrent POST /api/refresh could otherwise start repopulating the DB
+    # while the delete is still running. Both refresh entry points take this
+    # same lock. A refresh cancelled just above can still land a write from a
+    # to_thread call already in flight (cancelling the awaiter does not stop
+    # the thread) — this narrows that window rather than closing it.
+    await asyncio.to_thread(repo.delete_all_data)
+    purged = await asyncio.to_thread(cache.purge_feed_cache)
   if purged:
     log.step(f"Purged {purged} cached feed bodies.")
 
 
+@app.delete("/api/feeds", status_code=204)
+async def delete_all_data() -> None:
+  # Shielded, and the lock lives inside: cancelling the request must not
+  # release _refresh_lock while a to_thread delete is still running in a
+  # worker, or a refresh could start repopulating the DB mid-delete. Shielding
+  # the awaits alone would not help — the `async with` would still unwind.
+  await asyncio.shield(_delete_all_data_locked())
+
+
 @app.post("/api/feeds/{feed_id}/fetch", status_code=202)
 async def fetch_feed(feed_id: int, request: Request) -> dict[str, str]:
-  feed = repo.get_feed_by_id(feed_id)
+  feed = await asyncio.to_thread(repo.get_feed_by_id, feed_id)
   if feed is None:
     raise HTTPException(404, "Feed not found")
   config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
@@ -565,7 +584,11 @@ def delete_feed(feed_id: int) -> None:
 
 def _get_feed_or_404(feed_id: int) -> FeedRow:
   """Fetch a feed by id or raise 404. Used after every mutation handler so
-  the response body matches the post-update state."""
+  the response body matches the post-update state.
+
+  Stays sync because the `def` handlers below call it from FastAPI's own
+  threadpool. Async handlers must wrap it in asyncio.to_thread — it hits the DB.
+  """
   feed = repo.get_feed_by_id(feed_id)
   if feed is None:
     raise HTTPException(404, "Feed not found")
@@ -586,7 +609,7 @@ def toggle_summarize(feed_id: int) -> FeedRow:
 
 @app.patch("/api/feeds/{feed_id}/rules")
 async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
-  feed = _get_feed_or_404(feed_id)
+  feed = await asyncio.to_thread(_get_feed_or_404, feed_id)
   if feed.extraction_rules is None:
     raise HTTPException(400, "Not a web page feed")
   rules_raw: object = await request.json()
@@ -594,8 +617,8 @@ async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
     rules = validate_extraction_rules(rules_raw)
   except ValueError as e:
     raise HTTPException(422, str(e))
-  repo.update_feed_extraction_rules(feed_id, json.dumps(rules))
-  return _get_feed_or_404(feed_id)
+  await asyncio.to_thread(repo.update_feed_extraction_rules, feed_id, json.dumps(rules))
+  return await asyncio.to_thread(_get_feed_or_404, feed_id)
 
 
 class SampleArticle(BaseModel):
@@ -615,7 +638,7 @@ class InferRulesResponse(BaseModel):
 async def infer_feed_rules(feed_id: int, request: Request) -> InferRulesResponse:
   """Infer CSS extraction rules for a web-scrape feed via the LLM. Validates the
   rules against the live page and returns a preview — never persists them."""
-  feed = _get_feed_or_404(feed_id)
+  feed = await asyncio.to_thread(_get_feed_or_404, feed_id)
   if feed.extraction_rules is None:
     raise HTTPException(400, "Not a web page feed")
   if not feed.url:
@@ -860,25 +883,36 @@ def _persist_opml_feeds(
   return folders_created, feeds_created, feeds_skipped
 
 
+async def _start_refresh(config: AppConfig, *, trigger: str, force: bool = False) -> None:
+  """Create the refresh_jobs row and spawn the refresh task as one unit.
+
+  Callers must shield this. The row is inserted from a worker thread, so a
+  cancellation between the INSERT and create_task() would leave the job stuck
+  at 'running' with nothing to finish it — /api/status would then report a
+  refresh that is not happening, with no way back short of a restart.
+  """
+  global _refresh_task
+  job_id = await asyncio.to_thread(repo.create_refresh_job, trigger)
+  _refresh_task = asyncio.create_task(
+    _run_refresh(config, trigger=trigger, job_id=job_id, force=force)
+  )
+  _background_tasks.add(_refresh_task)
+  _refresh_task.add_done_callback(_log_task_exception)
+
+
 async def _maybe_trigger_opml_refresh(request: Request, feeds_created: int) -> None:
   """Kick off a refresh if OPML import added new feeds, without blocking the
-  response. The refresh_jobs row is created synchronously so /api/status
+  response. The refresh_jobs row is awaited before returning so /api/status
   reports running=true as soon as this response reaches the client.
   """
   if feeds_created <= 0:
     return
-  global _refresh_task
   async with _refresh_lock:
     if _refresh_task is not None and not _refresh_task.done():
       return
     config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
     log.info(f"OPML import added {feeds_created} feeds, auto-triggering refresh.")
-    job_id = repo.create_refresh_job("opml")
-    _refresh_task = asyncio.create_task(
-      _run_refresh(config, trigger="opml", job_id=job_id)
-    )
-    _background_tasks.add(_refresh_task)
-    _refresh_task.add_done_callback(_log_task_exception)
+    await asyncio.shield(_start_refresh(config, trigger="opml"))
 
 
 @app.post("/api/opml/import")
@@ -933,20 +967,14 @@ async def _run_refresh(
 
 @app.post("/api/refresh")
 async def trigger_refresh(request: Request) -> JSONResponse:
-  global _refresh_task
   async with _refresh_lock:
     if _refresh_task is not None and not _refresh_task.done():
       log.info("Refresh requested but one is already in progress.")
       return JSONResponse({"message": "Refresh already in progress"}, status_code=409)
     config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
-    # Create the refresh_jobs row synchronously so /api/status reports
+    # Create the refresh_jobs row before returning so /api/status reports
     # running=true by the time this response reaches the client.
-    job_id = repo.create_refresh_job("web")
-    _refresh_task = asyncio.create_task(
-      _run_refresh(config, trigger="web", job_id=job_id, force=True)
-    )
-    _background_tasks.add(_refresh_task)
-    _refresh_task.add_done_callback(_log_task_exception)
+    await asyncio.shield(_start_refresh(config, trigger="web", force=True))
   return JSONResponse({"message": "Refresh started"}, status_code=202)
 
 
@@ -994,10 +1022,23 @@ def health() -> dict[str, str]:
 _frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
 if _frontend_dist.is_dir():
   app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="static")
+  _frontend_root = _frontend_dist.resolve()
+
+  def _resolve_spa_file(path: str) -> Path | None:
+    """Resolve a request path to a file inside the dist dir, or None.
+
+    is_relative_to() rather than a string prefix check: "dist-old" starts with
+    "dist" as text but is a different directory.
+    """
+    file = (_frontend_dist / path).resolve()
+    if not file.is_relative_to(_frontend_root):
+      return None
+    return file if file.is_file() else None
 
   @app.get("/{path:path}")
   async def spa_fallback(path: str) -> FileResponse:
-    file = (_frontend_dist / path).resolve()
-    if path and file.is_file() and str(file).startswith(str(_frontend_dist.resolve())):
+    # Every page load hits this, so keep the stat() calls off the event loop.
+    file = await asyncio.to_thread(_resolve_spa_file, path) if path else None
+    if file is not None:
       return FileResponse(str(file))
     return FileResponse(str(_frontend_dist / "index.html"))
