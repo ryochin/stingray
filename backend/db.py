@@ -99,6 +99,10 @@ ALTER TABLE feeds ADD CONSTRAINT feeds_health_state
   CHECK (health IN ('ok', 'degraded', 'failing'));
 CREATE INDEX IF NOT EXISTS idx_feeds_next_fetch
   ON feeds(next_fetch_at) WHERE enabled;
+DELETE FROM filters f USING filters g
+  WHERE f.pattern = g.pattern AND f.target = g.target AND f.id > g.id;
+CREATE UNIQUE INDEX IF NOT EXISTS filters_pattern_target_uniq
+  ON filters(pattern, target);
 """
 
 _DEFAULT_URL = "postgresql://stingray:stingray@postgres:5432/stingray"

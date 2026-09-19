@@ -13,7 +13,12 @@ import pytest
 
 import db
 import repo
-from repo import _article_matches_filter, _parse_filter_pattern
+from repo import (
+  DuplicateFilterError,
+  _article_matches_filter,
+  _parse_filter_pattern,
+  filter_key,
+)
 from schemas import ArticleRow, FilterRow
 
 
@@ -33,6 +38,67 @@ class TestParsePattern:
 
   def test_opening_slash_only_not_regex(self):
     assert _parse_filter_pattern("/foo") == (False, "/foo")
+
+
+class TestFilterKey:
+  """The key decides which rules count as duplicates of each other."""
+
+  def test_case_is_ignored(self):
+    assert filter_key("Apple", "title") == filter_key("apple", "title")
+
+  def test_case_folding_matches_the_matcher(self):
+    # `_article_matches_filter` lowercases; casefold would merge these two
+    # even though only one of them matches the title "strasse".
+    assert filter_key("straße", "title") != filter_key("strasse", "title")
+
+  def test_surrounding_space_is_significant(self):
+    # Stored patterns match literally, so " spam " is its own rule. Input is
+    # stripped by `add_filter` instead.
+    assert filter_key(" spam ", "title") != filter_key("spam", "title")
+
+  def test_regex_keeps_its_case(self):
+    # Lowercasing a regex source would turn `\S` into `\s`.
+    assert filter_key(r"/\S+/", "title") != filter_key(r"/\s+/", "title")
+
+  def test_regex_is_distinct_from_the_same_keyword(self):
+    assert filter_key("/abc/", "title") != filter_key("abc", "title")
+
+  def test_body_and_both_are_the_same_scope(self):
+    assert filter_key("spam", "body") == filter_key("spam", "both")
+
+  def test_title_is_a_different_scope(self):
+    assert filter_key("spam", "title") != filter_key("spam", "both")
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestAddFilterDedupe:
+  def test_equivalent_pattern_is_rejected(self):
+    repo.add_filter("spam")
+    with pytest.raises(DuplicateFilterError):
+      repo.add_filter("  SPAM ")
+    assert len(repo.list_filters()) == 1
+
+  def test_pattern_is_stored_trimmed(self):
+    added = repo.add_filter("  spam  ")
+    assert added.pattern == "spam"
+
+  def test_same_pattern_on_another_target_is_allowed(self):
+    repo.add_filter("spam", target="title")
+    repo.add_filter("spam", target="both")
+    assert len(repo.list_filters()) == 2
+
+  def test_regex_differing_only_in_case_is_allowed(self):
+    repo.add_filter(r"/\S+/")
+    repo.add_filter(r"/\s+/")
+    assert len(repo.list_filters()) == 2
+
+  def test_legacy_row_with_padding_does_not_block(self):
+    # Rows written before patterns were stripped match literally, so the
+    # stripped rule is a different rule and must still be addable.
+    with db.connection() as conn:
+      conn.execute("INSERT INTO filters (pattern, target) VALUES (' spam ', 'title')")
+    repo.add_filter("spam")
+    assert len(repo.list_filters()) == 2
 
 
 def _article(

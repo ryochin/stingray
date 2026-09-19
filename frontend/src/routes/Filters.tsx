@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import type { FilterRule } from "../api/client"
 import { api } from "../api/client"
 import Header from "../components/Header"
+import { filterKey, isRegexPattern } from "../utils/filterRules"
 
 export default function Filters(): JSX.Element {
   const queryClient = useQueryClient()
@@ -39,6 +40,7 @@ export default function Filters(): JSX.Element {
     onSuccess: (): void => {
       invalidate()
       setPattern("")
+      setError(null)
     },
     onError: (err: Error): void => setError(err.message),
   })
@@ -49,6 +51,16 @@ export default function Filters(): JSX.Element {
   })
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Warn while typing. This only reads the cached list, so the add itself is
+  // left enabled — the backend answers 409 and has the final say.
+  const isDuplicate: boolean =
+    pattern.trim().length > 0 &&
+    (filters ?? []).some(
+      (filter: FilterRule) =>
+        filterKey(filter.pattern, filter.target) ===
+        filterKey(pattern.trim(), target),
+    )
 
   const handleCreate = (event: React.FormEvent): void => {
     event.preventDefault()
@@ -71,9 +83,6 @@ export default function Filters(): JSX.Element {
     }
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
-
-  const isRegex = (pattern: string): boolean =>
-    pattern.length > 2 && pattern.startsWith("/") && pattern.endsWith("/")
 
   return (
     <div className="flex flex-col h-screen">
@@ -135,6 +144,11 @@ export default function Filters(): JSX.Element {
             Add
           </button>
         </form>
+        {isDuplicate && (
+          <div className="text-orange-400 text-sm mb-3" aria-live="polite">
+            <span aria-hidden="true">⚠</span> This filter already exists
+          </div>
+        )}
         {(filters ?? []).length > 0 && (
           <div className="space-y-1">
             {(filters ?? []).map((filter: FilterRule) => (
@@ -143,7 +157,7 @@ export default function Filters(): JSX.Element {
                 className="flex items-center gap-2 p-2 bg-bg-secondary rounded border border-border"
               >
                 <span
-                  className={`flex-1 text-sm ${isRegex(filter.pattern) ? "font-mono text-amber-400" : "text-text"}`}
+                  className={`flex-1 text-sm ${isRegexPattern(filter.pattern) ? "font-mono text-amber-400" : "text-text"}`}
                 >
                   {filter.pattern}
                 </span>

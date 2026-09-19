@@ -12,13 +12,13 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import AsyncIterator, Coroutine, cast
+from typing import AsyncIterator, Coroutine, Literal, cast, get_args
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import cache
 import db
@@ -662,9 +662,12 @@ def move_feed_to_folder(feed_id: int, body: FeedMove) -> FeedRow:
 # -- Filters --
 
 
+FilterTarget = Literal["title", "both"]
+
+
 class FilterCreate(BaseModel):
-  pattern: str
-  target: str = "title"
+  pattern: str = Field(min_length=1)
+  target: FilterTarget = "title"
 
 
 @app.get("/api/filters")
@@ -674,7 +677,13 @@ def get_filters() -> list[FilterRow]:
 
 @app.post("/api/filters", status_code=201)
 def create_filter(body: FilterCreate) -> FilterRow:
-  return repo.add_filter(body.pattern, body.target)
+  pattern = body.pattern.strip()
+  if not pattern:
+    raise HTTPException(400, "Pattern must not be empty")
+  try:
+    return repo.add_filter(pattern, body.target)
+  except repo.DuplicateFilterError as exc:
+    raise HTTPException(409, str(exc))
 
 
 @app.delete("/api/filters/{filter_id}", status_code=204)
@@ -702,7 +711,7 @@ async def import_filters(file: UploadFile) -> dict[str, int]:
     raise HTTPException(400, f"Invalid JSON: {exc}")
   if not isinstance(data, list):
     raise HTTPException(400, "Expected a JSON array")
-  existing = {(f.pattern, f.target) for f in repo.list_filters()}
+  existing = {repo.filter_key(f.pattern, f.target) for f in repo.list_filters()}
   created = 0
   skipped = 0
   for raw_item in cast(list[object], data):
@@ -711,13 +720,18 @@ async def import_filters(file: UploadFile) -> dict[str, int]:
     item = cast(dict[str, object], raw_item)
     pattern = str(item["pattern"]).strip()
     target = str(item.get("target", "title")).strip()
-    if not pattern or target not in ("title", "both"):
+    if not pattern or target not in get_args(FilterTarget):
       continue
-    if (pattern, target) in existing:
+    key = repo.filter_key(pattern, target)
+    if key in existing:
       skipped += 1
       continue
-    repo.add_filter(pattern, target)
-    existing.add((pattern, target))
+    try:
+      repo.add_filter(pattern, target)
+    except repo.DuplicateFilterError:
+      skipped += 1
+      continue
+    existing.add(key)
     created += 1
   return {"created": created, "skipped": skipped}
 

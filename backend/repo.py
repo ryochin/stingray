@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator, Literal
 
 from psycopg import sql
+from psycopg.errors import UniqueViolation
 
 from models import Article
 from schemas import (
@@ -186,12 +187,59 @@ def list_filters() -> list[FilterRow]:
     return [FilterRow(**r) for r in rows]
 
 
+class DuplicateFilterError(ValueError):
+  """Raised when a filter equivalent to an existing one is added."""
+
+  def __init__(self, pattern: str, target: str) -> None:
+    super().__init__(f'Filter "{pattern}" already exists')
+    self.pattern = pattern
+    self.target = target
+
+
+# Arbitrary but stable key that serializes concurrent add_filter calls. The
+# unique index only catches byte-identical rows, so the equivalence check
+# below needs the lock to see every competing insert.
+_FILTER_LOCK_KEY = 4_919_431
+
+
+def filter_key(pattern: str, target: str) -> tuple[bool, str, str]:
+  """Identity of a filter rule, used to reject equivalent duplicates.
+
+  The pattern is taken as stored: whitespace is significant at match time, so
+  callers strip user input before it becomes a rule rather than here. Keyword
+  patterns are compared lowercased, the same folding matching uses (see
+  `_article_matches_filter`); regex sources are compared verbatim even though
+  they run with IGNORECASE, since lowercasing a source would turn `\\S` into
+  `\\s` and merge genuinely different rules. `body` and `both` select the same
+  columns, so they collapse onto one target.
+  """
+  is_regex, body = _parse_filter_pattern(pattern)
+  return (
+    is_regex,
+    body if is_regex else body.lower(),
+    "title" if target == "title" else "both",
+  )
+
+
 def add_filter(pattern: str, target: str = "title") -> FilterRow:
+  """Insert a filter rule. Raises DuplicateFilterError when an equivalent
+  rule already exists."""
+  pattern = pattern.strip()
+  key = filter_key(pattern, target)
   with db.connection() as conn:
-    row = conn.execute(
-      "INSERT INTO filters (pattern, target) VALUES (%s, %s) RETURNING *",
-      (pattern, target),
-    ).fetchone()
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_FILTER_LOCK_KEY,))
+    rows = conn.execute("SELECT pattern, target FROM filters").fetchall()
+    if any(filter_key(r["pattern"], r["target"]) == key for r in rows):
+      raise DuplicateFilterError(pattern, target)
+    try:
+      row = conn.execute(
+        "INSERT INTO filters (pattern, target) VALUES (%s, %s) RETURNING *",
+        (pattern, target),
+      ).fetchone()
+    except UniqueViolation as exc:
+      # Concurrent insert of the very same row; the unique index is the
+      # backstop for what the read above could not see.
+      raise DuplicateFilterError(pattern, target) from exc
     if row is None:
       raise RuntimeError("add_filter: INSERT returned no row")
     return FilterRow.model_validate(row)
