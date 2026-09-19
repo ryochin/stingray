@@ -363,11 +363,11 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
   """
   if not config.ollama.enabled:
     return 0
-  pending = repo.list_pending_summaries(limit=batch_size)
+  pending = await asyncio.to_thread(repo.list_pending_summaries, limit=batch_size)
   if not pending:
     return 0
 
-  feeds = repo.list_feeds(enabled=True)
+  feeds = await asyncio.to_thread(repo.list_feeds, enabled=True)
   feed_translate = {f.id: f.translate for f in feeds}
   feed_summarize = {f.id: f.summarize for f in feeds}
 
@@ -408,7 +408,8 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
 
   for article in articles:
     if article.title_translated or article.summary or article.content_translated:
-      repo.update_article_summary(
+      await asyncio.to_thread(
+        repo.update_article_summary,
         article.url,
         article.title_translated or None,
         article.summary or None,

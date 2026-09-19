@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import threading
 import time
 import xml.etree.ElementTree as _ET
 from contextlib import asynccontextmanager
@@ -82,6 +83,16 @@ _LLM_PROBE_TTL = 20.0
 _LLM_PROBE_TIMEOUT = 5.0
 _LLM_PROBE_ATTEMPTS = 3
 _llm_probe_cache: dict[str, tuple[float, bool, str | None]] = {}
+# Guards _llm_probe_cache and _llm_probe_inflight. The probe itself deliberately
+# runs outside the lock: holding it across an unresponsive Ollama would serialize
+# every caller behind the very timeout we are trying to absorb.
+_llm_probe_lock = threading.Lock()
+# base_url -> event that the owning probe sets on completion. Callers that find
+# an entry here must not start a probe of their own.
+_llm_probe_inflight: dict[str, threading.Event] = {}
+# Upper bound for sharing an in-flight probe, with a margin over the worst case
+# the probe itself can take.
+_LLM_PROBE_WAIT_TIMEOUT = _LLM_PROBE_TIMEOUT * _LLM_PROBE_ATTEMPTS + 1.0
 
 
 def _probe_llm_once(base_url: str) -> tuple[bool, str | None]:
@@ -95,17 +106,57 @@ def _probe_llm_once(base_url: str) -> tuple[bool, str | None]:
 
 
 def _probe_llm(base_url: str) -> tuple[bool, str | None]:
-  """Return (available, error_message) for the given Ollama endpoint."""
+  """Return (available, error_message) for the given Ollama endpoint.
+
+  Blocking. Callers running on the event loop must go through asyncio.to_thread.
+
+  Exactly one probe per endpoint runs at a time. This matters most when Ollama
+  is unreachable: /api/status is polled every 2s during a fetch, so without
+  de-duplication a 15s probe would stack up ~7 threads all waiting on the same
+  dead endpoint. Callers that arrive while a probe is running take one of two
+  paths:
+
+    - a previous result exists -> return it even if expired. It may be staler
+      than one TTL, but an availability flag lagging behind beats blocking.
+    - nothing has ever been cached -> wait for the running probe and share its
+      result, rather than starting a second one.
+  """
   now = time.monotonic()
-  cached = _llm_probe_cache.get(base_url)
-  if cached is not None and now < cached[0]:
-    return cached[1], cached[2]
-  ok, err = False, None
-  for _ in range(_LLM_PROBE_ATTEMPTS):
-    ok, err = _probe_llm_once(base_url)
-    if ok:
-      break
-  _llm_probe_cache[base_url] = (now + _LLM_PROBE_TTL, ok, err)
+  with _llm_probe_lock:
+    cached = _llm_probe_cache.get(base_url)
+    if cached is not None and now < cached[0]:
+      return cached[1], cached[2]
+    running = _llm_probe_inflight.get(base_url)
+    if running is not None and cached is not None:
+      return cached[1], cached[2]
+    owner = running is None
+    if owner:
+      running = threading.Event()
+      _llm_probe_inflight[base_url] = running
+
+  assert running is not None  # narrowing: set on both branches above
+  if not owner:
+    running.wait(timeout=_LLM_PROBE_WAIT_TIMEOUT)
+    with _llm_probe_lock:
+      shared = _llm_probe_cache.get(base_url)
+    if shared is not None:
+      return shared[1], shared[2]
+    return False, "LLM probe did not complete"
+
+  ok: bool = False
+  err: str | None = None
+  try:
+    for _ in range(_LLM_PROBE_ATTEMPTS):
+      ok, err = _probe_llm_once(base_url)
+      if ok:
+        break
+  finally:
+    # TTL runs from completion, not from entry: a probe that took 15s to fail
+    # would otherwise be considered stale almost immediately.
+    with _llm_probe_lock:
+      _llm_probe_cache[base_url] = (time.monotonic() + _LLM_PROBE_TTL, ok, err)
+      _llm_probe_inflight.pop(base_url, None)
+    running.set()
   return ok, err
 
 
@@ -573,7 +624,10 @@ async def infer_feed_rules(feed_id: int, request: Request) -> InferRulesResponse
   if not config.ollama.enabled:
     raise HTTPException(503, "LLM is disabled (ollama.enabled=false)")
   ollama_url = os.environ.get("OLLAMA_BASE_URL") or config.ollama.base_url
-  llm_ok, llm_err = _probe_llm(ollama_url)
+  # to_thread: _probe_llm blocks for as long as Ollama takes to answer, and this
+  # handler is async. get_status() below calls it directly because FastAPI runs
+  # sync handlers in its own threadpool already.
+  llm_ok, llm_err = await asyncio.to_thread(_probe_llm, ollama_url)
   if not llm_ok:
     raise HTTPException(503, f"LLM is unavailable: {llm_err}")
 
