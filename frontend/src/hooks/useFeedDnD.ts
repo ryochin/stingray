@@ -13,7 +13,7 @@ interface Options {
  * `onReorder` receives the new ordered id list for the affected folder,
  * which the caller hands to the reorder mutation.
  */
-interface DragHandlers {
+export interface DragHandlers {
   onDragStart: (feed: Feed) => void
   onDragOver: (feed: Feed) => void
   onDragLeave: (feed: Feed) => void
