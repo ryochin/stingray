@@ -164,4 +164,72 @@ describe("ArticleCard", () => {
     expect(onClick).toHaveBeenCalledTimes(1)
     expect(notPrevented).toBe(false)
   })
+
+  it("opens body links in a new tab (DOMPurify drops the feed's own target)", () => {
+    const a = article({
+      content_html:
+        '<a href="https://machi.to/bbs/link.cgi" rel="nofollow">link</a>',
+    })
+    const { container } = render(<ArticleCard article={a} />)
+    const link = container.querySelector(
+      "a[href='https://machi.to/bbs/link.cgi']",
+    ) as HTMLAnchorElement
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link.relList.contains("noopener")).toBe(true)
+    expect(link.relList.contains("noreferrer")).toBe(true)
+    // The feed's own rel tokens survive.
+    expect(link.relList.contains("nofollow")).toBe(true)
+  })
+
+  it("leaves in-page fragment links alone", () => {
+    const a = article({ content_html: '<a href="#fn1">fn</a>' })
+    const { container } = render(<ArticleCard article={a} />)
+    const link = container.querySelector("a[href='#fn1']") as HTMLAnchorElement
+    expect(link).not.toBeNull()
+    expect(link).not.toHaveAttribute("target")
+  })
+
+  it("does not fire the card onClick when a body link is clicked", () => {
+    const onClick: Mock = vi.fn()
+    const a = article({
+      content_html: '<a href="https://example.com/x">link</a>',
+    })
+    const { container } = render(<ArticleCard article={a} onClick={onClick} />)
+    const link = container.querySelector(
+      "a[href='https://example.com/x']",
+    ) as HTMLAnchorElement
+    const notPrevented = fireEvent.click(link, { cancelable: true })
+    expect(onClick).not.toHaveBeenCalled()
+    // Stopping propagation must not also suppress the navigation.
+    expect(notPrevented).toBe(true)
+  })
+
+  it("does not let Enter on a body link reach the card or the global shortcut", () => {
+    const onClick: Mock = vi.fn()
+    const onWindowKeyDown: Mock = vi.fn()
+    window.addEventListener("keydown", onWindowKeyDown)
+    try {
+      const a = article({
+        content_html: '<a href="https://example.com/x">link</a>',
+      })
+      const { container } = render(
+        <ArticleCard article={a} onClick={onClick} />,
+      )
+      const link = container.querySelector(
+        "a[href='https://example.com/x']",
+      ) as HTMLAnchorElement
+      const notPrevented = fireEvent.keyDown(link, {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      })
+      expect(onClick).not.toHaveBeenCalled()
+      // useArticleKeyboard listens on window and would open article.url.
+      expect(onWindowKeyDown).not.toHaveBeenCalled()
+      // Stopping propagation must not also suppress the link's own action.
+      expect(notPrevented).toBe(true)
+    } finally {
+      window.removeEventListener("keydown", onWindowKeyDown)
+    }
+  })
 })

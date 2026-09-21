@@ -1,6 +1,6 @@
 import DOMPurify from "dompurify"
 import type { JSX, KeyboardEvent, MouseEvent } from "react"
-import { forwardRef, useMemo } from "react"
+import { forwardRef, useCallback, useMemo } from "react"
 import type { Article } from "../api/client"
 import { parseSummary } from "../utils/articleContent"
 import type { PendingKind } from "../utils/articleProcessing"
@@ -70,6 +70,14 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
         article.summary ? parseSummary(article.summary) : null,
       [article.summary],
     )
+    const stopPropagationOnLink = useCallback(
+      (
+        event: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>,
+      ): void => {
+        if ((event.target as HTMLElement).closest("a")) event.stopPropagation()
+      },
+      [],
+    )
     const sanitizedHtml = useMemo<string | null>((): string | null => {
       if (!article.content_html) return null
       const clean: string = DOMPurify.sanitize(article.content_html)
@@ -78,6 +86,18 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       // value, so every later pass would otherwise walk a truncated tree.
       unwrapFormControls(doc)
       transformTwitterBlockquotes(doc)
+      // DOMPurify's default allow-list has no `target`, so a feed's own
+      // `target="_blank"` is already gone by here and body links would
+      // navigate the reader away in the same tab. Runs after the Twitter pass
+      // so the cards it generates follow the same rule.
+      for (const anchor of doc.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+        // A bare `#fragment` targets an anchor inside this very card; opening
+        // it in a new tab would land on our own URL instead of jumping.
+        if (anchor.getAttribute("href")?.startsWith("#")) continue
+        anchor.setAttribute("target", "_blank")
+        // Add rather than overwrite — feeds set `nofollow` / `ugc` worth keeping.
+        anchor.relList.add("noopener", "noreferrer")
+      }
       const seen: Set<string> = new Set<string>()
       // Strip dimension/layout attrs so the CSS `max-width: 100%` clamp can
       // win. Inline `style="width: ..."` and legacy `align="left"` (seen on
@@ -270,8 +290,15 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
           )}
 
         {sanitizedHtml && (
+          // biome-ignore lint/a11y/noStaticElementInteractions: the handlers only stop propagation for nested links; they add no interaction of their own
           <div
             className="mt-2 text-base text-text article-html max-w-none"
+            // Let body links act on their own. Without this the card's own
+            // handlers also fire: a click marks the article read, and Enter on
+            // a focused link is hijacked by the global feed shortcut, which
+            // opens `article.url` instead of the link the user is on.
+            onClick={stopPropagationOnLink}
+            onKeyDown={stopPropagationOnLink}
             // biome-ignore lint/security/noDangerouslySetInnerHtml: content is sanitized via DOMPurify before rendering (see useMemo above)
             dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />

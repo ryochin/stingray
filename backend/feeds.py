@@ -18,6 +18,7 @@ from pathlib import Path
 import lang
 import log
 from cache import load_feed_cache, save_feed_cache
+from html_urls import absolutize_html_urls
 from models import Article
 from schemas import DEFAULT_USER_AGENT
 from scraper import fetch_web_page
@@ -335,6 +336,13 @@ def _parse_rss(
     thumb_url = item_images.get(raw_link)
     if thumb_url and thumb_url not in raw_html:
       raw_html = f'<img src="{html.escape(thumb_url)}" alt="" />\n{raw_html}'
+
+    # Resolve relative URLs against the item's own link — never the feed URL.
+    # Generated mirror feeds (e.g. a machi.to thread republished elsewhere)
+    # host the XML on a different origin than the articles it points at, so the
+    # feed URL would absolutize links onto the wrong site. Runs after the
+    # thumbnail injection so relative `item_images` URLs are covered too.
+    raw_html = absolutize_html_urls(raw_html, raw_link)
 
     title = _normalize_title(entry.get("title", "") or "") or "(no title)"
     articles.append(Article(
