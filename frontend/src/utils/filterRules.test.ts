@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { filterKey, isRegexPattern } from "./filterRules"
+import { filterKey, filterTargetLabel, isRegexPattern } from "./filterRules"
 
 describe("isRegexPattern", (): void => {
   it("treats a slash-wrapped pattern as a regex", (): void => {
@@ -41,5 +41,22 @@ describe("filterKey", (): void => {
 
   it("separates title from the wider scope", (): void => {
     expect(filterKey("spam", "title")).not.toBe(filterKey("spam", "both"))
+  })
+
+  it("keeps url as its own scope", (): void => {
+    expect(filterKey("spam", "url")).not.toBe(filterKey("spam", "title"))
+    expect(filterKey("spam", "url")).not.toBe(filterKey("spam", "both"))
+  })
+})
+
+describe("filterTargetLabel", (): void => {
+  it("names each target", (): void => {
+    expect(filterTargetLabel("title")).toBe("Title")
+    expect(filterTargetLabel("both")).toBe("Title & Body")
+    expect(filterTargetLabel("url")).toBe("URL")
+  })
+
+  it("reads the legacy body target as title and body", (): void => {
+    expect(filterTargetLabel("body")).toBe("Title & Body")
   })
 })

@@ -100,6 +100,24 @@ describe("Filters duplicate detection", (): void => {
     )
   })
 
+  it("allows the same pattern on the URL scope", async (): Promise<void> => {
+    createFilter.mockResolvedValue({ id: 2, pattern: "spam", target: "url" })
+    renderFilters()
+    await screen.findByText("spam")
+
+    fireEvent.change(getPatternInput(), { target: { value: "spam" } })
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "url" },
+    })
+
+    expect(screen.queryByText(/This filter already exists/)).toBeNull()
+    fireEvent.submit(getPatternInput().closest("form") as HTMLFormElement)
+
+    await waitFor((): void =>
+      expect(createFilter).toHaveBeenCalledWith("spam", "url"),
+    )
+  })
+
   it("allows a pattern that is not a duplicate", async (): Promise<void> => {
     createFilter.mockResolvedValue({ id: 2, pattern: "ham", target: "title" })
     renderFilters()

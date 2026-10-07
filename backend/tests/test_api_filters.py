@@ -57,12 +57,17 @@ class TestCreateFilter:
     resp = client.post("/api/filters", json={"pattern": "spam", "target": "both"})
     assert resp.status_code == 201
 
+  def test_url_target_is_accepted(self):
+    resp = _client().post("/api/filters", json={"pattern": "/sponsored/", "target": "url"})
+    assert resp.status_code == 201
+    assert resp.json()["target"] == "url"
+
   def test_blank_pattern_is_rejected(self):
     assert _client().post("/api/filters", json={"pattern": ""}).status_code == 422
     assert _client().post("/api/filters", json={"pattern": "   "}).status_code == 400
 
   def test_unknown_target_is_rejected(self):
-    resp = _client().post("/api/filters", json={"pattern": "spam", "target": "url"})
+    resp = _client().post("/api/filters", json={"pattern": "spam", "target": "author"})
     assert resp.status_code == 422
 
 
@@ -77,3 +82,8 @@ class TestImportFilters:
   def test_skips_equivalent_rules_within_one_file(self):
     result = _import(_client(), [{"pattern": "spam"}, {"pattern": "Spam"}])
     assert result == {"created": 1, "skipped": 1}
+
+  def test_accepts_url_target(self):
+    result = _import(_client(), [{"pattern": "spam", "target": "url"}])
+    assert result == {"created": 1, "skipped": 0}
+    assert [f.target for f in repo.list_filters()] == ["url"]

@@ -69,7 +69,7 @@ Writing the selectors by hand is optional. Press **✨ Infer with LLM** in the r
 
 ### 🧹 Filter out the noise
 
-Rule-based filters drop articles you would rather not see. Set a pattern and choose whether it is matched against the article's **title** only or against **both** title and body; matching articles are excluded from the list. Titles are matched in their original and translated forms alike. A pattern is a plain keyword by default — substring match, case-insensitive — or a regular expression when wrapped in `/.../`. A rule equivalent to an existing one — same pattern ignoring case and surrounding space, same target — is refused, both when added and when imported. Rules are edited on the filter screen and can be imported and exported as JSON.
+Rule-based filters drop articles you would rather not see. Set a pattern and choose whether it is matched against the article's **Title** only, against **Title & Body**, or against the article's **URL** only; matching articles are excluded from the list. Titles are matched in their original and translated forms alike. A pattern is a plain keyword by default — substring match, case-insensitive — or a regular expression when wrapped in `/.../`. That means a URL pattern such as `/pr/` is read as the regex `pr`; write `pr/` or `/\/pr\//` to match the path segment. A rule equivalent to an existing one — same pattern ignoring case and surrounding space, same target — is refused, both when added and when imported. Rules are edited on the filter screen and can be imported and exported as JSON.
 
 ### 🤖 Translation and summarization with an LLM
 

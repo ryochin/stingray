@@ -740,7 +740,7 @@ def move_feed_to_folder(feed_id: int, body: FeedMove) -> FeedRow:
 # -- Filters --
 
 
-FilterTarget = Literal["title", "both"]
+FilterTarget = Literal["title", "both", "url"]
 
 
 class FilterCreate(BaseModel):

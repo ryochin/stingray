@@ -196,13 +196,35 @@ class DuplicateFilterError(ValueError):
     self.target = target
 
 
+FilterScope = Literal["title", "url", "both"]
+
+
+def _filter_scope(target: str) -> FilterScope:
+  """Normalize a stored target. Anything other than `title` / `url` —
+  `both` and the legacy `body` — scans titles and body text."""
+  if target == "title":
+    return "title"
+  if target == "url":
+    return "url"
+  return "both"
+
+
+# Article fields each scope matches against. The SQL path and the Python path
+# both read this so they cannot drift apart.
+_FILTER_COLUMNS: dict[FilterScope, tuple[str, ...]] = {
+  "title": ("title", "title_translated"),
+  "url": ("url",),
+  "both": ("title", "title_translated", "content_snippet", "summary"),
+}
+
+
 # Arbitrary but stable key that serializes concurrent add_filter calls. The
 # unique index only catches byte-identical rows, so the equivalence check
 # below needs the lock to see every competing insert.
 _FILTER_LOCK_KEY = 4_919_431
 
 
-def filter_key(pattern: str, target: str) -> tuple[bool, str, str]:
+def filter_key(pattern: str, target: str) -> tuple[bool, str, FilterScope]:
   """Identity of a filter rule, used to reject equivalent duplicates.
 
   The pattern is taken as stored: whitespace is significant at match time, so
@@ -210,14 +232,14 @@ def filter_key(pattern: str, target: str) -> tuple[bool, str, str]:
   patterns are compared lowercased, the same folding matching uses (see
   `_article_matches_filter`); regex sources are compared verbatim even though
   they run with IGNORECASE, since lowercasing a source would turn `\\S` into
-  `\\s` and merge genuinely different rules. `body` and `both` select the same
-  columns, so they collapse onto one target.
+  `\\s` and merge genuinely different rules. Targets are compared by
+  `_filter_scope`, so legacy `body` collapses onto `both`.
   """
   is_regex, body = _parse_filter_pattern(pattern)
   return (
     is_regex,
     body if is_regex else body.lower(),
-    "title" if target == "title" else "both",
+    _filter_scope(target),
   )
 
 
@@ -301,9 +323,7 @@ def _contains_match_expr(
   params: list[Any] = []
   for f in filters:
     _, pat = _parse_filter_pattern(f.pattern)
-    cols = ["title", "title_translated"]
-    if f.target != "title":
-      cols += ["content_snippet", "summary"]
+    cols = _FILTER_COLUMNS[_filter_scope(f.target)]
     col_clauses: list[sql.Composable] = []
     val = _like_value(pat)
     for col in cols:
@@ -321,11 +341,7 @@ def _contains_match_expr(
 def _article_matches_filter(article: ArticleRow, filters: list[FilterRow]) -> bool:
   for f in filters:
     is_regex, pat = _parse_filter_pattern(f.pattern)
-    if f.target == "title":
-      texts = [article.title, article.title_translated or ""]
-    else:
-      texts = [article.title, article.title_translated or "",
-               article.content_snippet or "", article.summary or ""]
+    texts = [getattr(article, col) or "" for col in _FILTER_COLUMNS[_filter_scope(f.target)]]
     for text in texts:
       if not text:
         continue

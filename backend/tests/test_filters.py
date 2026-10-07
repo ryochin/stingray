@@ -69,6 +69,10 @@ class TestFilterKey:
   def test_title_is_a_different_scope(self):
     assert filter_key("spam", "title") != filter_key("spam", "both")
 
+  def test_url_is_its_own_scope(self):
+    assert filter_key("spam", "url") != filter_key("spam", "title")
+    assert filter_key("spam", "url") != filter_key("spam", "both")
+
 
 @pytest.mark.usefixtures("clean_db")
 class TestAddFilterDedupe:
@@ -103,13 +107,14 @@ class TestAddFilterDedupe:
 
 def _article(
   *,
+  url: str = "https://example.com/x",
   title: str = "",
   title_translated: str | None = None,
   content_snippet: str | None = None,
   summary: str | None = None,
 ) -> ArticleRow:
   return ArticleRow(
-    url="https://example.com/x",
+    url=url,
     title=title,
     title_translated=title_translated,
     source="test",
@@ -151,6 +156,30 @@ class TestMatchesFilterSubstring:
   def test_target_body_checks_summary(self):
     art = _article(title="foo", summary="contains AD-phrase")
     assert _article_matches_filter(art, [_filter("AD-phrase", target="body")])
+
+
+class TestMatchesFilterUrl:
+  def test_target_url_matches_url(self):
+    art = _article(url="https://example.com/sponsored/1", title="foo")
+    assert _article_matches_filter(art, [_filter("SPONSORED/", target="url")])
+
+  def test_target_url_ignores_title_and_body(self):
+    art = _article(
+      title="sponsored",
+      title_translated="sponsored",
+      content_snippet="sponsored",
+      summary="sponsored",
+    )
+    assert not _article_matches_filter(art, [_filter("sponsored", target="url")])
+
+  def test_other_targets_ignore_url(self):
+    art = _article(url="https://example.com/sponsored/1", title="foo")
+    assert not _article_matches_filter(art, [_filter("sponsored", target="title")])
+    assert not _article_matches_filter(art, [_filter("sponsored", target="both")])
+
+  def test_regex_matches_url(self):
+    art = _article(url="https://ads.example.com/x", title="foo")
+    assert _article_matches_filter(art, [_filter(r"/^https?://ads\./", target="url")])
 
 
 class TestMatchesFilterRegex:
@@ -257,6 +286,24 @@ class TestListArticlesFilterIntegration:
     rows = repo.list_articles()
     assert [r.url for r in rows] == ["u1"]
 
+  def test_filter_target_url_matches_url(self):
+    fid = _feed()
+    _insert_article(fid, url="https://example.com/pr/1", title="ok")
+    # The survivor carries the pattern in its title, so a URL rule that
+    # leaked into other columns would drop it too.
+    _insert_article(fid, url="https://example.com/news/2", title="see /pr/1 here")
+    repo.add_filter("/PR/1", target="url")
+    rows = repo.list_articles()
+    assert [r.url for r in rows] == ["https://example.com/news/2"]
+
+  def test_regex_filter_target_url_matches_url(self):
+    fid = _feed()
+    _insert_article(fid, url="https://ads.example.com/1", title="ok")
+    _insert_article(fid, url="https://example.com/2", title="https://ads.example.com")
+    repo.add_filter(r"/^https?://ads\./", target="url")
+    rows = repo.list_articles()
+    assert [r.url for r in rows] == ["https://example.com/2"]
+
   def test_regex_filter_still_works(self):
     fid = _feed()
     _insert_article(fid, url="u1", title="Article 42")
@@ -297,6 +344,16 @@ class TestGetFeedStatsFilterIntegration:
     _insert_article(fid, url="u1", title="Article 42")
     _insert_article(fid, url="u2", title="Article foo")
     repo.add_filter(r"/\d+/")
+    stats = repo.get_feed_stats()
+    assert stats[fid].article_count == 1
+
+  def test_stats_with_url_filters(self):
+    fid = _feed()
+    _insert_article(fid, url="https://example.com/pr/1", title="a")
+    _insert_article(fid, url="https://ads.example.com/2", title="b")
+    _insert_article(fid, url="https://example.com/news/3", title="c")
+    repo.add_filter("/pr/1", target="url")  # contains
+    repo.add_filter(r"/^https?://ads\./", target="url")  # regex
     stats = repo.get_feed_stats()
     assert stats[fid].article_count == 1
 

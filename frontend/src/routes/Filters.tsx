@@ -4,13 +4,19 @@ import { useRef, useState } from "react"
 import type { FilterRule } from "../api/client"
 import { api } from "../api/client"
 import Header from "../components/Header"
-import { filterKey, isRegexPattern } from "../utils/filterRules"
+import type { FilterTarget } from "../utils/filterRules"
+import {
+  FILTER_TARGET_LABELS,
+  filterKey,
+  filterTargetLabel,
+  isRegexPattern,
+} from "../utils/filterRules"
 
 export default function Filters(): JSX.Element {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [pattern, setPattern] = useState<string>("")
-  const [target, setTarget] = useState<"title" | "both">("title")
+  const [target, setTarget] = useState<FilterTarget>("title")
 
   const { data: filters } = useQuery({
     queryKey: ["filters"],
@@ -129,12 +135,17 @@ export default function Filters(): JSX.Element {
           <select
             value={target}
             onChange={(event: React.ChangeEvent<HTMLSelectElement>): void =>
-              setTarget(event.target.value as "title" | "both")
+              setTarget(event.target.value as FilterTarget)
             }
             className="bg-bg-card text-text border border-border rounded px-2 py-1.5 text-sm"
           >
-            <option value="title">Title</option>
-            <option value="both">Both</option>
+            {Object.entries(FILTER_TARGET_LABELS).map(
+              ([value, label]: [string, string]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ),
+            )}
           </select>
           <button
             type="submit"
@@ -162,7 +173,7 @@ export default function Filters(): JSX.Element {
                   {filter.pattern}
                 </span>
                 <span className="text-xs text-text-dim px-1.5 py-0.5 bg-bg-card rounded">
-                  {filter.target}
+                  {filterTargetLabel(filter.target)}
                 </span>
                 <button
                   type="button"
