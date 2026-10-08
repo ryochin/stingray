@@ -45,11 +45,19 @@ DEBUG_FEEDS_DIR = Path("/app/debug-feeds")
 def read_file_url(url: str) -> str:
   """Read body of a `file://` feed URL (debug-only).
 
-  Absolute paths (`file:///abs/path`) are used as-is. Relative paths
-  (`file://name.xml`, `file://./name.xml`) resolve against DEBUG_FEEDS_DIR.
+  Relative paths (`file://name.xml`, `file://./name.xml`) resolve against
+  DEBUG_FEEDS_DIR; absolute paths (`file:///abs/path`) are taken as-is. Either
+  way the resolved path must stay inside DEBUG_FEEDS_DIR, otherwise
+  ValueError: feed URLs come from an unauthenticated endpoint, so this must
+  not become an arbitrary file read.
   """
   raw = url.removeprefix("file://")
-  path = Path(raw) if raw.startswith("/") else DEBUG_FEEDS_DIR / raw
+  base = DEBUG_FEEDS_DIR.resolve()
+  # Joining an absolute path replaces the base, so one expression covers both
+  # forms. resolve() collapses `..` and follows symlinks before the check.
+  path = (base / raw).resolve()
+  if not path.is_relative_to(base):
+    raise ValueError(f"file:// path outside {DEBUG_FEEDS_DIR}: {raw}")
   return path.read_text(encoding="utf-8")
 
 

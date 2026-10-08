@@ -372,7 +372,7 @@ async def _probe_feed(
   try:
     if url.startswith("file://"):
       # Debug-only: local file is always treated as RSS/Atom, skip HTML detection.
-      body = read_file_url(url)
+      body = await asyncio.to_thread(read_file_url, url)
     else:
       async with httpx.AsyncClient(
         timeout=15, follow_redirects=True,
