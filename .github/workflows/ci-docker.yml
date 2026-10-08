@@ -1,0 +1,57 @@
+name: Docker CI
+
+# The image is what users actually run, so build it whenever anything that
+# ends up in it (or in compose.yml) changes.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - "Dockerfile"
+      - ".dockerignore"
+      - "compose.yml"
+      - "crontab"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/ci-docker.yml"
+  pull_request:
+    paths: *paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Runs without .env / config.yml, like a fresh clone, so the defaults in
+      # compose.yml are what gets validated.
+      - name: Validate compose.yml
+        run: docker compose config -q
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: stingray:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # No DB or Ollama here, so only check what the image itself must get
+      # right: Python deps importable, frontend assets present, and the
+      # arch-specific supercronic binary runs and accepts the crontab. Run the
+      # image directly: compose would bind-mount backend/ over the baked copy.
+      - name: Smoke test image
+        run: |
+          docker run --rm stingray:ci sh -ec '
+            /app/.venv/bin/python -c "import app, main"
+            test -f /app/frontend/dist/index.html
+            supercronic -test /app/crontab
+          '

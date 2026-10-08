@@ -21,6 +21,15 @@ compose.yml
 Taskfile.yml
 CLAUDE.md
 AGENTS.md
-SPEC.md
-SPEC_WEBAPP.md
 README.md
+README.ja.md
+CHANGELOG.md
+docs
+plans
+task.md
+.github
+debug-feeds
+# Secrets and local settings: the image never COPYs them, so keep them out of
+# the build context too.
+.env
+config.yml
