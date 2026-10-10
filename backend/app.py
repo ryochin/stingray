@@ -206,11 +206,14 @@ def get_articles(
   feed_id: int | None = Query(None),
   unread: bool = Query(False),
   since_days: int | None = Query(None, ge=1, le=3650),
+  # Only with `unread`: also keep rows read within this many hours.
+  read_within_hours: int | None = Query(None, ge=1, le=168),
   limit: int = Query(10000, ge=1, le=10000),
 ) -> list[ArticleRow]:
   config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
   return repo.list_articles(
-    feed_id=feed_id, unread=unread, since_days=since_days, limit=limit,
+    feed_id=feed_id, unread=unread, since_days=since_days,
+    read_within_hours=read_within_hours, limit=limit,
     order=config.article_order,
   )
 

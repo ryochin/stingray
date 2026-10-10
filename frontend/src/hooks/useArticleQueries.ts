@@ -26,6 +26,13 @@ interface UseArticleQueriesResult {
   feedStats: Record<string, FeedStats> | undefined
 }
 
+// How long a read article keeps coming back in unread mode. A tab left open
+// longer than this loses the articles read before then on the next poll, as
+// does a read article pushed out of the response limit by newer reads.
+export const UNREAD_MODE_READ_WITHIN_HOURS: number = 24
+
+type ArticleQueryOpts = NonNullable<Parameters<typeof api.getArticles>[0]>
+
 /** Owns the read-only data fetches that back the Articles view. Centralises
  *  the polling cadence (`activeInterval`) and the `sinceDays` derivation so
  *  the route component doesn't have to thread those through manually. */
@@ -54,14 +61,28 @@ export function useArticleQueries({
     ? null
     : timeRangeDays(timeRangeId)
 
+  // Unread mode asks the backend for unread rows, so an old unread item can't
+  // fall outside the response limit. Recent reads ride along so what the
+  // reader just finished stays listed (`sessionReadUrls` keeps it visible);
+  // without them it would vanish on the refetch after each read flush.
+  const articleOpts: ArticleQueryOpts = showUnreadOnly
+    ? {
+        sinceDays,
+        unread: true,
+        readWithinHours: UNREAD_MODE_READ_WITHIN_HOURS,
+      }
+    : { sinceDays }
+
   const {
     data: allArticles,
     isLoading: articlesLoading,
     isError: articlesError,
   } = useQuery({
-    queryKey: ["articles", { sinceDays }],
+    // `unread` is part of the key: unread mode and the All range share
+    // `sinceDays: null` but get different responses.
+    queryKey: ["articles", { sinceDays, unread: showUnreadOnly }],
     queryFn: (): ReturnType<typeof api.getArticles> =>
-      api.getArticles({ sinceDays }),
+      api.getArticles(articleOpts),
     refetchInterval: activeInterval,
   })
 

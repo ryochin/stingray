@@ -151,6 +151,33 @@ describe("api fetchJson behavior", () => {
     expect(result.sample_articles[0].title).toBe("First")
   })
 
+  it("getArticles sends the unread-mode parameters", async () => {
+    const spy: Mock<(input: string, init: RequestInit) => Promise<Response>> =
+      vi.fn(
+        (_input: string, _init: RequestInit): Promise<Response> =>
+          Promise.resolve(
+            new Response("[]", {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+      )
+    vi.stubGlobal("fetch", spy)
+    await api.getArticles({
+      sinceDays: null,
+      unread: true,
+      readWithinHours: 24,
+    })
+    await api.getArticles({ sinceDays: 3 })
+    const urls: string[] = spy.mock.calls.map(
+      (call: [string, RequestInit]): string => call[0],
+    )
+    expect(urls).toEqual([
+      "/api/articles?unread=true&read_within_hours=24",
+      "/api/articles?since_days=3",
+    ])
+  })
+
   it("markAllRead scopes the request to the current selection", async () => {
     const spy: Mock<(input: string, init: RequestInit) => Promise<Response>> =
       vi.fn(

@@ -775,9 +775,18 @@ def list_articles(
   feed_id: int | None = None,
   unread: bool = False,
   since_days: int | None = None,
+  read_within_hours: int | None = None,
   limit: int = 10000,
   order: Literal["oldest", "newest"] = "oldest",
 ) -> list[ArticleRow]:
+  """List articles, newest `limit` rows by default.
+
+  With `unread` and `read_within_hours`, rows read within that many hours are
+  kept alongside the unread ones, so a client can keep showing what it just
+  read; trimming to `limit` then drops read rows before any unread one, so
+  read rows can never crowd an old unread row out. The cutoff uses the DB
+  clock, the same one that stamps `read_at`.
+  """
   filters = list_filters()
   contains_filters, regex_filters = _split_filters(filters)
   match_expr, match_params = _contains_match_expr(contains_filters)
@@ -787,7 +796,13 @@ def list_articles(
   if feed_id is not None:
     clauses.append(sql.SQL("feed_id = %s"))
     params.append(feed_id)
-  if unread:
+  prefer_unread = unread and read_within_hours is not None
+  if prefer_unread:
+    clauses.append(sql.SQL(
+      "(read_at IS NULL OR read_at >= NOW() - %s * INTERVAL '1 hour')"
+    ))
+    params.append(read_within_hours)
+  elif unread:
     clauses.append(sql.SQL("read_at IS NULL"))
   if since_days is not None:
     clauses.append(sql.SQL(
@@ -803,7 +818,8 @@ def list_articles(
   fetch_limit = limit * 3 if regex_filters else limit
   params.append(fetch_limit)
   # SQL returns newest first so LIMIT keeps the most recent `limit` rows
-  # even when total >> limit. By default the response is reversed to
+  # even when total >> limit (with `prefer_unread`, unread rows are kept
+  # first and the newest read rows fill what is left). By default the response is reversed to
   # oldest-first so the UI can render in ascending publication order without
   # re-sorting; `order="newest"` keeps the SQL's descending order.
   # `fetched_at DESC, url DESC` are tie-breakers: without them, rows that
@@ -811,19 +827,43 @@ def list_articles(
   # fetch batch whose feed emits a coarse-granularity pubDate) come back in
   # an implementation-defined order that shuffles between requests.
   # `url` is the PK so the ordering is fully deterministic.
-  query = sql.SQL(
-    "SELECT * FROM articles {where} "
-    "ORDER BY COALESCE(published, fetched_at) DESC NULLS LAST, "
-    "         fetched_at DESC, url DESC "
-    "LIMIT %s"
-  ).format(where=where)
+  date_order = sql.SQL(
+    "COALESCE(published, fetched_at) DESC NULLS LAST, fetched_at DESC, url DESC"
+  )
+  if prefer_unread:
+    # Pick which rows survive LIMIT unread-first, then hand them back in the
+    # usual date order.
+    query = sql.SQL(
+      "SELECT * FROM ("
+      "  SELECT * FROM articles {where} "
+      "  ORDER BY (read_at IS NULL) DESC, {date_order} LIMIT %s"
+      ") picked ORDER BY {date_order}"
+    ).format(where=where, date_order=date_order)
+  else:
+    query = sql.SQL(
+      "SELECT * FROM articles {where} ORDER BY {date_order} LIMIT %s"
+    ).format(where=where, date_order=date_order)
   with db.connection() as conn:
     rows = conn.execute(query, params).fetchall()
   articles = [ArticleRow.model_validate(r) for r in rows]
   if regex_filters:
     articles = [a for a in articles if not _article_matches_filter(a, regex_filters)]
-  trimmed = articles[:limit]
+  trimmed = _trim_unread_first(articles, limit) if prefer_unread else articles[:limit]
   return trimmed if order == "newest" else list(reversed(trimmed))
+
+
+def _trim_unread_first(articles: list[ArticleRow], limit: int) -> list[ArticleRow]:
+  """Keep `limit` of the newest-first `articles`, dropping read rows first.
+
+  Mirrors the unread-first LIMIT in SQL for the regex path, which has to
+  over-fetch and trim in Python. Date order is preserved.
+  """
+  if len(articles) <= limit:
+    return articles
+  unread = [a for a in articles if a.read_at is None][:limit]
+  read = [a for a in articles if a.read_at is not None][:limit - len(unread)]
+  keep: set[str] = {a.url for a in unread} | {a.url for a in read}
+  return [a for a in articles if a.url in keep]
 
 
 def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:

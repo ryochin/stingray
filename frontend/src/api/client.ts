@@ -158,11 +158,17 @@ export const api = {
   getArticles: (opts?: {
     feedId?: number
     sinceDays?: number | null
+    unread?: boolean
+    /** With `unread`: also return articles read within this many hours. */
+    readWithinHours?: number
   }): Promise<Article[]> => {
     const params: URLSearchParams = new URLSearchParams()
     if (opts?.feedId != null) params.set("feed_id", String(opts.feedId))
     if (opts?.sinceDays != null)
       params.set("since_days", String(opts.sinceDays))
+    if (opts?.unread) params.set("unread", "true")
+    if (opts?.readWithinHours != null)
+      params.set("read_within_hours", String(opts.readWithinHours))
     const qs: string = params.toString()
     return fetchJson<Article[]>(qs ? `/articles?${qs}` : "/articles")
   },

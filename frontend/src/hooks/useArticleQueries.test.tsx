@@ -20,9 +20,19 @@ import {
   type TimeRangeId,
   type TimeRangeOption,
 } from "../utils/articleView"
-import { useArticleQueries } from "./useArticleQueries"
+import {
+  UNREAD_MODE_READ_WITHIN_HOURS,
+  useArticleQueries,
+} from "./useArticleQueries"
 
 type GetArticlesOpts = NonNullable<Parameters<typeof api.getArticles>[0]>
+
+/** What unread mode must request: unread rows plus the reader's recent reads. */
+const UNREAD_MODE_OPTS: GetArticlesOpts = {
+  sinceDays: null,
+  unread: true,
+  readWithinHours: UNREAD_MODE_READ_WITHIN_HOURS,
+}
 
 /** Every offered range paired with the day count it must send. */
 const RANGE_CASES: ReadonlyArray<[TimeRangeId, number | null]> =
@@ -130,7 +140,7 @@ describe("useArticleQueries — refetching on range change", (): void => {
     )
 
     await waitFor((): void => {
-      expect(getArticlesSpy).toHaveBeenCalledWith({ sinceDays: null })
+      expect(getArticlesSpy).toHaveBeenCalledWith(UNREAD_MODE_OPTS)
     })
 
     // Leaving unread mode activates the selected window: a distinct query key,
@@ -143,6 +153,55 @@ describe("useArticleQueries — refetching on range change", (): void => {
     rerender({ showUnreadOnly: false, timeRangeId: "30d" })
     await waitFor((): void => {
       expect(getArticlesSpy).toHaveBeenCalledWith({ sinceDays: 30 })
+    })
+  })
+})
+
+describe("useArticleQueries — unread mode request", (): void => {
+  /** Render once and return the options the articles fetch was called with. */
+  async function fetchedOpts(
+    showUnreadOnly: boolean,
+    timeRangeId: TimeRangeId,
+  ): Promise<GetArticlesOpts | undefined> {
+    renderHook(
+      (): ReturnType<typeof useArticleQueries> =>
+        useArticleQueries({ showUnreadOnly, timeRangeId }),
+      { wrapper: makeWrapper() },
+    )
+    await waitFor((): void => {
+      expect(getArticlesSpy).toHaveBeenCalled()
+    })
+    return getArticlesSpy.mock.calls[0]?.[0]
+  }
+
+  it("asks for unread rows plus recent reads, so old unread items can't fall past the limit", async (): Promise<void> => {
+    expect(await fetchedOpts(true, DEFAULT_TIME_RANGE_ID)).toEqual(
+      UNREAD_MODE_OPTS,
+    )
+  })
+
+  it("does not narrow to unread when all articles are shown, even for the All range", async (): Promise<void> => {
+    expect(await fetchedOpts(false, "all")).toEqual({ sinceDays: null })
+  })
+
+  it("keeps unread mode and the All range in separate cache entries", async (): Promise<void> => {
+    // Both use sinceDays: null, so without `unread` in the key the All view
+    // would be served the unread-only response.
+    const { rerender } = renderHook(
+      ({
+        showUnreadOnly,
+      }: {
+        showUnreadOnly: boolean
+      }): ReturnType<typeof useArticleQueries> =>
+        useArticleQueries({ showUnreadOnly, timeRangeId: "all" }),
+      { wrapper: makeWrapper(), initialProps: { showUnreadOnly: true } },
+    )
+    await waitFor((): void => {
+      expect(getArticlesSpy).toHaveBeenCalledWith(UNREAD_MODE_OPTS)
+    })
+    rerender({ showUnreadOnly: false })
+    await waitFor((): void => {
+      expect(getArticlesSpy).toHaveBeenCalledWith({ sinceDays: null })
     })
   })
 })
