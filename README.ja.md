@@ -201,6 +201,10 @@ selector_inference:        # 「Infer with LLM」ボタンの挙動
 
 url_cleanup:
   enabled: true            # 取り込み時に既知のトラッキングパラメータ（utm_* など）を除去
+
+fetch:
+  allow_private: []              # フィード取得を許可する非公開ホスト（例: ["192.168.1.0/24", "nas.local"]）
+  max_response_bytes: 10485760   # 取得するフィード / ページの最大サイズ（10 MiB。「Infer with LLM」は先頭 5 MiB だけを読む）
 ```
 
 設定は、その性質に応じて 2 種類のファイルに分けています。ホストごとに変わる**接続情報や秘密**（DB 認証・`OLLAMA_BASE_URL`・公開ポート等）は `.env` に、環境に依らない**アプリの挙動**（モデル名・タイムアウト・取得期間・ネイティブ言語等）は `config.yml` に置きます。たとえば Ollama サーバの URL は接続情報なので、`config.yml` ではなく `.env` の `OLLAMA_BASE_URL` で指定します。同じ値を両方に書くことはありません。
@@ -241,6 +245,10 @@ Ollama に接続できていない可能性があります。`docker compose log
 **新着が増えない**
 
 スケジューラは取得期限の来たフィードだけを巡回します（「自動で集めてくる」を参照）。すぐ確認したいときは Web UI から手動更新してください。また、定期巡回と一括更新では `config.yml` の `max_age_hours` より古い記事は取り込まれません（フィード単位の手動更新にはこの制限は適用されません）。
+
+**自宅ネットワーク上のフィードが `BlockedDestinationError` で失敗する**
+
+フィードやページの URL は Web UI から入力されるため、Stingray は公開アドレスからしか取得しません。ループバック、LAN、リンクローカル、他の compose サービスに解決される URL は、リダイレクト経由でたどり着いた場合も含めて拒否されます。自宅ネットワーク上で配信されているフィードを購読するには、`config.yml` の `fetch.allow_private` にそのホストをホスト名・IP アドレス・CIDR のいずれかで追加し、コンテナを再起動してください（`docker compose restart web fetcher`）。
 
 **`config.yml` の変更が反映されない**
 

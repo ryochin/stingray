@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import html
+import io
 import json
 import random
 import re
@@ -10,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
 from urllib.parse import urljoin
 
+import defusedxml
+import defusedxml.ElementTree as SafeET
 import feedparser
 import httpx
 from bs4 import BeautifulSoup
@@ -20,7 +23,7 @@ import log
 from cache import load_feed_cache, save_feed_cache
 from html_urls import absolutize_html_urls
 from models import Article
-from schemas import DEFAULT_USER_AGENT
+from safe_http import FetchSettings, SafeClient
 from scraper import fetch_web_page
 
 
@@ -95,6 +98,17 @@ def extract_feed_candidates(body: str, base_url: str) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
+def _parse_feed(body: str) -> feedparser.FeedParserDict:
+  """feedparser.parse() on a body that is always treated as content.
+
+  Given a str, feedparser fetches it if it looks like a URL and opens it if it
+  names a readable file — an SSRF / local-file read for a body served by a
+  hostile feed. A byte stream is only ever read. The UTF-8 encoding matches
+  what feedparser does to a plain str body, so encoding detection is unchanged.
+  """
+  return feedparser.parse(io.BytesIO(body.encode("utf-8")))
+
+
 def probe_feed_body(body: str) -> tuple[str | None, str | None, str | None, bool]:
   """Parse a feed body and return (title, site_url, detected_lang, has_entries).
 
@@ -103,7 +117,7 @@ def probe_feed_body(body: str) -> tuple[str | None, str | None, str | None, bool
     - Japanese kana in the first few entry titles
   Returns detected_lang=None if none of the heuristics succeed.
   """
-  parsed = feedparser.parse(body)
+  parsed = _parse_feed(body)
   if not parsed.entries:
     return None, None, None, False
 
@@ -128,7 +142,7 @@ def probe_feed_body(body: str) -> tuple[str | None, str | None, str | None, bool
 
 def extract_site_url(body: str) -> str | None:
   """Return the <link> of a feed body, or None if parsing fails."""
-  parsed = feedparser.parse(body)
+  parsed = _parse_feed(body)
   site_url = (parsed.feed or {}).get("link", "") or ""
   stripped = site_url.strip()
   return stripped or None
@@ -161,7 +175,7 @@ def _truncate(text: str, max_len: int = 500) -> str:
 
 
 async def _fetch_with_cache(
-  client: httpx.AsyncClient,
+  client: SafeClient,
   url: str,
   headers: dict | None = None,
 ) -> tuple[str, bool, str]:
@@ -246,8 +260,8 @@ def _extract_item_images(body: str) -> dict[str, str]:
   """
   images: dict[str, str] = {}
   try:
-    root = ET.fromstring(body)
-  except ET.ParseError:
+    root = SafeET.fromstring(body)
+  except (ET.ParseError, defusedxml.DefusedXmlException):
     return images
 
   ns = {
@@ -307,7 +321,7 @@ def _parse_rss(
 ) -> list[Article]:
   max_items = feed_cfg.get("max_items", 200)
   source = feed_cfg["name"]
-  parsed = feedparser.parse(body)
+  parsed = _parse_feed(body)
   item_images = _extract_item_images(body)
 
   articles = []
@@ -366,7 +380,7 @@ def _parse_rss(
 
 
 async def _fetch_rss(
-  client: httpx.AsyncClient,
+  client: SafeClient,
   feed_cfg: dict,
   clean_url_fn: Callable[[str], str] | None = None,
 ) -> tuple[list[Article], bool, str]:
@@ -464,7 +478,8 @@ async def fetch_all(
   max_items: int = 200,
   on_feed_done: OnFeedDone | None = None,
   clean_url_fn: Callable[[str], str] | None = None,
-  user_agent: str = DEFAULT_USER_AGENT,
+  *,
+  fetch_settings: FetchSettings,
 ) -> list[Article]:
   """Fetch every feed in parallel.
 
@@ -485,7 +500,7 @@ async def fetch_all(
     feed.setdefault("max_items", max_items)
   cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
 
-  async def _run_one(client: httpx.AsyncClient, feed: dict):
+  async def _run_one(client: SafeClient, feed: dict):
     try:
       articles, was_cached, kind, source_tag = await _delayed_fetch(
         client, feed, random.uniform(0, 2), sem,
@@ -507,11 +522,10 @@ async def fetch_all(
 
     return fresh, was_cached, kind, fetch_exc
 
-  async with httpx.AsyncClient(
+  async with SafeClient(
+    fetch_settings,
     timeout=httpx.Timeout(60, connect=30),
-    follow_redirects=True,
     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-    headers={"User-Agent": user_agent},
   ) as client:
     tasks = [_run_one(client, feed) for feed in feeds_cfg]
     results = await asyncio.gather(*tasks)

@@ -201,6 +201,10 @@ selector_inference:        # The "Infer with LLM" button
 
 url_cleanup:
   enabled: true            # Strip known tracking params (utm_*, ...) at ingest time
+
+fetch:
+  allow_private: []              # Non-public hosts allowed as feed sources, e.g. ["192.168.1.0/24", "nas.local"]
+  max_response_bytes: 10485760   # Max size of a fetched feed/page (10 MiB; "Infer with LLM" reads the first 5 MiB)
 ```
 
 Settings are split across two files by their nature. Anything that varies per host — **connection details and secrets** such as database credentials, `OLLAMA_BASE_URL`, and the published port — lives in `.env`, while **application behavior** that does not depend on the environment — model name, timeouts, fetch window, your language — lives in `config.yml`. The Ollama server URL, for example, is a connection detail, so it goes in `OLLAMA_BASE_URL` in `.env` rather than in `config.yml`. No value is ever written in both.
@@ -241,6 +245,10 @@ Stingray probably cannot reach Ollama. Check `docker compose logs -f web` for co
 **Nothing new is coming in**
 
 The scheduler only visits feeds that are due — see "Fetch on its own". Use manual refresh in the web UI when you want to check right away. Note also that the scheduled crawl and the bulk refresh skip articles older than `max_age_hours` in `config.yml`; refreshing a single feed does not apply that limit.
+
+**A feed on my own network fails with `BlockedDestinationError`**
+
+Feed and page URLs come in through the web UI, so Stingray only fetches them from public addresses. A URL that resolves to loopback, a LAN range, link-local, or another compose service is refused, even when it is reached through a redirect. To subscribe to a feed served on your own network, add its host to `fetch.allow_private` in `config.yml` as a hostname, IP address, or CIDR range, then restart the containers (`docker compose restart web fetcher`).
 
 **Changes to `config.yml` have no effect**
 

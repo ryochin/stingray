@@ -9,6 +9,8 @@ import pytest
 
 import app
 import feeds
+from safe_http import FetchSettings
+from schemas import AppConfig
 
 RSS: str = (
   '<?xml version="1.0"?><rss version="2.0"><channel><title>Local</title>'
@@ -16,6 +18,8 @@ RSS: str = (
   "<item><title>a</title><link>https://example.com/a</link></item>"
   "</channel></rss>"
 )
+
+_SETTINGS: FetchSettings = FetchSettings.from_config(AppConfig())
 
 
 @pytest.fixture
@@ -68,7 +72,7 @@ def test_sibling_dir_sharing_the_prefix_is_rejected(feeds_dir: Path):
 
 def test_probe_reads_a_file_inside_the_dir(feeds_dir: Path):
   result: app.ProbeResult = asyncio.run(
-    app._probe_feed("file://feed.xml", native_lang="en")
+    app._probe_feed("file://feed.xml", native_lang="en", fetch_settings=_SETTINGS)
   )
   assert result.title == "Local"
 
@@ -77,6 +81,6 @@ def test_probe_returns_empty_result_for_a_path_outside(feeds_dir: Path):
   secret: Path = feeds_dir.parent / "secret.xml"
   secret.write_text(RSS, encoding="utf-8")
   result: app.ProbeResult = asyncio.run(
-    app._probe_feed(f"file://{secret}", native_lang="en")
+    app._probe_feed(f"file://{secret}", native_lang="en", fetch_settings=_SETTINGS)
   )
   assert result == app.ProbeResult()

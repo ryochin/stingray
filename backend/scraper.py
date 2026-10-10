@@ -5,14 +5,15 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from html import escape as html_escape
 from typing import Callable
 from urllib.parse import urljoin
 
-import httpx
 import soupsieve
 from bs4 import BeautifulSoup
 
 from models import Article
+from safe_http import SafeClient
 
 # Extraction rule keys. The required three identify the repeating item and its
 # title/link; the rest are optional refinements. "link" accepts the sentinel
@@ -182,7 +183,7 @@ def parse_web_page(
         thumb_url = thumb_el.get(thumb_attr, "") or thumb_el.get("src", "")
         if thumb_url:
           thumb_url = urljoin(page_url, thumb_url)
-          thumbnail_html = f'<img src="{thumb_url}" alt="" />'
+          thumbnail_html = f'<img src="{html_escape(thumb_url)}" alt="" />'
 
     articles.append(Article(
       title=title,
@@ -197,7 +198,7 @@ def parse_web_page(
 
 
 async def fetch_web_page(
-  client: httpx.AsyncClient,
+  client: SafeClient,
   feed_cfg: dict,
   clean_url_fn: Callable[[str], str] | None = None,
 ) -> tuple[list[Article], bool]:
@@ -209,7 +210,7 @@ async def fetch_web_page(
   rules_json = feed_cfg.get("extraction_rules", "{}")
   rules = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
 
-  resp = await client.get(url, follow_redirects=True)
+  resp = await client.get(url)
   resp.raise_for_status()
   html = resp.text
 

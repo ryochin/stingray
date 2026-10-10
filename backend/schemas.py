@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ipaddress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+import httpx
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # -- DB row models --
@@ -148,6 +150,54 @@ class SelectorInferenceConfig(BaseModel):
   min_articles: int = Field(default=3, ge=1)
 
 
+class FetchConfig(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
+  # Feed URLs arrive through an unauthenticated API, so destinations that
+  # resolve to non-public addresses (loopback, LAN, cloud metadata, the compose
+  # network) are refused unless listed here. Entries are hostnames (exact,
+  # case-insensitive), IP addresses, or CIDR networks.
+  allow_private: list[str] = Field(default_factory=list)
+  # Upper bound on a decoded response body; larger downloads are aborted.
+  max_response_bytes: int = Field(default=10 * 1024 * 1024, ge=64 * 1024)
+
+  @field_validator("allow_private")
+  @classmethod
+  def _normalize_allow_private(cls, entries: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for entry in entries:
+      value = entry.strip().lower()
+      if value.startswith("[") and value.endswith("]"):
+        # Bracketed IPv6 literal, as written in URLs; brackets around anything
+        # else are rejected as a non-bare host below.
+        try:
+          value = str(ipaddress.IPv6Address(value[1:-1]))
+        except ValueError:
+          pass
+      if not value:
+        raise ValueError("allow_private entries must not be empty")
+      if "/" in value:
+        # Anything with a slash must be a valid CIDR, so a typo cannot
+        # silently degrade into a never-matching hostname.
+        ipaddress.ip_network(value, strict=False)
+      else:
+        try:
+          ipaddress.ip_address(value)
+        except ValueError:
+          # A port, userinfo, or path would be silently dropped below and
+          # widen the entry to the whole host, so reject them outright.
+          if any(c in value for c in ":@?#[]\\ "):
+            raise ValueError(f"allow_private entry must be a bare host: {entry!r}")
+          # Store hostnames in the IDNA form httpx puts on the wire, so a
+          # Unicode entry matches a Punycode URL and vice versa.
+          try:
+            value = httpx.URL(f"http://{value}/").raw_host.decode("ascii")
+          except httpx.InvalidURL as e:
+            raise ValueError(f"invalid allow_private host: {entry!r}") from e
+      normalized.append(value)
+    return normalized
+
+
 class AppConfig(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
@@ -161,6 +211,7 @@ class AppConfig(BaseModel):
   ollama: OllamaConfig = Field(default_factory=OllamaConfig)
   url_cleanup: UrlCleanupConfig = Field(default_factory=UrlCleanupConfig)
   selector_inference: SelectorInferenceConfig = Field(default_factory=SelectorInferenceConfig)
+  fetch: FetchConfig = Field(default_factory=FetchConfig)
 
   @classmethod
   def load(cls, path: Path = Path("config.yml"), *, required: bool = False) -> "AppConfig":

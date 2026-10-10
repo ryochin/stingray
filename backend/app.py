@@ -30,10 +30,10 @@ from feeds import _fetch_rss, extract_feed_candidates, probe_feed_body, read_fil
 from fetcher import STALE_CACHE_DIAGNOSTICS, refresh_all, summarize_pending
 from url_cleaner import clean_url
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
+from safe_http import FetchSettings, SafeClient
 from scraper import fetch_web_page, validate_extraction_rules  # type: ignore[import-untyped]
 from selector_inference import infer_and_validate
 from schemas import (
-  DEFAULT_USER_AGENT,
   AppConfig,
   ArticleRow,
   FeedHealth,
@@ -366,7 +366,7 @@ def _is_html(content_type: str, body: str) -> bool:
 
 
 async def _probe_feed(
-  url: str, *, native_lang: str, user_agent: str = DEFAULT_USER_AGENT
+  url: str, *, native_lang: str, fetch_settings: FetchSettings
 ) -> ProbeResult:
   """Fetch a feed URL and extract its title, translate flag, and site URL.
 
@@ -377,10 +377,7 @@ async def _probe_feed(
       # Debug-only: local file is always treated as RSS/Atom, skip HTML detection.
       body = await asyncio.to_thread(read_file_url, url)
     else:
-      async with httpx.AsyncClient(
-        timeout=15, follow_redirects=True,
-        headers={"User-Agent": user_agent},
-      ) as client:
+      async with SafeClient(fetch_settings, timeout=15) as client:
         resp = await client.get(url)
         resp.raise_for_status()
       body = resp.text
@@ -438,10 +435,8 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
     kind = "web" if feed.extraction_rules else "rss"
     log.step(f"Fetching feed [{kind}]: {feed.name} ({feed.url})")
     source_tag: str | None = None
-    async with httpx.AsyncClient(
-      timeout=30, follow_redirects=True,
-      headers={"User-Agent": config.user_agent},
-    ) as client:
+    fetch_settings = FetchSettings.from_config(config)
+    async with SafeClient(fetch_settings, timeout=30) as client:
       if feed.extraction_rules and feed.extraction_rules != "{}":
         articles, was_cached = await fetch_web_page(
           client, feed_cfg, clean_url_fn=clean_url_fn,
@@ -467,7 +462,7 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
       log.info("  No articles returned.")
     if not feed.site_url and feed.url:
       probe = await _probe_feed(
-        feed.url, native_lang=config.native_lang, user_agent=config.user_agent
+        feed.url, native_lang=config.native_lang, fetch_settings=fetch_settings,
       )
       if probe.site_url:
         await asyncio.to_thread(repo.update_feed_site_url, feed.id, probe.site_url)
@@ -486,7 +481,8 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
   config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
   log.step(f"Probing feed: {body.url}")
   probe = await _probe_feed(
-    body.url, native_lang=config.native_lang, user_agent=config.user_agent
+    body.url, native_lang=config.native_lang,
+    fetch_settings=FetchSettings.from_config(config),
   )
   if not body.name.strip():
     body.name = probe.title or body.url
@@ -658,17 +654,15 @@ async def infer_feed_rules(feed_id: int, request: Request) -> InferRulesResponse
   if not llm_ok:
     raise HTTPException(503, f"LLM is unavailable: {llm_err}")
 
-  # Fetch the page, capping the download and using the final (post-redirect)
+  # Fetch the page, truncating the download and using the final (post-redirect)
   # URL as the base for resolving relative article links.
   try:
-    async with httpx.AsyncClient(
-      follow_redirects=True, timeout=30,
-      headers={"User-Agent": config.user_agent},
-    ) as client:
-      resp = await client.get(feed.url)
+    async with SafeClient(FetchSettings.from_config(config), timeout=30) as client:
+      resp = await client.get(
+        feed.url, max_bytes=_INFER_MAX_HTML_FETCH_BYTES, truncate=True,
+      )
       resp.raise_for_status()
-      raw = resp.content[:_INFER_MAX_HTML_FETCH_BYTES]
-      html = raw.decode(resp.encoding or "utf-8", errors="ignore")
+      html = resp.content.decode(resp.encoding or "utf-8", errors="ignore")
       page_url = str(resp.url)
   except httpx.HTTPError as e:
     raise HTTPException(502, f"Failed to fetch page: {e}")

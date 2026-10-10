@@ -8,6 +8,7 @@ the test runs without a live network or Ollama.
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 import httpx
@@ -17,6 +18,7 @@ from fastapi.testclient import TestClient
 import app as app_module
 import db
 import selector_inference
+from safe_http import SafeClient
 from schemas import AppConfig
 
 pytestmark = pytest.mark.usefixtures("clean_db")
@@ -57,24 +59,19 @@ def _client(config: AppConfig | None = None) -> TestClient:
   return TestClient(app_module.app)
 
 
-class _FakeResp:
-  def __init__(self, html: str) -> None:
-    self.content = html.encode("utf-8")
-    self.encoding = "utf-8"
-    self.url = "https://example.com/"
-
-  def raise_for_status(self) -> None:
-    pass
-
-
 def _mock_inference(monkeypatch: pytest.MonkeyPatch, rules: dict[str, Any]) -> None:
   """Patch the LLM probe, page fetch, and LLM call for a happy-path inference."""
   monkeypatch.setattr(app_module, "_probe_llm", lambda _url: (True, None))
 
-  async def fake_get(_self: Any, _url: str, **_kw: Any) -> _FakeResp:
-    return _FakeResp(LIST_HTML)
+  async def public_dns(_host: str, _port: int) -> list[str]:
+    return ["93.184.216.34"]
 
-  monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+  transport = httpx.MockTransport(
+    lambda _req: httpx.Response(200, html=LIST_HTML)
+  )
+  monkeypatch.setattr(
+    app_module, "SafeClient", partial(SafeClient, transport=transport, resolver=public_dns),
+  )
 
   async def fake_ollama(*_a: Any, **_kw: Any) -> dict[str, Any]:
     return rules
@@ -111,3 +108,52 @@ def test_inference_returns_preview_without_persisting(monkeypatch: pytest.Monkey
   assert [a["title"] for a in body["sample_articles"]] == ["First", "Second"]
   # The whole point: a preview must not write to the DB.
   assert _stored_rules(feed_id) == "{}"
+
+
+def test_unresolvable_page_returns_502(monkeypatch: pytest.MonkeyPatch) -> None:
+  feed_id = _insert_feed(web=True)
+  monkeypatch.setattr(app_module, "_probe_llm", lambda _url: (True, None))
+
+  async def no_dns(_host: str, _port: int) -> list[str]:
+    raise OSError("name resolution failed")
+
+  monkeypatch.setattr(app_module, "SafeClient", partial(SafeClient, resolver=no_dns))
+  resp = _client().post(f"/api/feeds/{feed_id}/rules/infer")
+  assert resp.status_code == 502
+
+
+class _Captured(Exception):
+  pass
+
+
+def test_page_is_truncated_at_5_mib_whatever_the_fetch_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+  feed_id = _insert_feed(web=True)
+  monkeypatch.setattr(app_module, "_probe_llm", lambda _url: (True, None))
+  served: list[int] = []
+
+  async def huge_page() -> Any:
+    for _ in range(12):  # 6 MiB in 512 KiB chunks, no Content-Length
+      served.append(1)
+      yield b"x" * (512 * 1024)
+
+  async def public_dns(_host: str, _port: int) -> list[str]:
+    return ["93.184.216.34"]
+
+  transport = httpx.MockTransport(lambda _req: httpx.Response(200, content=huge_page()))
+  monkeypatch.setattr(
+    app_module, "SafeClient", partial(SafeClient, transport=transport, resolver=public_dns),
+  )
+  seen: list[int] = []
+
+  async def capture(_client: Any, _model: str, html: str, **_kw: Any) -> Any:
+    seen.append(len(html))
+    raise _Captured
+
+  monkeypatch.setattr(app_module, "infer_and_validate", capture)
+  # A fetch limit far below 5 MiB must not turn the page into an error.
+  config = AppConfig()
+  config.fetch.max_response_bytes = 64 * 1024
+  with pytest.raises(_Captured):
+    _client(config).post(f"/api/feeds/{feed_id}/rules/infer")
+  assert seen == [5 * 1024 * 1024]
+  assert len(served) == 10

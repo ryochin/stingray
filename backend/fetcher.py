@@ -8,13 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 import log
 import repo
 from feeds import extract_site_url, fetch_all  # type: ignore[import-untyped]
 from models import Article
-from schemas import DEFAULT_USER_AGENT, AppConfig, FeedRow
+from safe_http import FetchSettings, SafeClient
+from schemas import AppConfig, FeedRow
 from seed import enrich_from_legacy_cache
 from summarizer import summarize_all  # type: ignore[import-untyped]
 from url_cleaner import clean_url
@@ -166,7 +165,7 @@ async def _fetch_and_persist_feeds(
     max_items=config.max_items_per_feed,
     on_feed_done=_persist_feed,
     clean_url_fn=clean_url if config.url_cleanup.enabled else None,
-    user_agent=config.user_agent,
+    fetch_settings=FetchSettings.from_config(config),
   )
   return articles, new_count_total
 
@@ -238,7 +237,7 @@ async def _run_llm_pass(
 
 
 async def _backfill_site_urls(
-  feeds: list[FeedRow], user_agent: str = DEFAULT_USER_AGENT
+  feeds: list[FeedRow], fetch_settings: FetchSettings
 ) -> None:
   """Look up `site_url` for any feed missing it by fetching the feed URL and
   scraping its declared site link. Runs feeds in parallel (capped) to keep
@@ -250,7 +249,7 @@ async def _backfill_site_urls(
   log.step(f"Backfilling site_url for {len(missing)} feeds...")
   sem = asyncio.Semaphore(8)
 
-  async def _one(client: httpx.AsyncClient, f: FeedRow) -> None:
+  async def _one(client: SafeClient, f: FeedRow) -> None:
     if not f.url:
       return
     async with sem:
@@ -263,9 +262,7 @@ async def _backfill_site_urls(
       except Exception:
         return
 
-  async with httpx.AsyncClient(
-    timeout=15, follow_redirects=True, headers={"User-Agent": user_agent}
-  ) as client:
+  async with SafeClient(fetch_settings, timeout=15) as client:
     await asyncio.gather(*(_one(client, f) for f in missing))
 
 
@@ -344,7 +341,7 @@ async def refresh_all(
           articles, feeds, feed_id_map, config,
         )
 
-      await _backfill_site_urls(feeds, config.user_agent)
+      await _backfill_site_urls(feeds, FetchSettings.from_config(config))
 
       pruned = await asyncio.to_thread(repo.prune_articles, config.article_cache_max_age_days)
       if pruned:
