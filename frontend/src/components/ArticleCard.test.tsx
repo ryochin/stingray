@@ -232,4 +232,40 @@ describe("ArticleCard", () => {
       window.removeEventListener("keydown", onWindowKeyDown)
     }
   })
+
+  it("lets other shortcut keys on a body link reach the global shortcut", () => {
+    const onWindowKeyDown: Mock = vi.fn()
+    window.addEventListener("keydown", onWindowKeyDown)
+    try {
+      const a = article({
+        content_html: '<a href="https://example.com/x">link</a>',
+      })
+      const { container } = render(<ArticleCard article={a} />)
+      const link = container.querySelector(
+        "a[href='https://example.com/x']",
+      ) as HTMLAnchorElement
+      for (const key of ["j", "k", "m", "?"]) {
+        fireEvent.keyDown(link, { key, bubbles: true })
+      }
+      expect(onWindowKeyDown).toHaveBeenCalledTimes(4)
+    } finally {
+      window.removeEventListener("keydown", onWindowKeyDown)
+    }
+  })
+
+  it("treats image map areas like body links", () => {
+    const onClick: Mock = vi.fn()
+    const a = article({
+      content_html:
+        '<map name="m"><area href="https://example.com/d" shape="rect" coords="0,0,1,1"></map>',
+    })
+    const { container } = render(<ArticleCard article={a} onClick={onClick} />)
+    const area = container.querySelector(
+      "area[href='https://example.com/d']",
+    ) as HTMLAreaElement
+    expect(area).toHaveAttribute("target", "_blank")
+    expect(area.relList.contains("noopener")).toBe(true)
+    fireEvent.click(area)
+    expect(onClick).not.toHaveBeenCalled()
+  })
 })

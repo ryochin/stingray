@@ -27,6 +27,9 @@ interface Props {
   onTitleClick?: () => void
 }
 
+// Navigable elements inside the sanitized body (image maps included).
+const BODY_LINK_SELECTOR: string = "a, area"
+
 const ArticleCard = forwardRef<HTMLDivElement, Props>(
   (
     {
@@ -70,11 +73,22 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
         article.summary ? parseSummary(article.summary) : null,
       [article.summary],
     )
-    const stopPropagationOnLink = useCallback(
-      (
-        event: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>,
-      ): void => {
-        if ((event.target as HTMLElement).closest("a")) event.stopPropagation()
+    const stopClickOnLink = useCallback(
+      (event: MouseEvent<HTMLDivElement>): void => {
+        if ((event.target as HTMLElement).closest(BODY_LINK_SELECTOR))
+          event.stopPropagation()
+      },
+      [],
+    )
+    // Only Enter belongs to the link; j / k / m / ? and friends must still
+    // reach the window-level shortcuts while a body link has focus.
+    const stopEnterOnLink = useCallback(
+      (event: KeyboardEvent<HTMLDivElement>): void => {
+        if (
+          event.key === "Enter" &&
+          (event.target as HTMLElement).closest(BODY_LINK_SELECTOR)
+        )
+          event.stopPropagation()
       },
       [],
     )
@@ -90,7 +104,9 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
       // `target="_blank"` is already gone by here and body links would
       // navigate the reader away in the same tab. Runs after the Twitter pass
       // so the cards it generates follow the same rule.
-      for (const anchor of doc.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+      for (const anchor of doc.querySelectorAll<
+        HTMLAnchorElement | HTMLAreaElement
+      >("a[href], area[href]")) {
         // A bare `#fragment` targets an anchor inside this very card; opening
         // it in a new tab would land on our own URL instead of jumping.
         if (anchor.getAttribute("href")?.startsWith("#")) continue
@@ -297,8 +313,8 @@ const ArticleCard = forwardRef<HTMLDivElement, Props>(
             // handlers also fire: a click marks the article read, and Enter on
             // a focused link is hijacked by the global feed shortcut, which
             // opens `article.url` instead of the link the user is on.
-            onClick={stopPropagationOnLink}
-            onKeyDown={stopPropagationOnLink}
+            onClick={stopClickOnLink}
+            onKeyDown={stopEnterOnLink}
             // biome-ignore lint/security/noDangerouslySetInnerHtml: content is sanitized via DOMPurify before rendering (see useMemo above)
             dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />

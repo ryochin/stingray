@@ -16,12 +16,20 @@ from bs4 import BeautifulSoup
 # before the markup ever reaches us, so handling them would be dead code.
 _URL_ATTRS: tuple[tuple[str, str], ...] = (
   ("a", "href"),
+  ("area", "href"),
   ("img", "src"),
   ("img", "longdesc"),
   ("source", "src"),
   ("video", "src"),
   ("video", "poster"),
   ("audio", "src"),
+  ("table", "background"),
+  ("td", "background"),
+  ("th", "background"),
+  ("blockquote", "cite"),
+  ("q", "cite"),
+  ("ins", "cite"),
+  ("del", "cite"),
 )
 
 # Values that are already absolute or intentionally document-local. A bare
