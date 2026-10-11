@@ -274,10 +274,13 @@ export default function Feeds(): JSX.Element {
 
         {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
 
-        {isError ? (
-          <div className="text-red-400">Failed to load feeds.</div>
-        ) : isLoading ? (
-          <div className="text-text-muted">Loading...</div>
+        {isError && (
+          <div className="text-red-400 mb-4">Failed to load feeds.</div>
+        )}
+        {/* A failed background refetch keeps the cached list mounted, so an
+            in-progress rename in FeedList survives until the next success. */}
+        {!feeds ? (
+          isLoading && <div className="text-text-muted">Loading...</div>
         ) : (
           <FeedList
             visibleFeeds={visibleFeeds}

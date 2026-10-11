@@ -46,7 +46,7 @@ vi.mock("../api/client", async (importOriginal) => {
   }
 })
 
-function renderFeeds(): void {
+function renderFeeds(): QueryClient {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -55,6 +55,7 @@ function renderFeeds(): void {
       <Feeds />
     </QueryClientProvider>,
   )
+  return client
 }
 
 /** The expanded card is the only place "Site URL:" appears. */
@@ -120,6 +121,29 @@ describe("Feeds row expand and rename", (): void => {
 
     await waitFor((): void => expect(screen.getByText("Alpha")).toBeTruthy())
     expect(renameFeed).not.toHaveBeenCalled()
+  })
+
+  it("keeps an in-progress rename across a failed refetch", async (): Promise<void> => {
+    // The rename draft lives in FeedList; unmounting the list on a background
+    // refetch error would silently throw it away.
+    const client: QueryClient = renderFeeds()
+    await screen.findByText("Alpha")
+
+    fireEvent.click(screen.getByTitle("Rename"))
+    const input = (await screen.findByDisplayValue("Alpha")) as HTMLInputElement
+    fireEvent.change(input, { target: { value: "Draft" } })
+
+    getFeeds.mockRejectedValue(new Error("offline"))
+    await client.refetchQueries({ queryKey: ["feeds"] })
+    await screen.findByText("Failed to load feeds.")
+    expect(screen.getByDisplayValue("Draft")).toBeTruthy()
+
+    getFeeds.mockResolvedValue([makeFeed({ id: 1, name: "Alpha" })])
+    await client.refetchQueries({ queryKey: ["feeds"] })
+    await waitFor((): void =>
+      expect(screen.queryByText("Failed to load feeds.")).toBeNull(),
+    )
+    expect(screen.getByDisplayValue("Draft")).toBeTruthy()
   })
 
   it("auto-expands the card of a newly added feed", async (): Promise<void> => {
