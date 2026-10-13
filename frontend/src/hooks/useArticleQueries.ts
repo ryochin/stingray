@@ -8,6 +8,7 @@ import type {
 } from "../api/client"
 import { api } from "../api/client"
 import { type TimeRangeId, timeRangeDays } from "../utils/articleView"
+import { failedLoads } from "../utils/queryErrors"
 
 interface UseArticleQueriesInput {
   showUnreadOnly: boolean
@@ -24,6 +25,9 @@ interface UseArticleQueriesResult {
   feeds: Feed[] | undefined
   folders: Folder[] | undefined
   feedStats: Record<string, FeedStats> | undefined
+  /** Names of the sidebar-backing queries in error; `articles` and `status`
+   *  are reported elsewhere (in place of the list, and by Header). */
+  failedSupportLoads: string[]
 }
 
 // How long a read article keeps coming back in unread mode. A tab left open
@@ -86,13 +90,13 @@ export function useArticleQueries({
     refetchInterval: activeInterval,
   })
 
-  const { data: feeds } = useQuery({
+  const { data: feeds, isError: feedsError } = useQuery({
     queryKey: ["feeds"],
     queryFn: api.getFeeds,
     refetchInterval: activeInterval,
   })
 
-  const { data: folders } = useQuery({
+  const { data: folders, isError: foldersError } = useQuery({
     queryKey: ["folders"],
     queryFn: api.getFolders,
   })
@@ -100,7 +104,7 @@ export function useArticleQueries({
   // Per-feed unread totals from the DB (not from the time-bounded /articles
   // response). This is the source of truth for sidebar badges so they stay
   // consistent regardless of the active time range.
-  const { data: feedStats } = useQuery({
+  const { data: feedStats, isError: feedStatsError } = useQuery({
     queryKey: ["feed-stats"],
     queryFn: api.getFeedStats,
     refetchInterval: activeInterval,
@@ -116,5 +120,10 @@ export function useArticleQueries({
     feeds,
     folders,
     feedStats,
+    failedSupportLoads: failedLoads({
+      feeds: feedsError,
+      folders: foldersError,
+      "feed stats": feedStatsError,
+    }),
   }
 }

@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import type { FilterRule } from "../api/client"
 import { api } from "../api/client"
 import Header from "../components/Header"
+import QueryErrorBanner from "../components/QueryErrorBanner"
 import type { FilterTarget } from "../utils/filterRules"
 import {
   FILTER_TARGET_LABELS,
@@ -11,6 +12,7 @@ import {
   filterTargetLabel,
   isRegexPattern,
 } from "../utils/filterRules"
+import { failedLoads } from "../utils/queryErrors"
 
 export default function Filters(): JSX.Element {
   const queryClient = useQueryClient()
@@ -18,7 +20,7 @@ export default function Filters(): JSX.Element {
   const [pattern, setPattern] = useState<string>("")
   const [target, setTarget] = useState<FilterTarget>("title")
 
-  const { data: filters } = useQuery({
+  const { data: filters, isError: filtersError } = useQuery({
     queryKey: ["filters"],
     queryFn: api.getFilters,
   })
@@ -119,6 +121,7 @@ export default function Filters(): JSX.Element {
         </div>
 
         {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
+        <QueryErrorBanner failed={failedLoads({ filters: filtersError })} />
 
         <h3 className="text-sm font-semibold text-text-heading mb-3">
           Filter Rules

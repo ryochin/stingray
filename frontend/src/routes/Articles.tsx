@@ -7,6 +7,7 @@ import ArticleList from "../components/ArticleList"
 import CaughtUpIndicator from "../components/CaughtUpIndicator"
 import Header from "../components/Header"
 import MarkAllReadMenu from "../components/MarkAllReadMenu"
+import QueryErrorBanner from "../components/QueryErrorBanner"
 import ShortcutsHelp from "../components/ShortcutsHelp"
 import Sidebar from "../components/Sidebar"
 import { useArticleDerivedState } from "../hooks/useArticleDerivedState"
@@ -91,6 +92,7 @@ export default function Articles(): JSX.Element {
     feeds,
     folders,
     feedStats,
+    failedSupportLoads,
   } = useArticleQueries({ showUnreadOnly, timeRangeId })
 
   // Both transitions (idle→running, running→idle) are owned by `useRefreshSync`
@@ -423,6 +425,10 @@ export default function Articles(): JSX.Element {
                   />
                 )}
               </div>
+              {/* Inside the measured sticky header so `scrollMargin` (its
+                  height) still marks where the list starts. A top margin
+                  only: a bottom one would collapse out of the measurement. */}
+              <QueryErrorBanner failed={failedSupportLoads} className="mt-3" />
             </div>
 
             {isError ? (

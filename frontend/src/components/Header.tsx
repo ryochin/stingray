@@ -11,7 +11,7 @@ import { NAV_ITEMS } from "./navItems"
 
 export default function Header(): JSX.Element {
   const queryClient: QueryClient = useQueryClient()
-  const { data: status } = useQuery({
+  const { data: status, isError: statusError } = useQuery({
     queryKey: ["status"],
     queryFn: api.getStatus,
     refetchInterval: (query: Query<RefreshStatus>): number =>
@@ -64,6 +64,14 @@ export default function Header(): JSX.Element {
         </nav>
       </div>
       <div className="flex items-center gap-3 text-sm">
+        {/* Every route mounts Header, so the status query is reported here
+            once instead of in each route's banner. The cached status stays
+            shown beside it until the next successful poll. */}
+        {statusError && (
+          <span role="alert" className="text-red-400">
+            ⚠ Status unavailable
+          </span>
+        )}
         {status &&
           (status.llm_enabled === false ? (
             <span

@@ -9,7 +9,9 @@ import FeedList from "../components/FeedList"
 import FolderManager from "../components/FolderManager"
 import Header from "../components/Header"
 import OpmlButtons from "../components/OpmlButtons"
+import QueryErrorBanner from "../components/QueryErrorBanner"
 import { useFeedMutations } from "../hooks/useFeedMutations"
+import { failedLoads } from "../utils/queryErrors"
 
 export default function Feeds(): JSX.Element {
   const queryClient = useQueryClient()
@@ -39,12 +41,12 @@ export default function Feeds(): JSX.Element {
     queryFn: api.getFeeds,
     refetchInterval: activeInterval,
   })
-  const { data: folders } = useQuery({
+  const { data: folders, isError: foldersError } = useQuery({
     queryKey: ["folders"],
     queryFn: api.getFolders,
     refetchInterval: activeInterval,
   })
-  const { data: feedStats } = useQuery({
+  const { data: feedStats, isError: feedStatsError } = useQuery({
     queryKey: ["feed-stats"],
     queryFn: api.getFeedStats,
     refetchInterval: activeInterval,
@@ -274,9 +276,13 @@ export default function Feeds(): JSX.Element {
 
         {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
 
-        {isError && (
-          <div className="text-red-400 mb-4">Failed to load feeds.</div>
-        )}
+        <QueryErrorBanner
+          failed={failedLoads({
+            feeds: isError,
+            folders: foldersError,
+            "feed stats": feedStatsError,
+          })}
+        />
         {/* A failed background refetch keeps the cached list mounted, so an
             in-progress rename in FeedList survives until the next success. */}
         {!feeds ? (

@@ -205,3 +205,21 @@ describe("useArticleQueries — unread mode request", (): void => {
     })
   })
 })
+
+describe("useArticleQueries — sidebar data failures", (): void => {
+  it("reports the failed sidebar-backing queries by name", async (): Promise<void> => {
+    vi.spyOn(api, "getFeedStats").mockRejectedValue(new Error("offline"))
+    const { result } = renderHook(
+      (): ReturnType<typeof useArticleQueries> =>
+        useArticleQueries({
+          showUnreadOnly: false,
+          timeRangeId: DEFAULT_TIME_RANGE_ID,
+        }),
+      { wrapper: makeWrapper() },
+    )
+
+    await waitFor((): void =>
+      expect(result.current.failedSupportLoads).toEqual(["feed stats"]),
+    )
+  })
+})

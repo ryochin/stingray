@@ -19,6 +19,7 @@ vi.mock("../components/Header", () => ({
 }))
 
 const getFeeds = vi.fn()
+const getFolders = vi.fn()
 
 vi.mock("../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/client")>()
@@ -37,7 +38,7 @@ vi.mock("../api/client", async (importOriginal) => {
         llm_error: null,
       }),
       getFeeds: (...args: unknown[]): unknown => getFeeds(...args),
-      getFolders: vi.fn().mockResolvedValue([]),
+      getFolders: (...args: unknown[]): unknown => getFolders(...args),
       getFeedStats: vi.fn().mockResolvedValue({}),
     },
   }
@@ -95,6 +96,8 @@ beforeEach((): void => {
   vi.stubGlobal("IntersectionObserver", NoopObserver)
   vi.stubGlobal("ResizeObserver", NoopObserver)
   getFeeds.mockReset()
+  getFolders.mockReset()
+  getFolders.mockResolvedValue([])
 })
 
 afterEach((): void => {
@@ -181,5 +184,30 @@ describe("degraded vs failing last_error display", (): void => {
     })
     expect(screen.queryByText(/^Stale:/)).toBeNull()
     expect(screen.queryByText(/^Error:/)).toBeNull()
+  })
+})
+
+describe("query failure banner", (): void => {
+  it("names a failed side query and keeps the feed list", async (): Promise<void> => {
+    // Only `feeds` used to be checked; a folders failure was silent.
+    getFeeds.mockResolvedValue([makeFeed({ id: 1, name: "Alpha" })])
+    getFolders.mockRejectedValue(new Error("offline"))
+    renderFeeds()
+
+    const banner: HTMLElement = await screen.findByRole("alert")
+    expect(banner.textContent).toBe("Failed to load folders.")
+    expect(screen.getByText("Alpha")).toBeTruthy()
+  })
+
+  it("lists every failed query in one line", async (): Promise<void> => {
+    getFeeds.mockRejectedValue(new Error("offline"))
+    getFolders.mockRejectedValue(new Error("offline"))
+    renderFeeds()
+
+    await waitFor((): void =>
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Failed to load feeds, folders.",
+      ),
+    )
   })
 })
