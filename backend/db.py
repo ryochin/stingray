@@ -79,6 +79,12 @@ CREATE TABLE IF NOT EXISTS filters (
 CREATE INDEX IF NOT EXISTS idx_articles_feed      ON articles(feed_id);
 CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published DESC);
 CREATE INDEX IF NOT EXISTS idx_articles_read_at   ON articles(read_at);
+CREATE INDEX IF NOT EXISTS idx_articles_fetched_at ON articles(fetched_at);
+-- Matches list_articles' default date ordering, so the planner can read it
+-- in order for a LIMIT and use it for `since_days` range scans.
+CREATE INDEX IF NOT EXISTS idx_articles_date_order ON articles(
+  (COALESCE(published, fetched_at)) DESC NULLS LAST, fetched_at DESC, url DESC
+);
 CREATE INDEX IF NOT EXISTS idx_feeds_folder_id    ON feeds(folder_id);
 """
 
@@ -104,6 +110,9 @@ DELETE FROM filters f USING filters g
 CREATE UNIQUE INDEX IF NOT EXISTS filters_pattern_target_uniq
   ON filters(pattern, target);
 """
+
+# Arbitrary but stable advisory lock key serializing `init_schema` runs.
+_SCHEMA_LOCK_KEY = 4_919_432
 
 _DEFAULT_URL = "postgresql://stingray:stingray@postgres:5432/stingray"
 _pool: ConnectionPool | None = None
@@ -147,5 +156,9 @@ def init_schema() -> None:
   migrations for databases that pre-date newer columns / constraints.
   """
   with connection() as conn:
+    # web and every fetcher run call this. Concurrent runs would otherwise
+    # take index locks on `feeds` and then deadlock upgrading them for
+    # `ALTER TABLE feeds`; `IF NOT EXISTS` does not serialize anything.
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
     conn.execute(_SCHEMA)
     conn.execute(_MIGRATIONS)

@@ -5,7 +5,9 @@ from __future__ import annotations
 import math
 import random
 import re
+from collections.abc import Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator, Literal
 
@@ -229,8 +231,8 @@ def filter_key(pattern: str, target: str) -> tuple[bool, str, FilterScope]:
 
   The pattern is taken as stored: whitespace is significant at match time, so
   callers strip user input before it becomes a rule rather than here. Keyword
-  patterns are compared lowercased, the same folding matching uses (see
-  `_article_matches_filter`); regex sources are compared verbatim even though
+  patterns are compared lowercased, roughly the folding matching uses (see
+  `_contains_match_expr`); regex sources are compared verbatim even though
   they run with IGNORECASE, since lowercasing a source would turn `\\S` into
   `\\s` and merge genuinely different rules. Targets are compared by
   `_filter_scope`, so legacy `body` collapses onto `both`.
@@ -278,25 +280,32 @@ def _parse_filter_pattern(pattern: str) -> tuple[bool, str]:
   return False, pattern
 
 
-# LIKE escape character. Using `!` instead of `\` sidesteps any
-# standard_conforming_strings interactions with backslash.
-_LIKE_ESCAPE = "!"
-
-
 def _like_value(pattern: str) -> str:
-  """Wrap `pattern` for ILIKE substring match, escaping LIKE metacharacters."""
-  e = _LIKE_ESCAPE
-  esc = pattern.replace(e, e * 2).replace("%", e + "%").replace("_", e + "_")
+  """Wrap `pattern` for a LIKE substring match, escaping LIKE metacharacters.
+
+  `LIKE ANY (array)` takes no ESCAPE clause, so this escapes for the default
+  `\\`. Values travel as bind parameters, so `standard_conforming_strings`
+  never sees the backslashes.
+  """
+  esc = pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
   return f"%{esc}%"
+
+
+@dataclass(frozen=True)
+class _RegexRule:
+  """A usable regex filter, compiled once per request."""
+
+  pattern: re.Pattern[str]
+  columns: tuple[str, ...]
 
 
 def _split_filters(
   filters: list[FilterRow],
-) -> tuple[list[FilterRow], list[FilterRow]]:
-  """Partition filters into (contains, regex). Invalid or oversized regex
-  patterns are dropped — same skip behavior as `_article_matches_filter`."""
+) -> tuple[list[FilterRow], list[_RegexRule]]:
+  """Partition filters into (contains, compiled regex rules). Invalid or
+  oversized regex patterns are dropped."""
   contains: list[FilterRow] = []
-  regexes: list[FilterRow] = []
+  regexes: list[_RegexRule] = []
   for f in filters:
     is_regex, pat = _parse_filter_pattern(f.pattern)
     if not is_regex:
@@ -305,11 +314,26 @@ def _split_filters(
     if len(pat) > 200:
       continue
     try:
-      re.compile(pat)
+      compiled = re.compile(pat, re.IGNORECASE)
     except re.error:
       continue
-    regexes.append(f)
+    regexes.append(_RegexRule(compiled, _FILTER_COLUMNS[_filter_scope(f.target)]))
   return contains, regexes
+
+
+def _db_lower(values: list[str]) -> list[str]:
+  """Lowercase `values` with PostgreSQL's `lower()`, preserving order."""
+  with db.connection() as conn:
+    row = conn.execute(
+      "SELECT array("
+      "  SELECT lower(v) FROM unnest(%s::text[]) WITH ORDINALITY AS t(v, i)"
+      "  ORDER BY i"
+      ") AS lowered",
+      (values,),
+    ).fetchone()
+  if row is None:
+    raise RuntimeError("_db_lower: query returned no row")
+  return list(row["lowered"])
 
 
 def _contains_match_expr(
@@ -318,44 +342,47 @@ def _contains_match_expr(
   """Build a Composable expression that is TRUE for any article matching at
   least one of the given contains filters. Returns `(None, [])` when no
   filters are usable, so callers can omit the WHERE fragment entirely.
+
+  One `LIKE ANY` per column instead of one `ILIKE` per rule and column: with
+  dozens of rules this lowercases each value once rather than once per rule,
+  which is what made the sidebar stats slow. On a multi-byte database `ILIKE`
+  is itself `lower(value) LIKE lower(pattern)`, so lowering the patterns with
+  the same PostgreSQL `lower()` keeps matches identical; Python's
+  `str.lower()` folds some characters differently. The patterns are lowered
+  in a separate round trip because a constant array is several times faster
+  to match than one computed inside the query.
   """
-  clauses: list[sql.Composable] = []
-  params: list[Any] = []
+  patterns_by_column: dict[str, list[str]] = {}
   for f in filters:
     _, pat = _parse_filter_pattern(f.pattern)
-    cols = _FILTER_COLUMNS[_filter_scope(f.target)]
-    col_clauses: list[sql.Composable] = []
-    val = _like_value(pat)
-    for col in cols:
-      col_clauses.append(
-        sql.SQL("COALESCE({c}, '') ILIKE %s ESCAPE %s").format(c=sql.Identifier(col)),
-      )
-      params.append(val)
-      params.append(_LIKE_ESCAPE)
-    clauses.append(sql.SQL("(") + sql.SQL(" OR ").join(col_clauses) + sql.SQL(")"))
-  if not clauses:
+    for col in _FILTER_COLUMNS[_filter_scope(f.target)]:
+      patterns_by_column.setdefault(col, []).append(pat)
+  if not patterns_by_column:
     return None, []
+  lowered = iter(_db_lower([p for pats in patterns_by_column.values() for p in pats]))
+  clauses: list[sql.Composable] = []
+  params: list[Any] = []
+  for col, pats in patterns_by_column.items():
+    clauses.append(
+      sql.SQL("lower(COALESCE({c}, '')) LIKE ANY(%s::text[])").format(c=sql.Identifier(col)),
+    )
+    params.append([_like_value(next(lowered)) for _ in pats])
   return sql.SQL(" OR ").join(clauses), params
 
 
-def _article_matches_filter(article: ArticleRow, filters: list[FilterRow]) -> bool:
-  for f in filters:
-    is_regex, pat = _parse_filter_pattern(f.pattern)
-    texts = [getattr(article, col) or "" for col in _FILTER_COLUMNS[_filter_scope(f.target)]]
-    for text in texts:
+def _matches_regex_rules(row: Mapping[str, Any], rules: list[_RegexRule]) -> bool:
+  """True when any rule matches one of its columns in `row`.
+
+  Empty fields are skipped rather than searched, so a pattern like `/^$/`
+  cannot hide every article that simply lacks a translated title.
+  """
+  for rule in rules:
+    for col in rule.columns:
+      text = row.get(col)
       if not text:
         continue
-      if is_regex:
-        try:
-          if len(pat) > 200:
-            continue
-          if re.search(pat, text[:10_000], re.IGNORECASE):
-            return True
-        except re.error:
-          continue
-      else:
-        if pat.lower() in text.lower():
-          return True
+      if rule.pattern.search(text[:10_000]):
+        return True
   return False
 
 
@@ -557,11 +584,11 @@ def get_feed_stats() -> dict[int, FeedStats]:
   the visible list (e.g. "39 unread" beside "All caught up" when every
   unread article is hidden by an NG-word filter).
 
-  Contains filters are pushed into SQL via `ILIKE` so even large article
-  tables stay aggregate-only. Regex filters use Python's `re` (PostgreSQL's
-  `~*` is POSIX, incompatible with patterns like `\\d+`), so when any regex
-  filter is active we fall back to the legacy "load + filter in Python"
-  path.
+  Contains filters are pushed into SQL (see `_contains_match_expr`) so even
+  large article tables stay aggregate-only. Regex filters keep Python's `re`
+  semantics, which PostgreSQL's `~*` does not share, so when any regex
+  filter is active we load just the columns needed to match and count, and
+  aggregate in Python.
   """
   filters = list_filters()
   contains_filters, regex_filters = _split_filters(filters)
@@ -598,20 +625,25 @@ def get_feed_stats() -> dict[int, FeedStats]:
   if match_expr is not None:
     where_parts.append(sql.SQL("NOT (") + match_expr + sql.SQL(")"))
   where = sql.SQL(" AND ").join(where_parts)
-  query = sql.SQL("SELECT * FROM articles WHERE {where}").format(where=where)
+  match_columns = sorted({c for rule in regex_filters for c in rule.columns})
+  columns = sql.SQL(", ").join(
+    sql.Identifier(c) for c in ("feed_id", "read_at", "published", *match_columns)
+  )
+  query = sql.SQL("SELECT {columns} FROM articles WHERE {where}").format(
+    columns=columns, where=where,
+  )
   with db.connection() as conn:
     rows = conn.execute(query, match_params).fetchall()
-  articles = [ArticleRow.model_validate(r) for r in rows]
-  visible = [a for a in articles if not _article_matches_filter(a, regex_filters)]
-  by_feed: dict[int, list[ArticleRow]] = {}
-  for a in visible:
-    by_feed.setdefault(a.feed_id, []).append(a)  # type: ignore[arg-type]
+  by_feed: dict[int, list[db.Row]] = {}
+  for r in rows:
+    if not _matches_regex_rules(r, regex_filters):
+      by_feed.setdefault(r["feed_id"], []).append(r)
   result: dict[int, FeedStats] = {}
   for fid, group in by_feed.items():
-    pubs = [a.published for a in group if a.published is not None]
+    pubs = [r["published"] for r in group if r["published"] is not None]
     result[fid] = FeedStats(
       article_count=len(group),
-      unread_count=sum(1 for a in group if a.read_at is None),
+      unread_count=sum(1 for r in group if r["read_at"] is None),
       latest_published=max(pubs) if pubs else None,
       oldest_published=min(pubs) if pubs else None,
     )
@@ -845,9 +877,9 @@ def list_articles(
     ).format(where=where, date_order=date_order)
   with db.connection() as conn:
     rows = conn.execute(query, params).fetchall()
-  articles = [ArticleRow.model_validate(r) for r in rows]
   if regex_filters:
-    articles = [a for a in articles if not _article_matches_filter(a, regex_filters)]
+    rows = [r for r in rows if not _matches_regex_rules(r, regex_filters)]
+  articles = [ArticleRow.model_validate(r) for r in rows]
   trimmed = _trim_unread_first(articles, limit) if prefer_unread else articles[:limit]
   return trimmed if order == "newest" else list(reversed(trimmed))
 

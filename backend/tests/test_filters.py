@@ -15,8 +15,9 @@ import db
 import repo
 from repo import (
   DuplicateFilterError,
-  _article_matches_filter,
+  _matches_regex_rules,
   _parse_filter_pattern,
+  _split_filters,
   filter_key,
 )
 from schemas import ArticleRow, FilterRow
@@ -47,8 +48,8 @@ class TestFilterKey:
     assert filter_key("Apple", "title") == filter_key("apple", "title")
 
   def test_case_folding_matches_the_matcher(self):
-    # `_article_matches_filter` lowercases; casefold would merge these two
-    # even though only one of them matches the title "strasse".
+    # Matching lowercases; casefold would merge these two even though only
+    # one of them matches the title "strasse".
     assert filter_key("straße", "title") != filter_key("strasse", "title")
 
   def test_surrounding_space_is_significant(self):
@@ -128,80 +129,68 @@ def _filter(pattern: str, target: str = "title") -> FilterRow:
   return FilterRow(id=1, pattern=pattern, target=target)
 
 
-class TestMatchesFilterSubstring:
-  def test_case_insensitive_title_match(self):
-    assert _article_matches_filter(_article(title="Hello World"), [_filter("hello")])
-
-  def test_no_match(self):
-    assert not _article_matches_filter(_article(title="Hello"), [_filter("goodbye")])
-
-  def test_empty_filter_list_never_matches(self):
-    assert not _article_matches_filter(_article(title="x"), [])
-
-  def test_target_title_checks_translated(self):
-    # The pattern must match the translated title only, so a filter that hit
-    # the original title would not prove anything.
-    art = _article(title="foo", title_translated="Translated title")
-    assert _article_matches_filter(art, [_filter("translated")])
-
-  def test_target_title_ignores_body_fields(self):
-    # target="title" must NOT peek into content_snippet/summary.
-    art = _article(title="foo", content_snippet="AD spam here", summary="AD summary")
-    assert not _article_matches_filter(art, [_filter("AD spam")])
-
-  def test_target_body_includes_all_fields(self):
-    art = _article(title="foo", content_snippet="AD spam here")
-    assert _article_matches_filter(art, [_filter("AD spam", target="body")])
-
-  def test_target_body_checks_summary(self):
-    art = _article(title="foo", summary="contains AD-phrase")
-    assert _article_matches_filter(art, [_filter("AD-phrase", target="body")])
+def _regex_hits(row: ArticleRow, *patterns: str, target: str = "title") -> bool:
+  _, rules = _split_filters([_filter(p, target) for p in patterns])
+  return _matches_regex_rules(row.model_dump(), rules)
 
 
-class TestMatchesFilterUrl:
-  def test_target_url_matches_url(self):
-    art = _article(url="https://example.com/sponsored/1", title="foo")
-    assert _article_matches_filter(art, [_filter("SPONSORED/", target="url")])
-
-  def test_target_url_ignores_title_and_body(self):
-    art = _article(
-      title="sponsored",
-      title_translated="sponsored",
-      content_snippet="sponsored",
-      summary="sponsored",
-    )
-    assert not _article_matches_filter(art, [_filter("sponsored", target="url")])
-
-  def test_other_targets_ignore_url(self):
-    art = _article(url="https://example.com/sponsored/1", title="foo")
-    assert not _article_matches_filter(art, [_filter("sponsored", target="title")])
-    assert not _article_matches_filter(art, [_filter("sponsored", target="both")])
-
-  def test_regex_matches_url(self):
-    art = _article(url="https://ads.example.com/x", title="foo")
-    assert _article_matches_filter(art, [_filter(r"/^https?://ads\./", target="url")])
-
-
-class TestMatchesFilterRegex:
+class TestRegexRules:
   def test_regex_matches(self):
-    assert _article_matches_filter(_article(title="Article 42"), [_filter(r"/\d+/")])
+    assert _regex_hits(_article(title="Article 42"), r"/\d+/")
 
   def test_regex_case_insensitive(self):
-    assert _article_matches_filter(_article(title="Hello"), [_filter("/hello/")])
+    assert _regex_hits(_article(title="Hello"), "/hello/")
+
+  def test_no_rules_never_match(self):
+    assert not _regex_hits(_article(title="x"))
+
+  def test_keyword_rules_are_left_to_sql(self):
+    contains, rules = _split_filters([_filter("hello")])
+    assert [f.pattern for f in contains] == ["hello"]
+    assert rules == []
 
   def test_invalid_regex_silently_skipped(self):
     # Malformed regex should not raise; filter just doesn't match.
-    assert not _article_matches_filter(_article(title="anything"), [_filter("/[unclosed/")])
+    assert not _regex_hits(_article(title="anything"), "/[unclosed/")
 
-  def test_overlong_regex_skipped(self):
+  def test_regex_length_limit_is_200(self):
     # Patterns > 200 chars are rejected as abuse guard.
-    long_pat = "/" + "a" * 201 + "/"
-    assert not _article_matches_filter(_article(title="a" * 300), [_filter(long_pat)])
+    title = "a" * 300
+    assert _regex_hits(_article(title=title), "/" + "a" * 200 + "/")
+    assert not _regex_hits(_article(title=title), "/" + "a" * 201 + "/")
 
-  def test_multiple_filters_any_match(self):
-    art = _article(title="Hello World")
-    filters = [_filter("missing"), _filter("World")]
-    assert _article_matches_filter(art, filters)
+  def test_only_the_first_10000_chars_are_searched(self):
+    assert _regex_hits(_article(title="a" * 9_999 + "X"), "/x/")
+    assert not _regex_hits(_article(title="a" * 10_000 + "X"), "/x/")
+
+  def test_empty_fields_are_not_searched(self):
+    # `/^$/` would otherwise hide every article without a translated title.
+    art = _article(title="Hello", title_translated=None, summary="")
+    assert not _regex_hits(art, "/^$/")
+    assert not _regex_hits(art, "/^$/", target="both")
+
+  def test_target_title_checks_translated(self):
+    art = _article(title="foo", title_translated="Translated 42")
+    assert _regex_hits(art, r"/\d+/")
+
+  def test_target_title_ignores_body_fields(self):
+    art = _article(title="foo", content_snippet="spam 42", summary="spam 42")
+    assert not _regex_hits(art, r"/\d+/")
+
+  def test_target_both_checks_summary(self):
+    art = _article(title="foo", summary="spam 42")
+    assert _regex_hits(art, r"/\d+/", target="body")
+
+  def test_regex_matches_url(self):
+    art = _article(url="https://ads.example.com/x", title="foo")
+    assert _regex_hits(art, r"/^https?://ads\./", target="url")
+
+  def test_url_target_ignores_title(self):
+    art = _article(url="https://example.com/x", title="https://ads.example.com")
+    assert not _regex_hits(art, r"/^https?://ads\./", target="url")
+
+  def test_multiple_rules_any_match(self):
+    assert _regex_hits(_article(title="Hello World"), "/missing/", "/World/")
 
 
 # --- Integration with list_articles (filters come from DB) ---
@@ -224,13 +213,16 @@ def _insert_article(
   *,
   url: str,
   title: str,
+  title_translated: str | None = None,
   content_snippet: str | None = None,
+  summary: str | None = None,
 ) -> None:
   with db.connection() as conn:
     conn.execute(
-      "INSERT INTO articles (url, feed_id, title, source, content_snippet) "
-      "VALUES (%s, %s, %s, 'F', %s)",
-      (url, feed_id, title, content_snippet),
+      "INSERT INTO articles "
+      "(url, feed_id, title, title_translated, source, content_snippet, summary) "
+      "VALUES (%s, %s, %s, %s, 'F', %s, %s)",
+      (url, feed_id, title, title_translated, content_snippet, summary),
     )
 
 
@@ -261,9 +253,8 @@ class TestListArticlesFilterIntegration:
     assert [r.url for r in rows] == ["u2"]
 
   def test_filter_substring_case_insensitive_unicode(self):
-    # The Japanese text is the subject under test: this is the only case that
-    # feeds a multi-byte pattern through the SQL ILIKE path, guarding against
-    # database encoding and collation regressions.
+    # Runs a Japanese substring through the SQL keyword-filter path, guarding
+    # against database encoding and collation regressions.
     fid = _feed()
     _insert_article(fid, url="u1", title="日本語のニュース")
     _insert_article(fid, url="u2", title="English news")
@@ -366,3 +357,124 @@ class TestGetFeedStatsFilterIntegration:
     repo.add_filter(r"/\d+/")  # regex
     stats = repo.get_feed_stats()
     assert stats[fid].article_count == 1
+
+
+def _visible(fid: int) -> set[str]:
+  return {r.url for r in repo.list_articles(feed_id=fid)}
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestContainsFilterSql:
+  """Keyword rules run only in SQL; these pin which columns each one sees."""
+
+  def test_case_insensitive_title_match(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="Hello World")
+    _insert_article(fid, url="u2", title="Goodbye")
+    repo.add_filter("hELLO")
+    assert _visible(fid) == {"u2"}
+
+  def test_target_title_checks_translated(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="foo", title_translated="Translated title")
+    _insert_article(fid, url="u2", title="translated in the original")
+    repo.add_filter("translated title")
+    assert _visible(fid) == {"u2"}
+
+  def test_target_title_ignores_summary(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="foo", summary="AD spam")
+    repo.add_filter("AD spam")
+    assert _visible(fid) == {"u1"}
+
+  def test_target_both_checks_summary(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="foo", summary="contains AD-phrase")
+    _insert_article(fid, url="u2", title="bar")
+    repo.add_filter("AD-phrase", target="body")
+    assert _visible(fid) == {"u2"}
+
+  def test_url_target_ignores_title_and_body(self):
+    fid = _feed()
+    _insert_article(
+      fid, url="u1", title="sponsored", title_translated="sponsored",
+      content_snippet="sponsored", summary="sponsored",
+    )
+    repo.add_filter("sponsored", target="url")
+    assert _visible(fid) == {"u1"}
+
+  def test_other_targets_ignore_url(self):
+    fid = _feed()
+    _insert_article(fid, url="https://example.com/sponsored/1", title="foo")
+    repo.add_filter("sponsored", target="title")
+    repo.add_filter("sponsored", target="both")
+    assert _visible(fid) == {"https://example.com/sponsored/1"}
+
+  def test_rules_sharing_a_column_each_apply(self):
+    # `title` and `both` rules land in the same per-column array.
+    fid = _feed()
+    _insert_article(fid, url="u1", title="alpha")
+    _insert_article(fid, url="u2", title="beta")
+    _insert_article(fid, url="u3", title="gamma", content_snippet="delta")
+    _insert_article(fid, url="u4", title="kept")
+    repo.add_filter("alpha")
+    repo.add_filter("beta", target="both")
+    repo.add_filter("delta", target="both")
+    assert _visible(fid) == {"u4"}
+
+  @pytest.mark.parametrize(
+    ("pattern", "dropped", "kept"),
+    [
+      ("50%", "50% off", "500FF"),
+      ("a_b", "a_b", "axb"),
+      ("C:\\x", "C:\\x", "C:x"),
+      ("!", "wow!", "wow"),
+      ("\\%", "\\% sign", "% sign"),
+    ],
+  )
+  def test_like_metacharacters_are_literal(self, pattern, dropped, kept):
+    fid = _feed()
+    _insert_article(fid, url="dropped", title=dropped)
+    _insert_article(fid, url="kept", title=kept)
+    repo.add_filter(pattern)
+    assert _visible(fid) == {"kept"}
+
+  @pytest.mark.parametrize(
+    ("title", "pattern"),
+    [
+      ("ÄRGER", "ä"),
+      ("ärger", "Ä"),
+      ("İstanbul", "i̇"),
+      ("istanbul", "İ"),
+      ("ΣΟΦΟΣ", "σοφος"),
+      ("Straße", "STRASSE"),
+      ("ＡＢＣ", "ａｂｃ"),
+    ],
+  )
+  def test_case_folding_matches_ilike(self, title, pattern):
+    # The SQL used to be one `ILIKE` per rule; the rewrite must keep its
+    # verdict even where Python's str.lower() would fold differently.
+    fid = _feed()
+    _insert_article(fid, url="u1", title=title)
+    repo.add_filter(pattern)
+    with db.connection() as conn:
+      row = conn.execute(
+        "SELECT %s ILIKE %s ESCAPE '!' AS hit",
+        (title, "%" + pattern + "%"),
+      ).fetchone()
+    assert row is not None
+    assert (_visible(fid) == set()) is row["hit"]
+
+  def test_stats_and_list_agree(self):
+    fid = _feed()
+    _insert_article(fid, url="u1", title="AD: spam")
+    _insert_article(fid, url="u2", title="Article 42")
+    _insert_article(fid, url="u3", title="foo", summary="sponsored")
+    _insert_article(fid, url="u4", title="Real news")
+    _insert_article(fid, url="u5", title="Other news", title_translated="")
+    repo.add_filter("ad:")
+    repo.add_filter(r"/\d+/")
+    repo.add_filter("SPONSORED", target="both")
+    repo.add_filter("/^$/")
+    assert _visible(fid) == {"u4", "u5"}
+    assert repo.get_feed_stats()[fid].article_count == 2
