@@ -1,7 +1,7 @@
 import type { JSX } from "react"
 import type { Feed, FeedStats, Folder } from "../api/client"
 import { faviconUrl } from "../api/client"
-import type { DragHandlers } from "../hooks/useFeedDnD"
+import type { DragHandlers } from "../hooks/useReorderDnD"
 import { formatRelativeShort } from "../utils/date"
 import { setCardDragImage } from "../utils/dragImage"
 import FeedDetails from "./FeedDetails"
@@ -43,7 +43,7 @@ type FeedItemProps = {
   fetching: boolean
   editing: EditingState
   expanded: ExpandedState
-  dnd: DragHandlers & { dragOver: boolean }
+  dnd: DragHandlers<Feed> & { dragOver: boolean }
   actions: FeedItemActions
 }
 

@@ -157,4 +157,21 @@ describe("FolderManager — reorder", (): void => {
 
     expect(reorder).not.toHaveBeenCalled()
   })
+
+  it("ignores a drag that started outside the folder list", async (): Promise<void> => {
+    // A feed card dragged across the Feeds screen passes over folder rows.
+    const reorder = vi.spyOn(api, "reorderFolders")
+    setup()
+    const row: HTMLElement = screen
+      .getByText("Beta")
+      .closest("li") as HTMLElement
+
+    fireEvent.dragOver(row)
+    expect(row.className).not.toContain("border-accent")
+
+    await act(async (): Promise<void> => {
+      fireEvent.drop(row)
+    })
+    expect(reorder).not.toHaveBeenCalled()
+  })
 })

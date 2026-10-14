@@ -1,9 +1,13 @@
 import type { JSX } from "react"
 import { useCallback, useMemo, useState } from "react"
 import type { Feed, FeedStats, Folder } from "../api/client"
-import { useFeedDnD } from "../hooks/useFeedDnD"
+import { useReorderDnD } from "../hooks/useReorderDnD"
 import type { EditingState, FeedItemActions } from "./FeedItem"
 import FeedItem from "./FeedItem"
+
+// Feeds reorder within their folder only; moving between folders goes
+// through the folder select.
+const feedFolderOf = (feed: Feed): number | null => feed.folder_id
 
 interface FeedListProps {
   /** Rows to render, already narrowed by the route's name/error filters. */
@@ -43,8 +47,9 @@ function FeedList({
   const [editingFeedId, setEditingFeedId] = useState<number | null>(null)
   const [editFeedName, setEditFeedName] = useState<string>("")
 
-  const { dragOverId, handlers: dndHandlers } = useFeedDnD({
-    feeds: allFeeds,
+  const { dragOverId, handlers: dndHandlers } = useReorderDnD<Feed>({
+    items: allFeeds,
+    groupOf: feedFolderOf,
     onReorder,
   })
 

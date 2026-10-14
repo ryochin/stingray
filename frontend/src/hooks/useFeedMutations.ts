@@ -2,6 +2,27 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import type { Feed, FeedCandidate, FeedCreate } from "../api/client"
 import { ApiError, api } from "../api/client"
+import { useOptimisticReorder } from "./useOptimisticReorder"
+
+/** Puts the reordered feeds back into the slots the group held, leaving
+ *  every other feed where it was. */
+function spliceFeedOrder(prev: Feed[], ids: number[]): Feed[] {
+  const idSet: Set<number> = new Set(ids)
+  const byId: Map<number, Feed> = new Map(
+    prev.map((f: Feed): [number, Feed] => [f.id, f]),
+  )
+  const reordered: Feed[] = []
+  let cursor: number = 0
+  for (const f of prev) {
+    if (idSet.has(f.id)) {
+      const next: Feed | undefined = byId.get(ids[cursor++])
+      if (next) reordered.push(next)
+    } else {
+      reordered.push(f)
+    }
+  }
+  return reordered
+}
 
 interface Options {
   /** Called with the user-facing error message whenever a mutation fails. */
@@ -9,7 +30,7 @@ interface Options {
 }
 
 /**
- * All feed/folder CRUD mutations plus the `invalidate` helper that refreshes
+ * All feed CRUD mutations plus the `invalidate` helper that refreshes
  * the three related queries (`feeds`, `folders`, `feed-stats`). Encapsulating
  * them here keeps the Feeds route focused on orchestration and rendering.
  *
@@ -136,42 +157,11 @@ export function useFeedMutations({ onError }: Options) {
     onError: reportError,
   })
 
-  // Optimistic reorder: splice the dragged feed into its new position inside
-  // the cached list before the server responds. On error we roll back to the
-  // pre-mutation snapshot captured in onMutate.
-  const reorderFeeds = useMutation({
-    mutationFn: (ids: number[]) => api.reorderFeeds(ids),
-    onMutate: async (ids: number[]): Promise<{ prev: Feed[] | undefined }> => {
-      await queryClient.cancelQueries({ queryKey: ["feeds"] })
-      const prev: Feed[] | undefined = queryClient.getQueryData<Feed[]>([
-        "feeds",
-      ])
-      if (prev) {
-        const idSet: Set<number> = new Set(ids)
-        const byId: Map<number, Feed> = new Map(
-          prev.map((f: Feed): [number, Feed] => [f.id, f]),
-        )
-        const reordered: Feed[] = []
-        let cursor: number = 0
-        for (const f of prev) {
-          if (idSet.has(f.id)) {
-            const next: Feed | undefined = byId.get(ids[cursor++])
-            if (next) reordered.push(next)
-          } else {
-            reordered.push(f)
-          }
-        }
-        queryClient.setQueryData<Feed[]>(["feeds"], reordered)
-      }
-      return { prev }
-    },
-    onError: (err: Error, _ids, ctx): void => {
-      if (ctx?.prev) queryClient.setQueryData(["feeds"], ctx.prev)
-      reportError(err as Error)
-    },
-    onSettled: (): void => {
-      queryClient.invalidateQueries({ queryKey: ["feeds"] })
-    },
+  const reorderFeeds = useOptimisticReorder<Feed>({
+    queryKey: ["feeds"],
+    mutationFn: (ids: number[]): Promise<void> => api.reorderFeeds(ids),
+    apply: spliceFeedOrder,
+    onError: reportError,
   })
 
   return {

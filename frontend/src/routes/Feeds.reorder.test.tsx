@@ -2,7 +2,8 @@
  * Drag reordering must always send the *whole* folder, even when the name
  * filter is hiding part of it. The hook that computes the new order takes the
  * feed list as an argument, so this contract lives at the call site, not in
- * the hook — only a route-level test can pin it.
+ * the hook — only a route-level test can pin it. The same goes for keeping a
+ * drop inside one folder, which the call site opts into.
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -41,8 +42,11 @@ vi.mock("../api/client", async (importOriginal) => {
           make({ id: 1, name: "Alpha" }),
           make({ id: 2, name: "Bravo" }),
           make({ id: 3, name: "Charlie" }),
+          make({ id: 4, name: "Delta", folder_id: 10 }),
         ]),
-      getFolders: vi.fn().mockResolvedValue([]),
+      getFolders: vi
+        .fn()
+        .mockResolvedValue([{ id: 10, name: "Inbox", position: 0 }]),
       getFeedStats: vi.fn().mockResolvedValue({}),
       reorderFeeds: (...args: unknown[]): unknown => reorderFeeds(...args),
     },
@@ -119,5 +123,16 @@ describe("Feeds drag reordering", (): void => {
     await waitFor((): void =>
       expect(reorderFeeds).toHaveBeenCalledWith([3, 1, 2]),
     )
+  })
+
+  it("ignores a drop onto a feed in another folder", async (): Promise<void> => {
+    renderFeeds()
+    await screen.findByText("Delta")
+
+    dragOnto("Charlie", "Delta")
+
+    // The drop is synchronous; give a stray mutation the chance to fire.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(reorderFeeds).not.toHaveBeenCalled()
   })
 })

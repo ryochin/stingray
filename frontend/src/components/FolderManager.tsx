@@ -1,9 +1,25 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { JSX } from "react"
-import { useCallback, useRef, useState } from "react"
+import { useState } from "react"
 import type { Folder } from "../api/client"
 import { api } from "../api/client"
+import { useOptimisticReorder } from "../hooks/useOptimisticReorder"
+import { useReorderDnD } from "../hooks/useReorderDnD"
 import { setCardDragImage } from "../utils/dragImage"
+
+/** Folders render sorted by `position`, not by array order, so the new order
+ *  is written into `position` (index, as the backend stores it). */
+function applyFolderPositions(prev: Folder[], ids: number[]): Folder[] {
+  const indexById: Map<number, number> = new Map(
+    ids.map((id: number, index: number): [number, number] => [id, index]),
+  )
+  return prev.map(
+    (folder: Folder): Folder => ({
+      ...folder,
+      position: indexById.get(folder.id) ?? folder.position,
+    }),
+  )
+}
 
 function FolderManager({
   folders,
@@ -16,8 +32,6 @@ function FolderManager({
   const [newName, setNewName] = useState<string>("")
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState<string>("")
-  const dragSrcId = useRef<number | null>(null)
-  const [dragOverId, setDragOverId] = useState<number | null>(null)
 
   const invalidate = (): void => {
     queryClient.invalidateQueries({ queryKey: ["folders"] })
@@ -46,41 +60,15 @@ function FolderManager({
     onSuccess: invalidate,
     onError,
   })
-  // Optimistic reorder, mirroring reorderFeeds. Folders render sorted by
-  // `position`, not by array order, so the new order is written into
-  // `position` (index, as the backend stores it) rather than by splicing.
-  const reorderFolders = useMutation({
-    mutationFn: (ids: number[]) => api.reorderFolders(ids),
-    onMutate: async (
-      ids: number[],
-    ): Promise<{ prev: Folder[] | undefined }> => {
-      await queryClient.cancelQueries({ queryKey: ["folders"] })
-      const prev: Folder[] | undefined = queryClient.getQueryData<Folder[]>([
-        "folders",
-      ])
-      if (prev) {
-        const indexById: Map<number, number> = new Map(
-          ids.map((id: number, index: number): [number, number] => [id, index]),
-        )
-        queryClient.setQueryData<Folder[]>(
-          ["folders"],
-          prev.map(
-            (folder: Folder): Folder => ({
-              ...folder,
-              position: indexById.get(folder.id) ?? folder.position,
-            }),
-          ),
-        )
-      }
-      return { prev }
-    },
-    onError: (err: Error, _ids, ctx): void => {
-      if (ctx?.prev) queryClient.setQueryData(["folders"], ctx.prev)
-      onError(err)
-    },
-    onSettled: (): void => {
-      queryClient.invalidateQueries({ queryKey: ["folders"] })
-    },
+  const reorderFolders = useOptimisticReorder<Folder>({
+    queryKey: ["folders"],
+    mutationFn: (ids: number[]): Promise<void> => api.reorderFolders(ids),
+    apply: applyFolderPositions,
+    onError,
+  })
+  const { dragOverId, handlers: dnd } = useReorderDnD<Folder>({
+    items: folders,
+    onReorder: reorderFolders.mutate,
   })
   // A second drop while one is in flight could have its optimistic order
   // wiped by the first one's rollback or refetch, so dragging waits.
@@ -102,23 +90,6 @@ function FolderManager({
     if (editingId == null || !editName.trim()) return
     renameFolder.mutate({ id: editingId, name: editName.trim() })
   }
-
-  const handleDrop = useCallback(
-    (targetId: number): void => {
-      const srcId: number | null = dragSrcId.current
-      dragSrcId.current = null
-      setDragOverId(null)
-      if (srcId == null || srcId === targetId) return
-      const ids: number[] = folders.map((folder: Folder): number => folder.id)
-      const fromIdx: number = ids.indexOf(srcId)
-      const toIdx: number = ids.indexOf(targetId)
-      if (fromIdx < 0 || toIdx < 0) return
-      ids.splice(fromIdx, 1)
-      ids.splice(toIdx, 0, srcId)
-      reorderFolders.mutate(ids)
-    },
-    [folders, reorderFolders.mutate],
-  )
 
   return (
     <div className="mb-6">
@@ -168,14 +139,10 @@ function FolderManager({
               }`}
               onDragOver={(event: React.DragEvent<HTMLLIElement>): void => {
                 event.preventDefault()
-                setDragOverId(folder.id)
+                dnd.onDragOver(folder)
               }}
-              onDragLeave={(): void =>
-                setDragOverId((prev: number | null): number | null =>
-                  prev === folder.id ? null : prev,
-                )
-              }
-              onDrop={(): void => handleDrop(folder.id)}
+              onDragLeave={(): void => dnd.onDragLeave(folder)}
+              onDrop={(): void => dnd.onDrop(folder)}
             >
               {/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle relies on native HTML5 DnD, which has no standard ARIA role */}
               <span
@@ -184,12 +151,9 @@ function FolderManager({
                   event: React.DragEvent<HTMLSpanElement>,
                 ): void => {
                   setCardDragImage(event, "li")
-                  dragSrcId.current = folder.id
+                  dnd.onDragStart(folder)
                 }}
-                onDragEnd={(): void => {
-                  dragSrcId.current = null
-                  setDragOverId(null)
-                }}
+                onDragEnd={dnd.onDragEnd}
                 className={`text-text-dim select-none inline-flex px-1 -mx-1 ${
                   canDrag(folder)
                     ? "cursor-grab active:cursor-grabbing"
