@@ -159,6 +159,38 @@ describe("usePendingReads — flushReads (manual)", (): void => {
 })
 
 describe("usePendingReads — session state", (): void => {
+  it("forgetSessionReads drops the URLs from the session set and the queued batch", (): void => {
+    const { result } = renderHook(
+      (): ReturnType<typeof usePendingReads> => usePendingReads(),
+      { wrapper },
+    )
+
+    act((): void => {
+      result.current.scheduleRead("a")
+      result.current.scheduleRead("b")
+    })
+    const countBefore: number = result.current.localReadCount
+
+    act((): void => {
+      result.current.forgetSessionReads(["a"])
+    })
+
+    expect(result.current.hasSessionRead("a")).toBe(false)
+    expect(result.current.localReadCount).not.toBe(countBefore)
+
+    act((): void => {
+      vi.advanceTimersByTime(500)
+    })
+    expect(markReadSpy).toHaveBeenCalledTimes(1)
+    expect(markReadSpy.mock.calls[0][0]).toEqual(["b"])
+
+    // A later read of the same URL is accepted again.
+    act((): void => {
+      result.current.scheduleRead("a")
+    })
+    expect(result.current.hasSessionRead("a")).toBe(true)
+  })
+
   it("hasSessionRead reflects URLs accepted via scheduleRead and is stable across renders", (): void => {
     const { result, rerender } = renderHook(
       (): ReturnType<typeof usePendingReads> => usePendingReads(),
@@ -200,6 +232,27 @@ describe("usePendingReads — session state", (): void => {
     expect(result.current.localReadCount).toBe(0)
     expect(result.current.hasSessionRead("a")).toBe(false)
     expect(result.current.hasSessionRead("b")).toBe(false)
+  })
+
+  it("resetSessionReads sends the queued batch right away instead of after the debounce", (): void => {
+    const { result } = renderHook(
+      (): ReturnType<typeof usePendingReads> => usePendingReads(),
+      { wrapper },
+    )
+
+    act((): void => {
+      result.current.scheduleRead("a")
+      result.current.resetSessionReads()
+    })
+
+    expect(markReadSpy).toHaveBeenCalledTimes(1)
+    expect(markReadSpy.mock.calls[0][0]).toEqual(["a"])
+
+    // Nothing is left for the debounce timer or a later forget to act on.
+    act((): void => {
+      vi.advanceTimersByTime(500)
+    })
+    expect(markReadSpy).toHaveBeenCalledTimes(1)
   })
 
   it("sessionReadUrls is a mutable ref carrying the underlying Set so derivation helpers can consume it directly", (): void => {

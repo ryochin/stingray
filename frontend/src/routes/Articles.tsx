@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { JSX } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { Feed, Selection } from "../api/client"
+import type { Article, Feed, Selection } from "../api/client"
 import { api } from "../api/client"
 import ArticleList from "../components/ArticleList"
 import CaughtUpIndicator from "../components/CaughtUpIndicator"
@@ -77,6 +77,7 @@ export default function Articles(): JSX.Element {
   const {
     scheduleRead,
     resetSessionReads,
+    forgetSessionReads,
     sessionReadUrls,
     hasSessionRead,
     localReadCount,
@@ -224,35 +225,69 @@ export default function Articles(): JSX.Element {
     nextUnreadFeed,
   })
 
+  const invalidateReadState = useCallback((): void => {
+    queryClient.invalidateQueries({ queryKey: ["articles"] })
+    queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
+  }, [queryClient])
+
+  // Show `urls` as unread right away and drop them from the session reads,
+  // before the server answers. Clearing `read_at` in the cache first keeps
+  // the cards in the unread filter; dropping them from the session set keeps
+  // them from being subtracted as not-yet-synced reads once the refetch lands,
+  // and lets a later read of the same article through. On failure the
+  // settle-time refetch restores the server's state.
+  const markUnreadLocally = useCallback(
+    async (urls: readonly string[]): Promise<void> => {
+      // A refetch landing after the optimistic write would revert it.
+      await queryClient.cancelQueries({ queryKey: ["articles"] })
+      const targets: ReadonlySet<string> = new Set<string>(urls)
+      queryClient.setQueriesData<Article[]>(
+        { queryKey: ["articles"] },
+        (prev: Article[] | undefined): Article[] | undefined =>
+          prev?.map(
+            (a: Article): Article =>
+              targets.has(a.url) ? { ...a, read_at: null } : a,
+          ),
+      )
+      forgetSessionReads(urls)
+    },
+    [queryClient, forgetSessionReads],
+  )
+
   // Mark all as read mutation — scoped to the current sidebar selection so a
   // folder/feed view never marks articles outside it.
   const markAllRead = useMutation({
     mutationFn: (olderThanHours: number | null) =>
       api.markAllRead(selection, olderThanHours ?? undefined),
-    onSuccess: (): void => {
-      queryClient.invalidateQueries({ queryKey: ["articles"] })
-      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
-    },
+    onSuccess: invalidateReadState,
   })
   const markAllUnread = useMutation({
     mutationFn: () => api.markAllUnread(selection),
-    onSuccess: (): void => {
-      queryClient.invalidateQueries({ queryKey: ["articles"] })
-      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
-    },
+    // Session reads (and the queued batch, a subset) only cover the current
+    // selection, so all of them are in scope. Other read articles in the
+    // cache just show as read until the refetch.
+    onMutate: (): Promise<void> =>
+      markUnreadLocally(Array.from(sessionReadUrls.current)),
+    onSettled: invalidateReadState,
   })
 
   // Toggle read/unread for a single article
   const toggleReadMutation = useMutation({
     mutationFn: ({ url, isRead }: { url: string; isRead: boolean }) =>
       isRead ? api.markUnread([url]) : api.markRead([url]),
-    onSuccess: (): void => {
-      queryClient.invalidateQueries({ queryKey: ["articles"] })
-      queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
+    onMutate: async ({
+      url,
+      isRead,
+    }: {
+      url: string
+      isRead: boolean
+    }): Promise<void> => {
+      if (isRead) await markUnreadLocally([url])
     },
     onError: (err: Error): void => {
       console.error("Failed to toggle read status:", err)
     },
+    onSettled: invalidateReadState,
   })
   const toggleRead = useCallback(
     (url: string, isRead: boolean): void => {

@@ -10,8 +10,15 @@ interface PendingReadsApi {
   /** Forces an immediate flush. Safe to call when the queue is empty. */
   flushReads: () => void
   /** Clears session-read state, e.g. when the active selection changes
-   *  and previously-read articles should no longer be filtered out. */
+   *  and previously-read articles should no longer be filtered out. The
+   *  queued batch is sent first, so it never holds URLs outside the
+   *  session set. */
   resetSessionReads: () => void
+  /** Drops `urls` from the session-read set and the queued batch, e.g. when
+   *  they are being marked unread — otherwise they would keep counting as
+   *  reads the DB hasn't caught up with yet, and a later read of the same
+   *  URL would be swallowed as a duplicate. */
+  forgetSessionReads: (urls: Iterable<string>) => void
   /** URLs marked read during the current session — exposed so callers
    *  can pass the underlying Set to derivation helpers. */
   sessionReadUrls: MutableRefObject<Set<string>>
@@ -20,9 +27,10 @@ interface PendingReadsApi {
    *  lint flags property-chain calls through destructured refs, while a
    *  stable callback satisfies the rule cleanly. */
   hasSessionRead: (url: string) => boolean
-  /** Monotonic counter that ticks each time `scheduleRead` accepts a new
-   *  URL. Mutations to `sessionReadUrls` are opaque to React, so consumers
-   *  key memos off this counter to re-run when the set changes. */
+  /** Counter that ticks each time `scheduleRead` accepts a new URL or
+   *  `forgetSessionReads` drops some, and resets with `resetSessionReads`.
+   *  Mutations to `sessionReadUrls` are opaque to React, so consumers key
+   *  memos off this counter to re-run when the set changes. */
   localReadCount: number
 }
 
@@ -106,9 +114,22 @@ export function usePendingReads(): PendingReadsApi {
 
   // Clearing the ref alone is opaque to React; resetting `localReadCount`
   // is what actually invalidates downstream memos that key off the count.
+  // Flushing first keeps the queue a subset of the session set, which
+  // `forgetSessionReads` callers rely on to reach every queued read in the
+  // current selection.
   const resetSessionReads = useCallback((): void => {
+    flushReads()
     sessionReadUrls.current.clear()
     setLocalReadCount(0)
+  }, [flushReads])
+
+  const forgetSessionReads = useCallback((urls: Iterable<string>): void => {
+    let dropped: boolean = false
+    for (const url of urls) {
+      pendingReadUrls.current.delete(url)
+      if (sessionReadUrls.current.delete(url)) dropped = true
+    }
+    if (dropped) setLocalReadCount((count: number): number => count + 1)
   }, [])
 
   const hasSessionRead = useCallback(
@@ -133,6 +154,7 @@ export function usePendingReads(): PendingReadsApi {
     scheduleRead,
     flushReads,
     resetSessionReads,
+    forgetSessionReads,
     sessionReadUrls,
     hasSessionRead,
     localReadCount,
