@@ -169,15 +169,25 @@ def advisory_lock(key: int = REFRESH_LOCK_KEY) -> Iterator[bool]:
   The same pooled connection is held for the duration of the `with` block so
   both acquire and release happen on the same session — session-scoped
   advisory locks would otherwise leak across pool connection reuse.
+
+  The acquiring transaction is committed right away (the session lock outlives
+  it) so the connection does not sit "idle in transaction" for the whole block.
   """
   with db.connection() as conn:
     row = conn.execute("SELECT pg_try_advisory_lock(%s) AS got", (key,)).fetchone()
     got = bool(row and row["got"])
     try:
+      conn.commit()
       yield got
     finally:
       if got:
-        conn.execute("SELECT pg_advisory_unlock(%s)", (key,))
+        try:
+          conn.execute("SELECT pg_advisory_unlock(%s)", (key,))
+        except BaseException:
+          # Rollback does not release a session lock; ending the session does.
+          # The pool replaces the closed connection.
+          conn.close()
+          raise
 
 
 # -- Filters --

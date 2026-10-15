@@ -8,8 +8,11 @@ and the outcome classifier in fetcher._classify_outcome.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 import psycopg
 import pytest
@@ -320,6 +323,100 @@ class TestAdvisoryLock:
     # Second acquisition after release should succeed.
     with repo.advisory_lock() as got:
       assert got is True
+
+  def test_holder_is_not_idle_in_transaction(self, clean_db):
+    with repo.advisory_lock(_TEST_LOCK_KEY) as got:
+      assert got is True
+      assert _lock_holder_states(_TEST_LOCK_KEY) == ["idle"]
+    assert _lock_holder_states(_TEST_LOCK_KEY) == []
+
+  def test_contended_lock_yields_false_and_keeps_holder(self, clean_db):
+    with repo.advisory_lock(_TEST_LOCK_KEY) as first:
+      assert first is True
+      with repo.advisory_lock(_TEST_LOCK_KEY) as second:
+        assert second is False
+      assert len(_lock_holder_states(_TEST_LOCK_KEY)) == 1
+    assert _lock_holder_states(_TEST_LOCK_KEY) == []
+
+  def test_exception_in_block_releases_lock(self, clean_db):
+    boom = RuntimeError("boom")
+    with pytest.raises(RuntimeError) as excinfo:
+      with repo.advisory_lock(_TEST_LOCK_KEY) as got:
+        assert got is True
+        raise boom
+    assert excinfo.value is boom
+    assert _lock_holder_states(_TEST_LOCK_KEY) == []
+
+  def test_failed_commit_releases_lock(self, clean_db, monkeypatch):
+    _make_connection_fail(monkeypatch, "commit")
+    with pytest.raises(psycopg.OperationalError, match="commit failed"):
+      with repo.advisory_lock(_TEST_LOCK_KEY):
+        pytest.fail("block must not run when the commit fails")
+    assert _lock_holder_states(_TEST_LOCK_KEY) == []
+
+  def test_failed_unlock_closes_session(self, clean_db, monkeypatch):
+    used = _make_connection_fail(monkeypatch, "unlock")
+    with pytest.raises(psycopg.OperationalError, match="unlock failed"):
+      with repo.advisory_lock(_TEST_LOCK_KEY) as got:
+        assert got is True
+    assert used[0].closed
+    assert _lock_holder_states(_TEST_LOCK_KEY) == []
+
+
+# Distinct from REFRESH_LOCK_KEY so a stray fetcher cannot interfere.
+_TEST_LOCK_KEY = 0x5EED_0001
+
+
+def _make_connection_fail(
+  monkeypatch: pytest.MonkeyPatch, step: Literal["commit", "unlock"],
+) -> list[db.Conn]:
+  """Patch db.connection so `step` raises on the lock connection.
+
+  Returns the list that receives the real connection once it is borrowed.
+  """
+  real_connection = db.connection
+  used: list[db.Conn] = []
+
+  class FailingConn:
+    def __init__(self, conn: db.Conn) -> None:
+      self._conn = conn
+
+    def __getattr__(self, name: str) -> object:
+      return getattr(self._conn, name)
+
+    def commit(self) -> None:
+      if step == "commit":
+        raise psycopg.OperationalError("commit failed")
+      self._conn.commit()
+
+    def execute(self, query: str, params: object = None) -> object:
+      if step == "unlock" and "pg_advisory_unlock" in query:
+        raise psycopg.OperationalError("unlock failed")
+      return self._conn.execute(query, params)  # type: ignore[arg-type]
+
+  @contextmanager
+  def fake_connection() -> Iterator[FailingConn]:
+    # Only the lock connection fails; later calls (e.g. the assertions'
+    # pg_locks lookup) get a plain connection.
+    monkeypatch.setattr(db, "connection", real_connection)
+    with real_connection() as conn:
+      used.append(conn)
+      yield FailingConn(conn)
+
+  monkeypatch.setattr(db, "connection", fake_connection)
+  return used
+
+
+def _lock_holder_states(key: int) -> list[str]:
+  """`pg_stat_activity.state` of every session holding the bigint advisory lock."""
+  with db.connection() as conn:
+    rows = conn.execute(
+      """SELECT a.state FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+         WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+           AND l.classid = %s AND l.objid = %s""",
+      (key >> 32, key & 0xFFFF_FFFF),
+    ).fetchall()
+  return [row["state"] for row in rows]
 
 
 # -- outcome classifier --
