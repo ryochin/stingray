@@ -150,6 +150,22 @@ class TestImport:
     assert result["feeds_skipped"] == 1
     assert len(repo.list_feeds()) == 4
 
+  def test_counts_a_feed_added_mid_import_as_skipped(
+    self, client: TestClient, refreshes: list[str], monkeypatch: pytest.MonkeyPatch
+  ):
+    """A feed that slips in after the import read the existing URLs hits the
+    unique index; it is skipped rather than failing the whole import."""
+    repo.add_feed(FeedRow(name="Existing", url="https://a.example.com/feed"))
+    real_list_feeds = repo.list_feeds
+    monkeypatch.setattr(repo, "list_feeds", lambda **_kw: [])
+
+    result = _import(client, OPML_TWO_FOLDERS)
+
+    monkeypatch.setattr(repo, "list_feeds", real_list_feeds)
+    assert result["feeds_created"] == 3
+    assert result["feeds_skipped"] == 1
+    assert len(repo.list_feeds()) == 4
+
   def test_reuses_an_existing_folder_with_the_same_name(
     self, client: TestClient, refreshes: list[str]
   ):

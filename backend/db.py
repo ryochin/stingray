@@ -126,7 +126,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS filters_pattern_target_uniq
   # 2: fresh installs got the fetch_interval_min CHECK twice (unnamed in
   # _SCHEMA, plus feeds_fetch_interval_bucket from migration 1).
   "ALTER TABLE feeds DROP CONSTRAINT IF EXISTS feeds_fetch_interval_min_check",
+  # 3: one feed per URL. Existing duplicates stop the migration with the list,
+  # since picking which copy (and whose articles) to keep is the user's call.
+  # The SHARE lock keeps INSERTs out between the check and the index build.
+  """\
+LOCK TABLE feeds IN SHARE MODE;
+DO $$
+DECLARE
+  dups TEXT;
+BEGIN
+  SELECT string_agg(url, ', ' ORDER BY url) INTO dups
+    FROM (SELECT url FROM feeds WHERE url IS NOT NULL
+          GROUP BY url HAVING COUNT(*) > 1) d;
+  IF dups IS NOT NULL THEN
+    RAISE EXCEPTION 'Duplicate feed URLs; delete the extra feeds, then restart: %', dups;
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS feeds_url_uniq ON feeds(url);
+""",
 ]
+
+# Name of the unique index created by migration 3 (repo maps its violation).
+FEEDS_URL_UNIQUE_INDEX = "feeds_url_uniq"
 
 # Arbitrary but stable advisory lock key serializing `init_schema` runs.
 _SCHEMA_LOCK_KEY = 4_919_432

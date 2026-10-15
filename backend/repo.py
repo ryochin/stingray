@@ -199,6 +199,14 @@ def list_filters() -> list[FilterRow]:
     return [FilterRow(**r) for r in rows]
 
 
+class DuplicateFeedError(ValueError):
+  """Raised when a feed with the same URL already exists."""
+
+  def __init__(self, url: str | None) -> None:
+    super().__init__(f"A feed with this URL already exists: {url}")
+    self.url = url
+
+
 class DuplicateFilterError(ValueError):
   """Raised when a filter equivalent to an existing one is added."""
 
@@ -488,25 +496,30 @@ def add_feed(feed: FeedRow, *, at_top: bool = True) -> FeedRow:
     else "COALESCE((SELECT MAX(position) + 1 FROM feeds), 0)"
   )
   with db.connection() as conn:
-    row = conn.execute(
-      f"""INSERT INTO feeds
-           (name, url, site_url, translate, summarize, enabled, folder_id, position, extraction_rules)
-         VALUES
-           (%s, %s, %s, %s, %s, %s, %s,
-            {position_expr},
-            %s)
-         RETURNING *""",
-      (
-        feed.name,
-        feed.url,
-        feed.site_url,
-        feed.translate,
-        feed.summarize,
-        feed.enabled,
-        feed.folder_id,
-        feed.extraction_rules,
-      ),
-    ).fetchone()
+    try:
+      row = conn.execute(
+        f"""INSERT INTO feeds
+             (name, url, site_url, translate, summarize, enabled, folder_id, position, extraction_rules)
+           VALUES
+             (%s, %s, %s, %s, %s, %s, %s,
+              {position_expr},
+              %s)
+           RETURNING *""",
+        (
+          feed.name,
+          feed.url,
+          feed.site_url,
+          feed.translate,
+          feed.summarize,
+          feed.enabled,
+          feed.folder_id,
+          feed.extraction_rules,
+        ),
+      ).fetchone()
+    except UniqueViolation as exc:
+      if exc.diag.constraint_name == db.FEEDS_URL_UNIQUE_INDEX:
+        raise DuplicateFeedError(feed.url) from exc
+      raise
     if row is None:
       raise RuntimeError("add_feed: INSERT returned no row")
     return _row_to_feed(row)

@@ -519,7 +519,10 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
     log.info(f"  RSS feed: {probe.title or '(no title)'}")
 
   feed = FeedRow(**body.model_dump(), site_url=probe.site_url, extraction_rules=extraction_rules)
-  created = await asyncio.to_thread(repo.add_feed, feed)
+  try:
+    created = await asyncio.to_thread(repo.add_feed, feed)
+  except repo.DuplicateFeedError as exc:
+    raise HTTPException(409, str(exc))
   log.info(f"  Feed created: id={created.id}, name={created.name}")
   # Web-scrape feeds are created with empty rules ("{}"); fetching now would
   # just fail (no "item" selector) and record an error. Defer the first fetch
@@ -867,18 +870,23 @@ def _persist_opml_feeds(
       return
     # Append in file order so an imported OPML keeps its original ordering,
     # rather than reversing it (the interactive add-at-top default).
-    repo.add_feed(
-      FeedRow(
-        name=feed_data.name,
-        url=feed_data.url,
-        site_url=feed_data.site_url,
-        translate=feed_data.translate,
-        summarize=feed_data.summarize,
-        folder_id=folder_id,
-        extraction_rules=feed_data.extraction_rules,
-      ),
-      at_top=False,
-    )
+    try:
+      repo.add_feed(
+        FeedRow(
+          name=feed_data.name,
+          url=feed_data.url,
+          site_url=feed_data.site_url,
+          translate=feed_data.translate,
+          summarize=feed_data.summarize,
+          folder_id=folder_id,
+          extraction_rules=feed_data.extraction_rules,
+        ),
+        at_top=False,
+      )
+    except repo.DuplicateFeedError:
+      # Added since existing_urls was read (e.g. via POST /api/feeds).
+      feeds_skipped += 1
+      return
     existing_urls.add(feed_data.url)
     feeds_created += 1
 

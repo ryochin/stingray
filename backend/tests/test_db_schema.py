@@ -188,6 +188,46 @@ def test_version_is_reread_after_taking_the_lock(
   assert _probe_rows(conn) == [2, 3]
 
 
+
+# --- migration 3: unique feed URLs ---
+
+def _at_version_2(conn: db.Conn, *feeds: tuple[str, str | None]) -> None:
+  db.migrate(conn, db._MIGRATIONS[:2])
+  for name, url in feeds:
+    conn.execute("INSERT INTO feeds (name, url) VALUES (%s, %s)", (name, url))
+  conn.commit()
+
+
+def test_feed_url_becomes_unique_and_null_urls_stay_allowed(conn: db.Conn) -> None:
+  _at_version_2(conn, ("a", "https://a.example.com/"), ("n1", None), ("n2", None))
+
+  db.migrate(conn)
+  conn.commit()
+
+  assert _version(conn) == 3
+  conn.execute("INSERT INTO feeds (name, url) VALUES ('n3', NULL)")
+  with pytest.raises(psycopg.errors.UniqueViolation) as excinfo:
+    conn.execute("INSERT INTO feeds (name, url) VALUES ('a2', 'https://a.example.com/')")
+  assert excinfo.value.diag.constraint_name == db.FEEDS_URL_UNIQUE_INDEX
+  conn.rollback()
+
+
+def test_duplicate_feed_urls_stop_the_migration_and_name_the_url(conn: db.Conn) -> None:
+  _at_version_2(
+    conn,
+    ("a1", "https://dup.example.com/"),
+    ("a2", "https://dup.example.com/"),
+    ("b", "https://b.example.com/"),
+  )
+
+  with pytest.raises(psycopg.errors.RaiseException, match="https://dup.example.com/"):
+    db.migrate(conn)
+  conn.rollback()
+
+  assert _version(conn) == 2
+  assert not _exists(conn, db.FEEDS_URL_UNIQUE_INDEX)
+
+
 # --- failures ---
 
 def test_failed_migration_rolls_everything_back(conn: db.Conn) -> None:
