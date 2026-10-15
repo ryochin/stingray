@@ -10,12 +10,12 @@ from typing import Any
 
 import log
 import repo
-from feeds import extract_site_url, fetch_all  # type: ignore[import-untyped]
+from feeds import extract_site_url, fetch_all
 from models import Article
 from safe_http import FetchSettings, SafeClient
 from schemas import AppConfig, FeedRow
 from seed import enrich_from_legacy_cache
-from summarizer import summarize_all  # type: ignore[import-untyped]
+from summarizer import summarize_all
 from url_cleaner import clean_url
 
 SHORT_SNIPPET_CHARS = 300

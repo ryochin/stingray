@@ -26,12 +26,12 @@ import db
 import lang
 import log
 import repo
-from feeds import _fetch_rss, extract_feed_candidates, probe_feed_body, read_file_url  # type: ignore[import-untyped]
+from feeds import extract_feed_candidates, fetch_rss, probe_feed_body, read_file_url
 from fetcher import STALE_CACHE_DIAGNOSTICS, refresh_all, summarize_pending
 from url_cleaner import clean_url
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
 from safe_http import FetchSettings, SafeClient
-from scraper import fetch_web_page, validate_extraction_rules  # type: ignore[import-untyped]
+from scraper import fetch_web_page, validate_extraction_rules
 from selector_inference import infer_and_validate
 from schemas import (
   AppConfig,
@@ -449,7 +449,7 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
         )
         return
       else:
-        articles, was_cached, source_tag = await _fetch_rss(
+        articles, was_cached, source_tag = await fetch_rss(
           client, feed_cfg, clean_url_fn=clean_url_fn,
         )
     elapsed_ms = int((time.perf_counter() - start) * 1000)

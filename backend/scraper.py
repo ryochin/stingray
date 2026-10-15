@@ -6,11 +6,11 @@ import json
 import re
 from datetime import datetime, timezone
 from html import escape as html_escape
-from typing import Callable
+from typing import Any, Callable, cast
 from urllib.parse import urljoin
 
 import soupsieve
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from models import Article
 from safe_http import SafeClient
@@ -36,7 +36,8 @@ def validate_extraction_rules(raw: object) -> dict[str, str]:
   if not isinstance(raw, dict):
     raise ValueError("Extraction rules must be a JSON object")
   rules: dict[str, str] = {}
-  for key, value in raw.items():
+  # Non-str keys cannot match ALLOWED_RULE_KEYS and are rejected below.
+  for key, value in cast(dict[str, object], raw).items():
     if key not in ALLOWED_RULE_KEYS:
       raise ValueError(f"Unknown extraction rule key: {key}")
     if value is None:
@@ -90,13 +91,13 @@ def _parse_date(text: str | None) -> datetime | None:
   return None
 
 
-def _extract_own_text(el, item_ids: set, max_len: int = 500) -> str:
+def _extract_own_text(el: Tag, item_ids: set[int], max_len: int = 500) -> str:
   """Extract text from an element, stopping at any child that is itself an item.
 
   When html.parser fails to auto-close tags (e.g. <p>), subsequent items
   become nested children. This function avoids including their text.
   """
-  parts = []
+  parts: list[str] = []
   total = 0
   for child in el.children:
     if hasattr(child, "name") and id(child) in item_ids:
@@ -113,21 +114,36 @@ def _extract_own_text(el, item_ids: set, max_len: int = 500) -> str:
   return " ".join(parts)[:max_len]
 
 
+def attr_str(el: Tag, name: str) -> str | None:
+  """Read a single-valued attribute; None when missing or empty.
+
+  bs4 returns a list for multi-valued attributes (`class`, `rel`, ...). Those
+  are not usable as a URL or date, so they fail the page (as urljoin / strip
+  did before) instead of silently picking one value.
+  """
+  value = el.get(name)
+  if value is None or isinstance(value, str):
+    return value or None
+  if not value:
+    return None
+  raise TypeError(f"Attribute {name!r} is multi-valued: {value!r}")
+
+
 def parse_web_page(
   html: str,
-  rules: dict,
-  feed_cfg: dict,
+  rules: dict[str, str],
+  feed_cfg: dict[str, Any],
   clean_url_fn: Callable[[str], str] | None = None,
 ) -> list[Article]:
   """Extract articles from HTML using CSS selector rules."""
   soup = BeautifulSoup(html, "html.parser")
-  source = feed_cfg["name"]
-  page_url = feed_cfg["url"]
-  max_items = feed_cfg.get("max_items", 200)
+  source: str = feed_cfg["name"]
+  page_url: str = feed_cfg["url"]
+  max_items: int = feed_cfg.get("max_items", 200)
 
   items = soup.select(rules["item"])
   item_ids = {id(el) for el in items}
-  articles = []
+  articles: list[Article] = []
 
   for el in items[:max_items]:
     # Title
@@ -144,9 +160,7 @@ def parse_web_page(
     if not link_el:
       link_el = el  # item itself may be the <a> element
     link_attr = rules.get("link_attr", "href")
-    raw_url = link_el.get(link_attr, "")
-    if not raw_url:
-      raw_url = link_el.get("href", "")
+    raw_url = attr_str(link_el, link_attr) or attr_str(link_el, "href")
     if not raw_url:
       continue
     article_url = urljoin(page_url, raw_url)
@@ -166,7 +180,7 @@ def parse_web_page(
       date_el = el.select_one(date_selector)
       if date_el:
         date_attr = rules.get("date_attr")
-        date_text = date_el.get(date_attr) if date_attr else None
+        date_text = attr_str(date_el, date_attr) if date_attr else None
         if not date_text:
           date_text = date_el.get_text(strip=True)
         published = _parse_date(date_text)
@@ -180,7 +194,7 @@ def parse_web_page(
       thumb_el = el.select_one(thumb_selector)
       if thumb_el:
         thumb_attr = rules.get("thumbnail_attr", "src")
-        thumb_url = thumb_el.get(thumb_attr, "") or thumb_el.get("src", "")
+        thumb_url = attr_str(thumb_el, thumb_attr) or attr_str(thumb_el, "src")
         if thumb_url:
           thumb_url = urljoin(page_url, thumb_url)
           thumbnail_html = f'<img src="{html_escape(thumb_url)}" alt="" />'
@@ -199,16 +213,16 @@ def parse_web_page(
 
 async def fetch_web_page(
   client: SafeClient,
-  feed_cfg: dict,
+  feed_cfg: dict[str, Any],
   clean_url_fn: Callable[[str], str] | None = None,
 ) -> tuple[list[Article], bool]:
   """Fetch a web page and extract articles using stored CSS rules.
 
   Returns (articles, was_cached). was_cached is always False for web pages.
   """
-  url = feed_cfg["url"]
-  rules_json = feed_cfg.get("extraction_rules", "{}")
-  rules = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
+  url: str = feed_cfg["url"]
+  rules_json: Any = feed_cfg.get("extraction_rules", "{}")
+  rules: dict[str, str] = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
 
   resp = await client.get(url)
   resp.raise_for_status()

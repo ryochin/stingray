@@ -9,7 +9,7 @@ preview — it is never persisted automatically.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -112,7 +112,8 @@ def _coerce_str_dict(value: Any) -> dict[str, str]:
   fallback path where validation failed but we still want to show the attempt."""
   if not isinstance(value, dict):
     return {}
-  return {k: v for k, v in value.items() if isinstance(v, str)}
+  # Parsed from JSON, so keys are always str.
+  return {k: v for k, v in cast(dict[str, object], value).items() if isinstance(v, str)}
 
 
 # Path *segments* that mark a listing/index page (category, tag, author, ...)

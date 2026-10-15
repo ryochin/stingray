@@ -8,12 +8,12 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 from urllib.parse import urljoin
 
 import defusedxml
 import defusedxml.ElementTree as SafeET
-import feedparser
+import feedparser  # pyright: ignore[reportMissingTypeStubs]
 import httpx
 from bs4 import BeautifulSoup
 from pathlib import Path
@@ -24,7 +24,7 @@ from cache import load_feed_cache, save_feed_cache
 from html_urls import absolutize_html_urls
 from models import Article
 from safe_http import FetchSettings, SafeClient
-from scraper import fetch_web_page
+from scraper import attr_str, fetch_web_page
 
 
 # Link types on <link rel="alternate"> that identify a feed. Order matters:
@@ -64,6 +64,10 @@ def read_file_url(url: str) -> str:
   return path.read_text(encoding="utf-8")
 
 
+def _is_alternate(rel: str | None) -> bool:
+  return rel is not None and "alternate" in rel
+
+
 def extract_feed_candidates(body: str, base_url: str) -> list[dict[str, str]]:
   """Extract feed candidates from an HTML page via <link rel="alternate">.
 
@@ -74,11 +78,11 @@ def extract_feed_candidates(body: str, base_url: str) -> list[dict[str, str]]:
   seen: set[str] = set()
   candidates: list[dict[str, str]] = []
   for type_hint in _FEED_LINK_TYPES:
-    for link in soup.find_all("link", rel=lambda v: v and "alternate" in v):
-      link_type = (link.get("type") or "").strip().lower()
+    for link in soup.find_all("link", rel=_is_alternate):
+      link_type = (attr_str(link, "type") or "").strip().lower()
       if link_type != type_hint:
         continue
-      href = (link.get("href") or "").strip()
+      href = (attr_str(link, "href") or "").strip()
       if not href:
         continue
       absolute = urljoin(base_url, href)
@@ -87,7 +91,7 @@ def extract_feed_candidates(body: str, base_url: str) -> list[dict[str, str]]:
       seen.add(absolute)
       candidates.append({
         "href": absolute,
-        "title": (link.get("title") or "").strip(),
+        "title": (attr_str(link, "title") or "").strip(),
         "type": link_type,
       })
   return candidates
@@ -98,15 +102,28 @@ def extract_feed_candidates(body: str, base_url: str) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _parse_feed(body: str) -> feedparser.FeedParserDict:
+def _parse_feed(body: str) -> Any:
   """feedparser.parse() on a body that is always treated as content.
+
+  feedparser is untyped, so the result is Any: this is the boundary where its
+  Unknown types stop. Read string fields through _str_field.
 
   Given a str, feedparser fetches it if it looks like a URL and opens it if it
   names a readable file — an SSRF / local-file read for a body served by a
   hostile feed. A byte stream is only ever read. The UTF-8 encoding matches
   what feedparser does to a plain str body, so encoding detection is unchanged.
   """
-  return feedparser.parse(io.BytesIO(body.encode("utf-8")))
+  return feedparser.parse(io.BytesIO(body.encode("utf-8")))  # pyright: ignore[reportUnknownMemberType]
+
+
+def _str_field(d: Any, key: str) -> str:
+  """Read a string field from a FeedParserDict; "" when missing or not a str.
+
+  Uses .get() so FeedParserDict's key aliases (e.g. description -> summary)
+  still apply.
+  """
+  value = d.get(key)
+  return value if isinstance(value, str) else ""
 
 
 def probe_feed_body(body: str) -> tuple[str | None, str | None, str | None, bool]:
@@ -121,18 +138,16 @@ def probe_feed_body(body: str) -> tuple[str | None, str | None, str | None, bool
   if not parsed.entries:
     return None, None, None, False
 
-  feed_meta = parsed.feed or {}
-  raw_title = feed_meta.get("title", "") or ""
-  raw_link = feed_meta.get("link", "") or ""
-  title = raw_title.strip() or None
-  site_url = raw_link.strip() or None
+  feed_meta: Any = parsed.feed or {}
+  title = _str_field(feed_meta, "title").strip() or None
+  site_url = _str_field(feed_meta, "link").strip() or None
 
-  feed_lang = feed_meta.get("language", "") or ""
+  feed_lang = _str_field(feed_meta, "language")
   detected_lang = lang.normalize_lang_code(feed_lang)
 
   if detected_lang is None:
     for entry in parsed.entries[:5]:
-      entry_title = entry.get("title", "") or ""
+      entry_title = _str_field(entry, "title")
       detected_lang = lang.detect_lang_by_script(entry_title)
       if detected_lang is not None:
         break
@@ -143,9 +158,7 @@ def probe_feed_body(body: str) -> tuple[str | None, str | None, str | None, bool
 def extract_site_url(body: str) -> str | None:
   """Return the <link> of a feed body, or None if parsing fails."""
   parsed = _parse_feed(body)
-  site_url = (parsed.feed or {}).get("link", "") or ""
-  stripped = site_url.strip()
-  return stripped or None
+  return _str_field(parsed.feed or {}, "link").strip() or None
 
 
 def _normalize_title(text: str) -> str:
@@ -177,7 +190,7 @@ def _truncate(text: str, max_len: int = 500) -> str:
 async def _fetch_with_cache(
   client: SafeClient,
   url: str,
-  headers: dict | None = None,
+  headers: dict[str, str] | None = None,
 ) -> tuple[str, bool, str]:
   """Fetch URL with L1 cache (ETag / content hash).
 
@@ -199,41 +212,44 @@ async def _fetch_with_cache(
   # Cache bodies run to hundreds of KB and every feed fetches concurrently, so
   # reading or writing them on the event loop serialises the whole refresh.
   cached = await asyncio.to_thread(load_feed_cache, url)
-  if cached and "body" not in cached:
-    cached = None
+  cached_body = cached.get("body") if cached else None
+  if not isinstance(cached_body, str):
+    cached, cached_body = None, None
   req_headers = dict(headers or {})
   conditional = False
   if cached:
-    if cached.get("etag"):
-      req_headers["If-None-Match"] = cached["etag"]
+    etag = cached.get("etag")
+    if isinstance(etag, str) and etag:
+      req_headers["If-None-Match"] = etag
       conditional = True
-    if cached.get("last_modified"):
-      req_headers["If-Modified-Since"] = cached["last_modified"]
+    last_modified = cached.get("last_modified")
+    if isinstance(last_modified, str) and last_modified:
+      req_headers["If-Modified-Since"] = last_modified
       conditional = True
 
   start = time.perf_counter()
   try:
     resp = await client.get(url, headers=req_headers)
   except (httpx.TransportError, OSError) as e:
-    if cached:
+    if cached_body is not None:
       log.warn(f"    Network error, using cached feed: {url} ({type(e).__name__}: {e or 'no details'})")
-      return cached["body"], True, "net-cache"
+      return cached_body, True, "net-cache"
     raise
   elapsed_ms = int((time.perf_counter() - start) * 1000)
 
   if resp.status_code == 304:
-    if cached:
+    if cached_body is not None:
       log.dim(f"    GET {url} → 304 Not Modified ({elapsed_ms}ms, cache hit)")
-      return cached["body"], True, "304"
+      return cached_body, True, "304"
     log.warn(f"    304 without cached data, skipping: {url}")
     return "", True, "304-empty"
 
   try:
     resp.raise_for_status()
   except httpx.HTTPStatusError as e:
-    if e.response.status_code in {403, 429, 500, 502, 503, 504} and cached:
+    if e.response.status_code in {403, 429, 500, 502, 503, 504} and cached_body is not None:
       log.warn(f"    HTTP {e.response.status_code}, using cached feed: {url}")
-      return cached["body"], True, "5xx-cache"
+      return cached_body, True, "5xx-cache"
     raise
   body = resp.text
   size_kb = len(body.encode("utf-8")) / 1024
@@ -316,16 +332,17 @@ def _extract_item_images(body: str) -> dict[str, str]:
 
 def _parse_rss(
   body: str,
-  feed_cfg: dict,
+  feed_cfg: dict[str, Any],
   clean_url_fn: Callable[[str], str] | None = None,
 ) -> list[Article]:
-  max_items = feed_cfg.get("max_items", 200)
-  source = feed_cfg["name"]
+  max_items: int = feed_cfg.get("max_items", 200)
+  source: str = feed_cfg["name"]
   parsed = _parse_feed(body)
   item_images = _extract_item_images(body)
 
-  articles = []
-  for entry in parsed.entries[:max_items]:
+  articles: list[Article] = []
+  entries: list[Any] = parsed.entries
+  for entry in entries[:max_items]:
     published = None
     for attr in ("published_parsed", "updated_parsed"):
       if hasattr(entry, attr) and getattr(entry, attr):
@@ -338,16 +355,17 @@ def _parse_rss(
     raw_html = ""
     snippet = ""
     # Prefer content:encoded (full article) over description (often truncated)
-    if hasattr(entry, "content") and entry.content:
-      raw_html = entry.content[0].get("value", "")
-    if not raw_html and hasattr(entry, "summary"):
-      raw_html = entry.summary
-    if not raw_html and hasattr(entry, "description"):
-      raw_html = entry.description
+    contents = entry.get("content")
+    if contents:
+      raw_html = _str_field(contents[0], "value")
+    if not raw_html:
+      raw_html = _str_field(entry, "summary")
+    if not raw_html:
+      raw_html = _str_field(entry, "description")
     if raw_html:
       snippet = _strip_html(raw_html)
 
-    raw_link = entry.get("link", "")
+    raw_link = _str_field(entry, "link")
     if not raw_link or not raw_link.startswith(("http://", "https://")):
       continue
     cleaned_link = clean_url_fn(raw_link) if clean_url_fn else raw_link
@@ -366,7 +384,7 @@ def _parse_rss(
     # thumbnail injection so relative `item_images` URLs are covered too.
     raw_html = absolutize_html_urls(raw_html, raw_link)
 
-    title = _normalize_title(entry.get("title", "") or "") or "(no title)"
+    title = _normalize_title(_str_field(entry, "title")) or "(no title)"
     articles.append(Article(
       title=title,
       url=cleaned_link,
@@ -379,9 +397,9 @@ def _parse_rss(
   return articles
 
 
-async def _fetch_rss(
+async def fetch_rss(
   client: SafeClient,
-  feed_cfg: dict,
+  feed_cfg: dict[str, Any],
   clean_url_fn: Callable[[str], str] | None = None,
 ) -> tuple[list[Article], bool, str]:
   """Fetch an RSS feed body with caching and parse it.
@@ -390,7 +408,7 @@ async def _fetch_rss(
   from _fetch_with_cache so schedulers downstream can distinguish a normal
   fetch from a degraded cache fallback.
   """
-  url = feed_cfg["url"]
+  url: str = feed_cfg["url"]
   body, was_cached, tag = await _fetch_with_cache(client, url)
   # Empty body happens on 304-without-cache (already logged in _fetch_with_cache).
   # Returning [] here lets callers treat it the same as "no new articles".
@@ -402,12 +420,12 @@ async def _fetch_rss(
 _CONCURRENCY = 5
 
 async def _delayed_fetch(
-  client,
-  feed,
+  client: SafeClient,
+  feed: dict[str, Any],
   delay: float,
   sem: asyncio.Semaphore,
   clean_url_fn: Callable[[str], str] | None = None,
-):
+) -> tuple[list[Article], bool, str, str | None]:
   """Fetch a single feed with concurrency limit and random delay.
 
   Returns (articles, was_cached, kind, source_tag) where
@@ -417,14 +435,14 @@ async def _delayed_fetch(
       feeds (e.g. "fresh", "unchanged", "304", "304-empty", "net-cache",
       "5xx-cache"); None for web feeds (they don't go through the cache layer).
   """
-  name = feed.get("name") or feed.get("url") or "?"
+  name: str = feed.get("name") or feed.get("url") or "?"
   async with sem:
     if delay > 0:
       await asyncio.sleep(delay)
-    rules_json = feed.get("extraction_rules")
+    rules_json: Any = feed.get("extraction_rules")
     is_web = rules_json is not None
     if is_web and rules_json != "{}":
-      rules = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
+      rules: dict[str, Any] = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
       if rules.get("item"):
         start = time.perf_counter()
         articles, was_cached = await fetch_web_page(
@@ -440,7 +458,7 @@ async def _delayed_fetch(
       log.warn(f"  [web/skip] {name}: no extraction rules configured")
       return [], False, "web-norules", None
     start = time.perf_counter()
-    articles, was_cached, source_tag = await _fetch_rss(
+    articles, was_cached, source_tag = await fetch_rss(
       client, feed, clean_url_fn=clean_url_fn,
     )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
@@ -467,13 +485,13 @@ def _filter_by_cutoff(feed_articles: list[Article], cutoff: datetime) -> list[Ar
 
 
 OnFeedDone = Callable[
-  [dict, list[Article], str | None, str, Exception | None],
+  [dict[str, Any], list[Article], str | None, str, Exception | None],
   Awaitable[None],
 ]
 
 
 async def fetch_all(
-  feeds_cfg: list[dict],
+  feeds_cfg: list[dict[str, Any]],
   max_age_hours: float = 48,
   max_items: int = 200,
   on_feed_done: OnFeedDone | None = None,
@@ -500,7 +518,9 @@ async def fetch_all(
     feed.setdefault("max_items", max_items)
   cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
 
-  async def _run_one(client: SafeClient, feed: dict):
+  async def _run_one(
+    client: SafeClient, feed: dict[str, Any],
+  ) -> tuple[list[Article], bool, str, Exception | None]:
     try:
       articles, was_cached, kind, source_tag = await _delayed_fetch(
         client, feed, random.uniform(0, 2), sem,
@@ -509,7 +529,8 @@ async def fetch_all(
       fetch_exc: Exception | None = None
     except Exception as e:
       log.error(f"  [error] {feed.get('name')}: {type(e).__name__}: {e}")
-      articles, was_cached, kind, source_tag = [], False, "rss", None
+      articles: list[Article] = []
+      was_cached, kind, source_tag = False, "rss", None
       fetch_exc = e
 
     fresh = _filter_by_cutoff(articles, cutoff) if articles else []
@@ -534,7 +555,7 @@ async def fetch_all(
 
 
 def _aggregate_feed_results(
-  feeds_cfg: list[dict],
+  feeds_cfg: list[dict[str, Any]],
   results: list[tuple[list[Article], bool, str, Exception | None]],
 ) -> list[Article]:
   """Merge per-feed fetch outcomes into a deduped article list and log a

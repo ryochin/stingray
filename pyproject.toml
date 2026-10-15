@@ -36,10 +36,5 @@ extraPaths = ["backend"]
 exclude = [
   "**/.venv",
   "**/__pycache__",
-  "backend/feeds.py",
-  "backend/summarizer.py",
-  "backend/log.py",
-  "backend/scraper.py",
-  "backend/selector_inference.py",
   "backend/tests",
 ]
