@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from typing import Any, Iterator, cast
+from typing import Any, Iterator, LiteralString, Sequence, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS feeds (
                         CHECK (health IN ('ok', 'degraded', 'failing')),
   extraction_rules      TEXT,
   fetch_interval_min    INTEGER NOT NULL DEFAULT 10
+                        CONSTRAINT feeds_fetch_interval_bucket
                         CHECK (fetch_interval_min IN (10, 15, 30, 60, 120, 240, 360)),
   next_fetch_at         TIMESTAMPTZ,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -88,9 +89,21 @@ CREATE INDEX IF NOT EXISTS idx_articles_date_order ON articles(
 CREATE INDEX IF NOT EXISTS idx_feeds_folder_id    ON feeds(folder_id);
 """
 
-# Idempotent migrations for existing databases that pre-date newer columns /
-# constraints. Each statement is safe to run on an already-migrated schema.
-_MIGRATIONS = """\
+_SCHEMA_VERSION_TABLE = """\
+CREATE TABLE IF NOT EXISTS schema_version (
+  id      BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
+  version INTEGER NOT NULL
+);
+"""
+
+# Versioned migrations: entry N (1-based) brings a database to version N.
+# Append new entries; never edit or reorder existing ones, since databases
+# record how many they have applied. Each entry runs inside the migration
+# transaction, so it must be transaction-safe (no CREATE INDEX CONCURRENTLY).
+_MIGRATIONS: list[LiteralString] = [
+  # 1: columns / constraints added after the first release. Idempotent, as it
+  # also runs on databases that already had them before versioning existed.
+  """\
 ALTER TABLE feeds
   ADD COLUMN IF NOT EXISTS fetch_interval_min INTEGER NOT NULL DEFAULT 10;
 ALTER TABLE feeds
@@ -109,7 +122,11 @@ DELETE FROM filters f USING filters g
   WHERE f.pattern = g.pattern AND f.target = g.target AND f.id > g.id;
 CREATE UNIQUE INDEX IF NOT EXISTS filters_pattern_target_uniq
   ON filters(pattern, target);
-"""
+""",
+  # 2: fresh installs got the fetch_interval_min CHECK twice (unnamed in
+  # _SCHEMA, plus feeds_fetch_interval_bucket from migration 1).
+  "ALTER TABLE feeds DROP CONSTRAINT IF EXISTS feeds_fetch_interval_min_check",
+]
 
 # Arbitrary but stable advisory lock key serializing `init_schema` runs.
 _SCHEMA_LOCK_KEY = 4_919_432
@@ -152,13 +169,55 @@ def connection() -> Iterator[Conn]:
 
 
 def init_schema() -> None:
-  """Create tables and indexes if they don't exist, and apply idempotent
-  migrations for databases that pre-date newer columns / constraints.
-  """
+  """Bring the database schema up to date (see migrate)."""
   with connection() as conn:
-    # web and every fetcher run call this. Concurrent runs would otherwise
-    # take index locks on `feeds` and then deadlock upgrading them for
-    # `ALTER TABLE feeds`; `IF NOT EXISTS` does not serialize anything.
-    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
+    migrate(conn)
+
+
+def _read_version(conn: Conn) -> int:
+  """Applied migration count; 0 without a schema_version table or row."""
+  row = conn.execute("SELECT to_regclass('schema_version') AS oid").fetchone()
+  if row is None or row["oid"] is None:
+    return 0
+  row = conn.execute("SELECT version FROM schema_version").fetchone()
+  return row["version"] if row else 0
+
+
+def _check_not_newer(current: int, latest: int) -> None:
+  if current > latest:
+    raise RuntimeError(
+      f"Database schema is at version {current}, but this code supports {latest}; "
+      "upgrade the application"
+    )
+
+
+def migrate(conn: Conn, migrations: Sequence[LiteralString] = _MIGRATIONS) -> None:
+  """Apply pending migrations in the caller's transaction.
+
+  web and every fetcher run call this, so an up-to-date database costs two
+  reads and no advisory lock or DDL. Otherwise an advisory lock serializes concurrent
+  runs, which would deadlock upgrading their locks on `feeds`; the version is
+  re-read under the lock (READ COMMITTED) in case another run just finished.
+  Version 0 means a fresh or pre-versioning database: _SCHEMA is idempotent,
+  so it is created or completed before migration 1.
+  """
+  latest = len(migrations)
+  current = _read_version(conn)
+  _check_not_newer(current, latest)
+  if current == latest:
+    return
+  conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
+  current = _read_version(conn)
+  _check_not_newer(current, latest)
+  if current == latest:
+    return
+  if current == 0:
     conn.execute(_SCHEMA)
-    conn.execute(_MIGRATIONS)
+    conn.execute(_SCHEMA_VERSION_TABLE)
+  for sql in migrations[current:]:
+    conn.execute(sql)
+  conn.execute(
+    "INSERT INTO schema_version (version) VALUES (%s) "
+    "ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version",
+    (latest,),
+  )
