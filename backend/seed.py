@@ -16,11 +16,12 @@ def enrich_from_legacy_cache(
 ) -> list[Article]:
   """Restore title_translated/summary from legacy articles.json for matching URLs.
 
-  After enrichment, renames the file to .migrated so it's only processed once.
+  Fills `articles` in place and returns the ones it changed; the caller must
+  persist them, since the file is renamed to .migrated so it is only read once.
   """
   cache_path = cache_dir / "articles.json"
   if not cache_path.exists():
-    return articles
+    return []
 
   log.step("Migrating legacy article cache...")
   try:
@@ -28,11 +29,11 @@ def enrich_from_legacy_cache(
     parsed: object = json.loads(raw_text)
   except (json.JSONDecodeError, OSError) as e:
     log.warn(f"  Could not read legacy cache: {e}")
-    return articles
+    return []
 
   if not isinstance(parsed, dict):
     log.warn("  Legacy cache is not a dict, skipping.")
-    return articles
+    return []
 
   raw = cast(dict[str, object], parsed)
   legacy: dict[str, dict[str, str]] = {}
@@ -43,19 +44,23 @@ def enrich_from_legacy_cache(
         str(k): str(v) for k, v in entry.items()
       }
 
-  enriched = 0
+  restored: list[Article] = []
   for article in articles:
     entry = legacy.get(article.url)
     if entry is None:
       continue
+    changed = False
     if not article.title_translated and entry.get("title_ja"):
       article.title_translated = entry["title_ja"]
-      enriched += 1
+      changed = True
     if not article.summary and entry.get("summary"):
       article.summary = entry["summary"]
+      changed = True
+    if changed:
+      restored.append(article)
 
-  if enriched:
-    log.info(f"  Enriched {enriched} articles from legacy cache.")
+  if restored:
+    log.info(f"  Enriched {len(restored)} articles from legacy cache.")
 
   # Rename to .migrated (non-destructive)
   migrated_path = cache_path.with_suffix(".json.migrated")
@@ -65,4 +70,4 @@ def enrich_from_legacy_cache(
   except OSError as e:
     log.warn(f"  Could not rename legacy cache: {e}")
 
-  return articles
+  return restored

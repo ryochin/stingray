@@ -183,3 +183,26 @@ class TestOrderingAndLimit:
     for i in range(5):
       _make_article(feed_id=fid, url=f"u{i}")
     assert len(repo.list_pending_summaries(limit=2)) == 2
+
+  def test_no_limit_returns_every_row(self):
+    fid = _make_feed(translate=True, summarize=True)
+    for i in range(7):
+      _make_article(feed_id=fid, url=f"u{i}")
+    assert len(repo.list_pending_summaries(limit=None)) == 7
+
+
+class TestScope:
+  def test_urls_narrow_the_search(self):
+    fid = _make_feed(translate=True, summarize=True)
+    for url in ("u1", "u2", "u3"):
+      _make_article(feed_id=fid, url=url)
+    assert _urls(repo.list_pending_summaries(urls=["u1", "u3", "missing"])) == {"u1", "u3"}
+
+  def test_disabled_feed_is_never_pending(self):
+    """Its rows used to fill the batch while the summarizer, which only looks
+    at enabled feeds, could never clear them."""
+    fid = _make_feed(translate=True, summarize=True)
+    with db.connection() as conn:
+      conn.execute("UPDATE feeds SET enabled = FALSE WHERE id = %s", (fid,))
+    _make_article(feed_id=fid, url="u1")
+    assert repo.list_pending_summaries() == []

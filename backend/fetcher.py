@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,12 +15,13 @@ import repo
 from feeds import extract_site_url, fetch_all
 from models import Article
 from safe_http import FetchSettings, SafeClient
-from schemas import AppConfig, FeedRow
+from schemas import AppConfig, ArticleRow, FeedRow
 from seed import enrich_from_legacy_cache
 from summarizer import summarize_all
 from url_cleaner import clean_url
 
 SHORT_SNIPPET_CHARS = 300
+SUMMARIZE_LOCK_POLL_SECONDS = 5.0
 
 
 @dataclass
@@ -203,37 +206,59 @@ async def _run_summarize(
   return failures
 
 
+@asynccontextmanager
+async def _wait_for_summarize_lock() -> AsyncIterator[None]:
+  """Hold the cross-process LLM lock, polling until it is free.
+
+  Polls with try-lock instead of a blocking pg_advisory_lock so the web event
+  loop never stalls and a cancellation lands at the next sleep.
+  """
+  waited = False
+  while True:
+    with repo.advisory_lock(repo.SUMMARIZE_LOCK_KEY) as got:
+      if got:
+        yield
+        return
+    if not waited:
+      log.info("  Waiting for the LLM lock held by another process...")
+      waited = True
+    await asyncio.sleep(SUMMARIZE_LOCK_POLL_SECONDS)
+
+
 async def _run_llm_pass(
   articles: list[Article],
   feeds: list[FeedRow],
-  feed_id_map: dict[str, int],
   config: AppConfig,
 ) -> int:
-  """Summarize/translate the subset of `articles` that still needs LLM work
-  and re-upsert them so the new fields persist. Returns failure count.
+  """Summarize/translate the subset of `articles` that still needs LLM work.
+  Returns failure count.
+
+  `articles` only narrows the candidates. Under the LLM lock the rows are
+  re-read from the DB, which drops ones the background summarizer finished
+  while we waited and picks up the latest stored body (another feed carrying
+  the same URL may have rewritten it after this copy was taken).
   """
   summarize_map = {f.name: f.summarize for f in feeds}
   translate_map = {f.name: f.translate for f in feeds}
   # _needs_llm internalizes the feed-level gate: a feed with neither translate
   # nor summarize yields False for every article, so no separate gate is needed.
-  need_llm = [
-    a for a in articles
+  candidate_urls = [
+    a.url for a in articles
     if _needs_llm(
       a,
       translate=translate_map.get(a.source, False),
       summarize=summarize_map.get(a.source, False),
     )
   ]
-  if not need_llm:
-    log.success("  All articles already processed.")
-    return 0
-  translate_set = {name for name, flag in translate_map.items() if flag}
-  summarize_set = {name for name, flag in summarize_map.items() if flag}
-  failures = await _run_summarize(need_llm, translate_set, summarize_set, config)
-  # Re-upsert to persist LLM-filled fields. Rows already exist from the
-  # per-feed pass; COALESCE in _UPSERT_ARTICLE only fills newly non-null ones.
-  await asyncio.to_thread(repo.upsert_articles, need_llm, feed_id_map)
-  return failures
+  if candidate_urls:
+    async with _wait_for_summarize_lock():
+      pending = await asyncio.to_thread(
+        repo.list_pending_summaries, limit=None, urls=candidate_urls,
+      )
+      if pending:
+        return await _summarize_rows(pending, config, log_prefix="Processing")
+  log.success("  All articles already processed.")
+  return 0
 
 
 async def _backfill_site_urls(
@@ -329,17 +354,18 @@ async def refresh_all(
         await asyncio.to_thread(repo.finish_refresh_job, job_id, "completed", 0, None)
         return result
 
-      articles = await asyncio.to_thread(
+      restored = await asyncio.to_thread(
         enrich_from_legacy_cache, articles, Path(config.cache_dir),
       )
+      if restored:
+        # The LLM pass re-reads rows from the DB, so store these first.
+        await asyncio.to_thread(repo.upsert_articles, restored, feed_id_map)
 
       if no_summary or not config.ollama.enabled:
         if not no_summary:
           log.info("  Skipping LLM processing: ollama.enabled=false in config.")
       else:
-        result.summarize_failures = await _run_llm_pass(
-          articles, feeds, feed_id_map, config,
-        )
+        result.summarize_failures = await _run_llm_pass(articles, feeds, config)
 
       await _backfill_site_urls(feeds, FetchSettings.from_config(config))
 
@@ -356,16 +382,30 @@ async def refresh_all(
 
 
 async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
-  """Process articles that are pending (feed.summarize=True but not yet processed).
+  """Process a batch of pending articles (feed.summarize/translate on, LLM
+  output missing). Skips the round while another process holds the LLM lock.
 
   Returns the number of articles processed.
   """
   if not config.ollama.enabled:
     return 0
-  pending = await asyncio.to_thread(repo.list_pending_summaries, limit=batch_size)
-  if not pending:
-    return 0
+  with repo.advisory_lock(repo.SUMMARIZE_LOCK_KEY) as got:
+    if not got:
+      log.info("  Background summarizer skipped (LLM work running elsewhere).")
+      return 0
+    pending = await asyncio.to_thread(repo.list_pending_summaries, limit=batch_size)
+    if not pending:
+      return 0
+    await _summarize_rows(pending, config, log_prefix="Background processing")
+    return len(pending)
 
+
+async def _summarize_rows(
+  rows: list[ArticleRow], config: AppConfig, *, log_prefix: str,
+) -> int:
+  """Run the LLM over pending DB rows and store its output. Callers must hold
+  the LLM lock through the store. Returns the number of LLM failures.
+  """
   feeds = await asyncio.to_thread(repo.list_feeds, enabled=True)
   feed_translate = {f.id: f.translate for f in feeds}
   feed_summarize = {f.id: f.summarize for f in feeds}
@@ -382,14 +422,14 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
       content_html=row.content_html or "",
       content_translated=row.content_translated or "",
     )
-    for row in pending
+    for row in rows
   ]
   translate_set: set[str] = {
-    row.source for row in pending
+    row.source for row in rows
     if row.feed_id and feed_translate.get(row.feed_id, False)
   }
   summarize_set: set[str] = {
-    row.source for row in pending
+    row.source for row in rows
     if row.feed_id and feed_summarize.get(row.feed_id, False)
   }
   need_llm = [
@@ -398,14 +438,13 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
       a, translate=a.source in translate_set, summarize=a.source in summarize_set
     )
   ]
+  if not need_llm:
+    return 0
 
-  if need_llm:
-    await _run_summarize(
-      need_llm, translate_set, summarize_set, config,
-      log_prefix="Background processing",
-    )
-
-  for article in articles:
+  failures = await _run_summarize(
+    need_llm, translate_set, summarize_set, config, log_prefix=log_prefix,
+  )
+  for article in need_llm:
     if article.title_translated or article.summary or article.content_translated:
       await asyncio.to_thread(
         repo.update_article_summary,
@@ -414,5 +453,4 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
         article.summary or None,
         article.content_translated or None,
       )
-
-  return len(articles)
+  return failures

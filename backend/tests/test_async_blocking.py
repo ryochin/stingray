@@ -37,7 +37,7 @@ _ALLOWED = {
   # Touches no database.
   "repo.filter_key",
   # A context manager holding a session-scoped Postgres advisory lock, taken
-  # once per refresh (not per request). It stays synchronous because splitting
+  # once per refresh or background summarizer round (not per request). It stays synchronous because splitting
   # acquire and release into two to_thread calls opens a window where a
   # cancellation between them leaks both the connection and the lock. See
   # plans/done/plan-2026-09-19-async-blocking-io.md for the full rationale.

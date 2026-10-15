@@ -36,6 +36,9 @@ BUCKETS = (10, 30, 60, 120, 240, 360)
 JITTER_RATIO = 0.10
 CRON_TICK_MIN = 10
 REFRESH_LOCK_KEY = 0xFEEDCAFE  # bigint key for pg_try_advisory_lock
+# Serializes LLM work across processes: the fetcher's refresh pass and the
+# web's background summarizer would otherwise pick up the same pending rows.
+SUMMARIZE_LOCK_KEY = 0xFEEDC0DE
 
 Outcome = Literal["fresh", "miss", "degraded", "failure"]
 
@@ -921,8 +924,12 @@ def _trim_unread_first(articles: list[ArticleRow], limit: int) -> list[ArticleRo
   return [a for a in articles if a.url in keep]
 
 
-def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:
-  """Find articles needing LLM processing.
+def list_pending_summaries(
+  limit: int | None = 5, urls: list[str] | None = None,
+) -> list[ArticleRow]:
+  """Find articles of enabled feeds needing LLM processing, oldest first.
+
+  `limit=None` returns all of them; `urls` narrows the search to those rows.
 
   Condition must match `fetcher._needs_llm`. The feed-level gate is
   `translate OR summarize`; the article-level done-condition depends on
@@ -936,22 +943,24 @@ def list_pending_summaries(limit: int = 5) -> list[ArticleRow]:
     rows = conn.execute(
       """SELECT a.* FROM articles a
          JOIN feeds f ON a.feed_id = f.id
-         WHERE (
-           (f.translate AND (
-             a.title_translated IS NULL
-             OR (LENGTH(COALESCE(a.content_snippet, '')) BETWEEN 1 AND 299
-                 AND a.content_translated IS NULL)
-             OR (LENGTH(COALESCE(a.content_snippet, '')) >= 300
-                 AND f.summarize AND a.summary IS NULL)
-           ))
-           OR
-           (NOT f.translate AND f.summarize
-             AND LENGTH(COALESCE(a.content_snippet, '')) >= 300
-             AND a.summary IS NULL)
-         )
+         WHERE f.enabled
+           AND (%(urls)s::text[] IS NULL OR a.url = ANY(%(urls)s))
+           AND (
+             (f.translate AND (
+               a.title_translated IS NULL
+               OR (LENGTH(COALESCE(a.content_snippet, '')) BETWEEN 1 AND 299
+                   AND a.content_translated IS NULL)
+               OR (LENGTH(COALESCE(a.content_snippet, '')) >= 300
+                   AND f.summarize AND a.summary IS NULL)
+             ))
+             OR
+             (NOT f.translate AND f.summarize
+               AND LENGTH(COALESCE(a.content_snippet, '')) >= 300
+               AND a.summary IS NULL)
+           )
          ORDER BY a.published ASC
-         LIMIT %s""",
-      (limit,),
+         LIMIT %(limit)s""",
+      {"urls": urls, "limit": limit},
     ).fetchall()
     return [ArticleRow.model_validate(r) for r in rows]
 
