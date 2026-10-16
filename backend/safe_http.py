@@ -21,9 +21,9 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Awaitable, Callable
 
 import httpx
 

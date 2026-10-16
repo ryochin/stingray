@@ -11,7 +11,7 @@ by the `clean_db` fixture.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,14 +38,14 @@ def _seed_two_articles() -> None:
         title="old",
         url="u-old",
         source="F",
-        published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc),
+        published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC),
         content_snippet="body",
       ),
       Article(
         title="new",
         url="u-new",
         source="F",
-        published=datetime(2026, 5, 21, 8, 0, 0, tzinfo=timezone.utc),
+        published=datetime(2026, 5, 21, 8, 0, 0, tzinfo=UTC),
         content_snippet="body",
       ),
     ],

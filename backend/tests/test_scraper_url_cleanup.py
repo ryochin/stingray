@@ -10,7 +10,6 @@ from __future__ import annotations
 from scraper import parse_web_page
 from url_cleaner import clean_url
 
-
 HTML_WITH_TRACKER = """
 <html><body>
   <div class="item">

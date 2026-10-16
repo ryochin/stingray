@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -49,11 +49,11 @@ def _check_recent_job(max_age_minutes: int) -> None:
     return  # Startup grace: no job has run yet.
   if job.finished_at is None:
     # A job is currently running; accept as healthy unless it has been running absurdly long.
-    age = datetime.now(tz=timezone.utc) - job.started_at
+    age = datetime.now(tz=UTC) - job.started_at
     if age > timedelta(minutes=max_age_minutes * 2):
       raise RuntimeError(f"Job {job.id} has been running for {age}.")
     return
-  age = datetime.now(tz=timezone.utc) - job.finished_at
+  age = datetime.now(tz=UTC) - job.finished_at
   if age > timedelta(minutes=max_age_minutes):
     raise RuntimeError(
       f"Last job finished {age} ago (> {max_age_minutes}m).",

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from feeds import extract_feed_candidates, extract_site_url, probe_feed_body
 
-
 # Titles are deliberately ASCII: <language> alone must drive the detection, so
 # kana here would mask a broken language tag by falling back to inference.
 RSS_JA = """<?xml version="1.0" encoding="UTF-8"?>

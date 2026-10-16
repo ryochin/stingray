@@ -157,7 +157,7 @@ class TestInferAndValidate:
 
   def test_single_match_retries_then_accepts(self, monkeypatch: pytest.MonkeyPatch):
     # 1 match is below min_articles (2), so it retries and accepts the 2-match try.
-    fake, calls = _fake_ollama([ONE_MATCH_RULES, GOOD_RULES])
+    fake, _ = _fake_ollama([ONE_MATCH_RULES, GOOD_RULES])
     monkeypatch.setattr(selector_inference, "call_ollama", fake)
     result = _run_infer()
     assert result.status == "ok"

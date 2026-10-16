@@ -11,7 +11,7 @@ tasks or DB probe run; the DB is provided by the `clean_db` fixture.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -46,7 +46,7 @@ def _seed_two_feeds_one_foldered() -> tuple[int, dict[str, int]]:
           title=source,
           url=f"u-{source}",
           source=source,
-          published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc),
+          published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC),
           content_snippet="body",
         )
       ],

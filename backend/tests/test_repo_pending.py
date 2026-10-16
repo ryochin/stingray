@@ -7,12 +7,13 @@ starving truly-pending items.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 import db
 import repo
+from schemas import ArticleRow
 
 
 def _make_feed(*, translate: bool, summarize: bool, name: str = "F") -> int:
@@ -45,14 +46,14 @@ def _make_article(
          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
       (
         url, feed_id, title, title_translated, "test",
-        published or datetime.now(tz=timezone.utc),
+        published or datetime.now(tz=UTC),
         content_snippet, summary, content_translated,
       ),
     )
 
 
-def _urls(rows: list[object]) -> set[str]:
-  return {getattr(r, "url") for r in rows}
+def _urls(rows: list[ArticleRow]) -> set[str]:
+  return {r.url for r in rows}
 
 
 pytestmark = pytest.mark.usefixtures("clean_db")
@@ -171,7 +172,7 @@ class TestNonTranslatingFeed:
 class TestOrderingAndLimit:
   def test_orders_by_published_ascending(self):
     fid = _make_feed(translate=True, summarize=True)
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     _make_article(feed_id=fid, url="new", published=now)
     _make_article(feed_id=fid, url="old", published=now - timedelta(days=2))
     _make_article(feed_id=fid, url="mid", published=now - timedelta(days=1))

@@ -7,7 +7,7 @@ rather than silently picking one value.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -66,7 +66,7 @@ def test_date_attr_missing_or_empty_falls_back_to_text(attr: str) -> None:
 
 def test_date_without_attr_uses_text() -> None:
   [article] = _parse('<a class="t" href="/a">T</a><time>2026/05/06</time>', date="time")
-  assert article.published == datetime(2026, 5, 6, tzinfo=timezone.utc)
+  assert article.published == datetime(2026, 5, 6, tzinfo=UTC)
 
 
 # --- thumbnail ---

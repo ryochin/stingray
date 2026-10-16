@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 import db
 import repo
 from schemas import FeedRow
-
 
 pytestmark = pytest.mark.usefixtures("clean_db")
 
@@ -29,7 +28,7 @@ def _insert_article(
     conn.execute(
       """INSERT INTO articles (url, feed_id, title, source, published, read_at)
          VALUES (%s, %s, 'T', 'F', %s, %s)""",
-      (url, feed_id, published, datetime.now(tz=timezone.utc) if read else None),
+      (url, feed_id, published, datetime.now(tz=UTC) if read else None),
     )
 
 
@@ -51,7 +50,7 @@ class TestFeedStats:
 
   def test_latest_and_oldest_published(self):
     fid = _feed()
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     _insert_article(fid, url="old", published=now - timedelta(days=5))
     _insert_article(fid, url="new", published=now - timedelta(hours=1))
     _insert_article(fid, url="mid", published=now - timedelta(days=2))

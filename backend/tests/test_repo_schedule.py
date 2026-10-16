@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -87,19 +87,19 @@ class TestStepBucket:
 
 class TestScheduleNextAt:
   def test_lands_on_tick_boundary(self):
-    now = datetime(2026, 4, 22, 10, 3, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 4, 22, 10, 3, 0, tzinfo=UTC)
     for _ in range(20):
       next_at = repo.schedule_next_at(now, 10)
       # Seconds since epoch must be a multiple of 10 minutes.
       assert int(next_at.timestamp()) % (10 * 60) == 0
 
   def test_always_in_the_future(self):
-    now = datetime(2026, 4, 22, 10, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 4, 22, 10, 0, 0, tzinfo=UTC)
     for _ in range(20):
       assert repo.schedule_next_at(now, 10) > now
 
   def test_roughly_matches_interval(self):
-    now = datetime(2026, 4, 22, 10, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 4, 22, 10, 0, 0, tzinfo=UTC)
     for _ in range(20):
       delta = repo.schedule_next_at(now, 60) - now
       # 60 min ± 10% jitter, then ceil to next 10-min tick → range [60, 70].
@@ -167,7 +167,7 @@ class TestRecordFeedAttempt:
     assert row["last_error"] == "boom"
 
   def test_failure_never_moves_schedule_earlier(self, clean_db):
-    far_future = datetime.now(tz=timezone.utc) + timedelta(hours=12)
+    far_future = datetime.now(tz=UTC) + timedelta(hours=12)
     fid = _make_feed(
       fetch_interval_min=360, next_fetch_at=far_future, consecutive_failures=0,
     )
@@ -257,8 +257,8 @@ class TestRecordFeedAttemptHealth:
 
 class TestListDueFeeds:
   def test_force_false_selects_null_and_past(self, clean_db):
-    past = datetime.now(tz=timezone.utc) - timedelta(minutes=5)
-    future = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    past = datetime.now(tz=UTC) - timedelta(minutes=5)
+    future = datetime.now(tz=UTC) + timedelta(hours=1)
     null_id = _make_feed(name="A", next_fetch_at=None)
     past_id = _make_feed(name="B", next_fetch_at=past)
     _make_feed(name="C", next_fetch_at=future)
@@ -266,7 +266,7 @@ class TestListDueFeeds:
     assert due_ids == {null_id, past_id}
 
   def test_force_true_returns_all_enabled(self, clean_db):
-    future = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    future = datetime.now(tz=UTC) + timedelta(hours=1)
     a_id = _make_feed(name="A", next_fetch_at=future)
     b_id = _make_feed(name="B", next_fetch_at=None)
     _make_feed(name="C", enabled=False)
@@ -283,7 +283,7 @@ class TestListDueFeeds:
 
 class TestToggleFeed:
   def test_disable_clears_next_fetch_at(self, clean_db):
-    future = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    future = datetime.now(tz=UTC) + timedelta(hours=1)
     fid = _make_feed(enabled=True, next_fetch_at=future)
     repo.toggle_feed(fid)
     row = _read_feed(fid)
@@ -291,7 +291,7 @@ class TestToggleFeed:
     assert row["next_fetch_at"] is None
 
   def test_enable_leaves_next_fetch_at(self, clean_db):
-    future = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    future = datetime.now(tz=UTC) + timedelta(hours=1)
     fid = _make_feed(enabled=False, next_fetch_at=future)
     repo.toggle_feed(fid)
     row = _read_feed(fid)
@@ -305,12 +305,11 @@ class TestToggleFeed:
 
 class TestBucketCheck:
   def test_rejects_non_bucket_value(self, clean_db):
-    with pytest.raises(psycopg.errors.CheckViolation):
-      with db.connection() as conn:
-        conn.execute(
-          "INSERT INTO feeds (name, url, fetch_interval_min) "
-          "VALUES ('bad', 'https://bad.example.com/', 45)",
-        )
+    with pytest.raises(psycopg.errors.CheckViolation), db.connection() as conn:
+      conn.execute(
+        "INSERT INTO feeds (name, url, fetch_interval_min) "
+        "VALUES ('bad', 'https://bad.example.com/', 45)",
+      )
 
 
 # -- advisory_lock --
@@ -340,25 +339,28 @@ class TestAdvisoryLock:
 
   def test_exception_in_block_releases_lock(self, clean_db):
     boom = RuntimeError("boom")
-    with pytest.raises(RuntimeError) as excinfo:
-      with repo.advisory_lock(_TEST_LOCK_KEY) as got:
-        assert got is True
-        raise boom
+    with pytest.raises(RuntimeError) as excinfo, repo.advisory_lock(_TEST_LOCK_KEY) as got:
+      assert got is True
+      raise boom
     assert excinfo.value is boom
     assert _lock_holder_states(_TEST_LOCK_KEY) == []
 
   def test_failed_commit_releases_lock(self, clean_db, monkeypatch):
     _make_connection_fail(monkeypatch, "commit")
-    with pytest.raises(psycopg.OperationalError, match="commit failed"):
-      with repo.advisory_lock(_TEST_LOCK_KEY):
-        pytest.fail("block must not run when the commit fails")
+    with (
+      pytest.raises(psycopg.OperationalError, match="commit failed"),
+      repo.advisory_lock(_TEST_LOCK_KEY),
+    ):
+      pytest.fail("block must not run when the commit fails")
     assert _lock_holder_states(_TEST_LOCK_KEY) == []
 
   def test_failed_unlock_closes_session(self, clean_db, monkeypatch):
     used = _make_connection_fail(monkeypatch, "unlock")
-    with pytest.raises(psycopg.OperationalError, match="unlock failed"):
-      with repo.advisory_lock(_TEST_LOCK_KEY) as got:
-        assert got is True
+    with (
+      pytest.raises(psycopg.OperationalError, match="unlock failed"),
+      repo.advisory_lock(_TEST_LOCK_KEY) as got,
+    ):
+      assert got is True
     assert used[0].closed
     assert _lock_holder_states(_TEST_LOCK_KEY) == []
 

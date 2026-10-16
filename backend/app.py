@@ -9,11 +9,12 @@ import re
 import threading
 import time
 import xml.etree.ElementTree as _ET
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import AsyncIterator, Coroutine, Literal, cast, get_args
+from typing import Literal, cast, get_args
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
@@ -28,11 +29,8 @@ import log
 import repo
 from feeds import extract_feed_candidates, fetch_rss, probe_feed_body, read_file_url
 from fetcher import STALE_CACHE_DIAGNOSTICS, refresh_all, summarize_pending
-from url_cleaner import clean_url
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
 from safe_http import FetchSettings, SafeClient
-from scraper import fetch_web_page, validate_extraction_rules
-from selector_inference import infer_and_validate
 from schemas import (
   AppConfig,
   ArticleRow,
@@ -43,6 +41,9 @@ from schemas import (
   FolderRow,
   StatusResponse,
 )
+from scraper import fetch_web_page, validate_extraction_rules
+from selector_inference import infer_and_validate
+from url_cleaner import clean_url
 
 # -- Globals for background refresh --
 _refresh_lock = asyncio.Lock()
@@ -360,9 +361,7 @@ def _is_html(content_type: str, body: str) -> bool:
   if any(prefix.startswith(tag) for tag in ("<rss", "<feed", "<rdf:rdf")):
     return False
   # Contains <html> tag anywhere in the prefix
-  if "<html" in prefix:
-    return True
-  return False
+  return "<html" in prefix
 
 
 async def _probe_feed(
@@ -522,7 +521,7 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
   try:
     created = await asyncio.to_thread(repo.add_feed, feed)
   except repo.DuplicateFeedError as exc:
-    raise HTTPException(409, str(exc))
+    raise HTTPException(409, str(exc)) from exc
   log.info(f"  Feed created: id={created.id}, name={created.name}")
   # Web-scrape feeds are created with empty rules ("{}"); fetching now would
   # just fail (no "item" selector) and record an error. Defer the first fetch
@@ -619,7 +618,7 @@ async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
   try:
     rules = validate_extraction_rules(rules_raw)
   except ValueError as e:
-    raise HTTPException(422, str(e))
+    raise HTTPException(422, str(e)) from e
   await asyncio.to_thread(repo.update_feed_extraction_rules, feed_id, json.dumps(rules))
   return await asyncio.to_thread(_get_feed_or_404, feed_id)
 
@@ -668,26 +667,25 @@ async def infer_feed_rules(feed_id: int, request: Request) -> InferRulesResponse
       html = resp.content.decode(resp.encoding or "utf-8", errors="ignore")
       page_url = str(resp.url)
   except httpx.HTTPError as e:
-    raise HTTPException(502, f"Failed to fetch page: {e}")
+    raise HTTPException(502, f"Failed to fetch page: {e}") from e
 
   clean_url_fn = clean_url if config.url_cleanup.enabled else None
-  async with _infer_semaphore:
-    async with httpx.AsyncClient(
-      base_url=ollama_url, timeout=config.ollama.timeout,
-    ) as ollama_client:
-      result = await infer_and_validate(
-        ollama_client,
-        config.ollama.model,
-        html,
-        page_url=page_url,
-        source=feed.name,
-        max_html_bytes=config.selector_inference.max_html_bytes,
-        max_attempts=config.selector_inference.max_attempts,
-        max_items=config.max_items_per_feed,
-        min_articles=config.selector_inference.min_articles,
-        num_ctx=config.selector_inference.num_ctx,
-        clean_url_fn=clean_url_fn,
-      )
+  async with _infer_semaphore, httpx.AsyncClient(
+    base_url=ollama_url, timeout=config.ollama.timeout,
+  ) as ollama_client:
+    result = await infer_and_validate(
+      ollama_client,
+      config.ollama.model,
+      html,
+      page_url=page_url,
+      source=feed.name,
+      max_html_bytes=config.selector_inference.max_html_bytes,
+      max_attempts=config.selector_inference.max_attempts,
+      max_items=config.max_items_per_feed,
+      min_articles=config.selector_inference.min_articles,
+      num_ctx=config.selector_inference.num_ctx,
+      clean_url_fn=clean_url_fn,
+    )
 
   return InferRulesResponse(
     rules=result.rules,
@@ -761,7 +759,7 @@ def create_filter(body: FilterCreate) -> FilterRow:
   try:
     return repo.add_filter(pattern, body.target)
   except repo.DuplicateFilterError as exc:
-    raise HTTPException(409, str(exc))
+    raise HTTPException(409, str(exc)) from exc
 
 
 @app.delete("/api/filters/{filter_id}", status_code=204)
@@ -813,7 +811,7 @@ async def import_filters(file: UploadFile) -> dict[str, int]:
     content = (await file.read()).decode("utf-8")
     data: object = json.loads(content)
   except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-    raise HTTPException(400, f"Invalid JSON: {exc}")
+    raise HTTPException(400, f"Invalid JSON: {exc}") from exc
   if not isinstance(data, list):
     raise HTTPException(400, "Expected a JSON array")
   # Malformed entries are dropped here rather than counted: they were never
@@ -972,9 +970,9 @@ async def opml_import(file: UploadFile, request: Request) -> dict[str, int]:
     content = (await file.read()).decode("utf-8")
     imported_folders, uncategorized = parse_opml(content, native_lang=config.native_lang)
   except UnicodeDecodeError as e:
-    raise HTTPException(400, f"Invalid file encoding: {e}")
+    raise HTTPException(400, f"Invalid file encoding: {e}") from e
   except _ET.ParseError as e:
-    raise HTTPException(400, f"Invalid OPML XML: {e}")
+    raise HTTPException(400, f"Invalid OPML XML: {e}") from e
 
   folders_created, feeds_created, feeds_skipped = await asyncio.shield(
     _persist_opml_import(imported_folders, uncategorized)
@@ -1062,7 +1060,7 @@ def health() -> dict[str, str]:
     with db.connection() as conn:
       conn.execute("SELECT 1").fetchone()
   except Exception as e:
-    raise HTTPException(status_code=503, detail=f"db: {type(e).__name__}: {e}")
+    raise HTTPException(status_code=503, detail=f"db: {type(e).__name__}: {e}") from e
   return {"status": "ok"}
 
 

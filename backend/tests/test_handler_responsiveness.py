@@ -26,8 +26,9 @@ import asyncio
 import contextlib
 import threading
 import time
+from collections.abc import Iterator
 from types import SimpleNamespace
-from typing import Any, Iterator
+from typing import Any
 
 import httpx
 import pytest

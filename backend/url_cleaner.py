@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-
 # Any query parameter whose lowercased name starts with one of these is
 # dropped. Kept narrow on purpose — only families that are unambiguously
 # tracking-only and prefix-shaped.

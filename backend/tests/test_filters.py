@@ -7,7 +7,7 @@ Filter patterns support:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -119,7 +119,7 @@ def _article(
     title=title,
     title_translated=title_translated,
     source="test",
-    published=datetime.now(tz=timezone.utc),
+    published=datetime.now(tz=UTC),
     content_snippet=content_snippet,
     summary=summary,
   )
@@ -448,7 +448,7 @@ class TestContainsFilterSql:
       ("istanbul", "İ"),
       ("ΣΟΦΟΣ", "σοφος"),
       ("Straße", "STRASSE"),
-      ("ＡＢＣ", "ａｂｃ"),
+      ("ＡＢＣ", "ａｂｃ"),  # noqa: RUF001
     ],
   )
   def test_case_folding_matches_ilike(self, title, pattern):

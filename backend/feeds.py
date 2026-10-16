@@ -7,8 +7,10 @@ import random
 import re
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin
 
 import defusedxml
@@ -16,7 +18,6 @@ import defusedxml.ElementTree as SafeET
 import feedparser  # pyright: ignore[reportMissingTypeStubs]
 import httpx
 from bs4 import BeautifulSoup
-from pathlib import Path
 
 import lang
 import log
@@ -25,7 +26,6 @@ from html_urls import absolutize_html_urls
 from models import Article
 from safe_http import FetchSettings, SafeClient
 from scraper import attr_str, fetch_web_page
-
 
 # Link types on <link rel="alternate"> that identify a feed. Order matters:
 # preferred types come first so a page advertising both RSS and Atom surfaces
@@ -347,7 +347,7 @@ def _parse_rss(
     for attr in ("published_parsed", "updated_parsed"):
       if hasattr(entry, attr) and getattr(entry, attr):
         try:
-          published = datetime(*getattr(entry, attr)[:6], tzinfo=timezone.utc)
+          published = datetime(*getattr(entry, attr)[:6], tzinfo=UTC)
           break
         except (ValueError, TypeError):
           pass
@@ -477,7 +477,7 @@ def _filter_by_cutoff(feed_articles: list[Article], cutoff: datetime) -> list[Ar
   for a in feed_articles:
     pub = a.published
     if pub is not None and pub.tzinfo is None:
-      pub = pub.replace(tzinfo=timezone.utc)
+      pub = pub.replace(tzinfo=UTC)
       a.published = pub
     if pub is None or pub >= cutoff:
       fresh.append(a)
@@ -516,7 +516,7 @@ async def fetch_all(
   sem = asyncio.Semaphore(_CONCURRENCY)
   for feed in feeds_cfg:
     feed.setdefault("max_items", max_items)
-  cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
+  cutoff = datetime.now(tz=UTC) - timedelta(hours=max_age_hours)
 
   async def _run_one(
     client: SafeClient, feed: dict[str, Any],
@@ -568,7 +568,7 @@ def _aggregate_feed_results(
   error_feeds = 0
   skipped_web_feeds = 0
   total_items = 0
-  for _feed, (feed_articles, was_cached, kind, fetch_exc) in zip(feeds_cfg, results):
+  for _feed, (feed_articles, was_cached, kind, fetch_exc) in zip(feeds_cfg, results, strict=True):
     if fetch_exc is not None:
       error_feeds += 1
     elif kind == "web-norules":

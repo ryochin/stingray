@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -38,7 +38,7 @@ def _art(
     title=title,
     url=url,
     source=source,
-    published=published or datetime.now(tz=timezone.utc),
+    published=published or datetime.now(tz=UTC),
     content_snippet=content_snippet,
     title_translated=title_translated,
     summary=summary,
@@ -98,8 +98,8 @@ class TestUpsertArticles:
     # same-batch dup. The merged-batch path must preserve that.
     f1 = _make_feed(name="A")
     _make_feed(name="B")
-    early = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    late = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    early = datetime(2026, 1, 1, tzinfo=UTC)
+    late = datetime(2026, 6, 1, tzinfo=UTC)
     n = repo.upsert_articles(
       [
         _art(url="u1", title="first-title", source="A", summary="", published=early),
@@ -268,7 +268,7 @@ class TestSinceDaysFilter:
 
   def test_filters_by_published(self):
     fid = _make_feed()
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     repo.upsert_articles(
       [
         _art(url="recent", published=now - timedelta(days=2)),
@@ -284,7 +284,7 @@ class TestSinceDaysFilter:
     # by ingest time. Recent fetch survives a 7-day window even without
     # published; an old fetch is excluded.
     fid = _make_feed()
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     with db.connection() as conn:
       conn.execute(
         """INSERT INTO articles (url, feed_id, title, source, published, fetched_at)
@@ -302,7 +302,7 @@ class TestSinceDaysFilter:
   def test_combined_with_unread_and_feed_id(self):
     f1 = _make_feed(name="A")
     f2 = _make_feed(name="B")
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     repo.upsert_articles(
       [
         _art(url="a-recent", source="A", published=now - timedelta(days=1)),
@@ -327,7 +327,7 @@ class TestPruneArticles:
       conn.execute(
         """INSERT INTO articles (url, feed_id, title, source, fetched_at)
            VALUES (%s, %s, %s, %s, %s)""",
-        ("old", fid, "T", "F", datetime.now(tz=timezone.utc) - timedelta(days=60)),
+        ("old", fid, "T", "F", datetime.now(tz=UTC) - timedelta(days=60)),
       )
     n = repo.prune_articles(max_age_days=30)
     assert n == 1
@@ -339,7 +339,7 @@ class TestPruneArticles:
       conn.execute(
         """INSERT INTO articles (url, feed_id, title, source, fetched_at)
            VALUES (%s, %s, %s, %s, %s)""",
-        ("ancient", fid, "T", "F", datetime.now(tz=timezone.utc) - timedelta(days=3650)),
+        ("ancient", fid, "T", "F", datetime.now(tz=UTC) - timedelta(days=3650)),
       )
     assert repo.prune_articles(max_age_days=0) == 0
     assert {r.url for r in repo.list_articles()} == {"ancient"}
@@ -402,8 +402,8 @@ class TestListArticlesOrderStability:
       [_art(url="u-c"), _art(url="u-a"), _art(url="u-b")],
       {"F": fid},
     )
-    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc)
-    fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=timezone.utc)
+    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC)
+    fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=UTC)
     for u in ("u-a", "u-b", "u-c"):
       self._force_timestamps(u, published=pub, fetched_at=fetched)
 
@@ -420,8 +420,8 @@ class TestListArticlesOrderStability:
       [_art(url="u-c"), _art(url="u-a"), _art(url="u-b")],
       {"F": fid},
     )
-    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc)
-    fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=timezone.utc)
+    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC)
+    fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=UTC)
     for u in ("u-a", "u-b", "u-c"):
       self._force_timestamps(u, published=pub, fetched_at=fetched)
 
@@ -441,16 +441,16 @@ class TestListArticlesOrderStability:
       [_art(url="u-old-fetch"), _art(url="u-new-fetch")],
       {"F": fid},
     )
-    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc)
+    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC)
     self._force_timestamps(
       "u-old-fetch",
       published=pub,
-      fetched_at=datetime(2026, 5, 20, 10, 0, 0, tzinfo=timezone.utc),
+      fetched_at=datetime(2026, 5, 20, 10, 0, 0, tzinfo=UTC),
     )
     self._force_timestamps(
       "u-new-fetch",
       published=pub,
-      fetched_at=datetime(2026, 5, 20, 14, 0, 0, tzinfo=timezone.utc),
+      fetched_at=datetime(2026, 5, 20, 14, 0, 0, tzinfo=UTC),
     )
 
     # SQL `fetched_at DESC` → newer fetch first; `reversed()` → API yields
@@ -467,12 +467,12 @@ class TestListArticlesOrderStability:
     self._force_timestamps(
       "u-early",
       published=None,
-      fetched_at=datetime(2026, 5, 20, 9, 0, 0, tzinfo=timezone.utc),
+      fetched_at=datetime(2026, 5, 20, 9, 0, 0, tzinfo=UTC),
     )
     self._force_timestamps(
       "u-late",
       published=None,
-      fetched_at=datetime(2026, 5, 20, 15, 0, 0, tzinfo=timezone.utc),
+      fetched_at=datetime(2026, 5, 20, 15, 0, 0, tzinfo=UTC),
     )
 
     first = [r.url for r in repo.list_articles()]
@@ -489,13 +489,13 @@ class TestListArticlesOrderStability:
     )
     self._force_timestamps(
       "u-old",
-      published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc),
-      fetched_at=datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc),
+      published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC),
+      fetched_at=datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC),
     )
     self._force_timestamps(
       "u-new",
-      published=datetime(2026, 5, 21, 8, 0, 0, tzinfo=timezone.utc),
-      fetched_at=datetime(2026, 5, 21, 8, 0, 0, tzinfo=timezone.utc),
+      published=datetime(2026, 5, 21, 8, 0, 0, tzinfo=UTC),
+      fetched_at=datetime(2026, 5, 21, 8, 0, 0, tzinfo=UTC),
     )
 
     # Default is oldest-first; `order="newest"` keeps the SQL descending order.
@@ -510,8 +510,8 @@ class TestListArticlesOrderStability:
       [_art(url="u-c"), _art(url="u-a"), _art(url="u-b")],
       {"F": fid},
     )
-    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=timezone.utc)
-    fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=timezone.utc)
+    pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC)
+    fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=UTC)
     for u in ("u-a", "u-b", "u-c"):
       self._force_timestamps(u, published=pub, fetched_at=fetched)
 
@@ -539,7 +539,7 @@ class TestListArticlesReadWithinHours:
 
   def _seed(self) -> None:
     fid = _make_feed(name="F")
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     repo.upsert_articles([
       _art(url="old-unread", published=now - timedelta(days=30)),
       _art(url="read-stale", published=now - timedelta(days=2)),

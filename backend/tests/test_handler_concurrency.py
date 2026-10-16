@@ -30,8 +30,9 @@ import asyncio
 import io
 import threading
 import time
+from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 from fastapi import UploadFile

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from llm import sanitize_byte_fallback, _sanitize_value, call_ollama
+from llm import _sanitize_value, call_ollama, sanitize_byte_fallback
 
 
 class TestSanitizeByteFallback:

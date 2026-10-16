@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +54,7 @@ def _feed() -> FeedRow:
 def _store(feed: FeedRow, url: str, snippet: str) -> Article:
   article = Article(
     title="T", url=url, source=feed.name,
-    published=datetime.now(tz=timezone.utc), content_snippet=snippet,
+    published=datetime.now(tz=UTC), content_snippet=snippet,
   )
   repo.upsert_articles([article], {feed.name: feed.id})
   return article

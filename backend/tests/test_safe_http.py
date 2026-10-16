@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import gzip
 import socket
+from collections.abc import AsyncIterator, Callable
 from functools import partial
-from typing import AsyncIterator, Callable
 
 import httpx
 import pydantic

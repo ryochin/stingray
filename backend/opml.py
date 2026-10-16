@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-import defusedxml.ElementTree as SafeET
 from dataclasses import dataclass, field
+
+import defusedxml.ElementTree as SafeET
 
 import lang
 from schemas import FeedRow, FolderRow

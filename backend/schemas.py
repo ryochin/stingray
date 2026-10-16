@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 import httpx
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 
 # -- DB row models --
 
@@ -26,14 +26,14 @@ class FilterRow(BaseModel):
   id: int = 0
   pattern: str
   target: str = "title"
-  created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+  created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 class FolderRow(BaseModel):
   id: int = 0
   name: str
   position: int = 0
-  created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+  created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 class FeedRow(BaseModel):
@@ -53,7 +53,7 @@ class FeedRow(BaseModel):
   extraction_rules: str | None = None
   fetch_interval_min: int = 10
   next_fetch_at: datetime | None = None
-  created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+  created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
   def to_feed_cfg(self) -> dict[str, object]:
     """Convert to the dict format expected by feeds.fetch_all()."""
@@ -78,13 +78,13 @@ class ArticleRow(BaseModel):
   summary: str | None = None
   content_html: str | None = None
   content_translated: str | None = None
-  fetched_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+  fetched_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
   read_at: datetime | None = None
 
 
 class RefreshJob(BaseModel):
   id: int = 0
-  started_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+  started_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
   finished_at: datetime | None = None
   source: str = "web"
   status: str = "running"
@@ -170,10 +170,8 @@ class FetchConfig(BaseModel):
       if value.startswith("[") and value.endswith("]"):
         # Bracketed IPv6 literal, as written in URLs; brackets around anything
         # else are rejected as a non-bare host below.
-        try:
+        with contextlib.suppress(ValueError):
           value = str(ipaddress.IPv6Address(value[1:-1]))
-        except ValueError:
-          pass
       if not value:
         raise ValueError("allow_private entries must not be empty")
       if "/" in value:
@@ -187,7 +185,7 @@ class FetchConfig(BaseModel):
           # A port, userinfo, or path would be silently dropped below and
           # widen the entry to the whole host, so reject them outright.
           if any(c in value for c in ":@?#[]\\ "):
-            raise ValueError(f"allow_private entry must be a bare host: {entry!r}")
+            raise ValueError(f"allow_private entry must be a bare host: {entry!r}") from None
           # Store hostnames in the IDNA form httpx puts on the wire, so a
           # Unicode entry matches a Punycode URL and vice versa.
           try:
@@ -214,7 +212,7 @@ class AppConfig(BaseModel):
   fetch: FetchConfig = Field(default_factory=FetchConfig)
 
   @classmethod
-  def load(cls, path: Path = Path("config.yml"), *, required: bool = False) -> "AppConfig":
+  def load(cls, path: Path = Path("config.yml"), *, required: bool = False) -> AppConfig:
     """Read and validate config.yml. The single source of truth for all
     callers (web, fetcher, healthcheck).
 

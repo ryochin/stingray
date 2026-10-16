@@ -5,15 +5,16 @@ from __future__ import annotations
 import math
 import random
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Iterator, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 from psycopg import sql
 from psycopg.errors import UniqueViolation
 
+import db
 from models import Article
 from schemas import (
   ArticleRow,
@@ -24,9 +25,6 @@ from schemas import (
   FolderRow,
   RefreshJob,
 )
-
-import db
-
 
 # -- Adaptive fetch scheduling --
 
@@ -68,7 +66,7 @@ def schedule_next_at(now: datetime, interval_min: int) -> datetime:
   raw = now + timedelta(minutes=interval_min * factor)
   tick_s = CRON_TICK_MIN * 60
   snapped = math.ceil(raw.timestamp() / tick_s) * tick_s
-  return datetime.fromtimestamp(snapped, tz=timezone.utc)
+  return datetime.fromtimestamp(snapped, tz=UTC)
 
 
 def record_feed_attempt(
@@ -95,7 +93,7 @@ def record_feed_attempt(
     cur_min = row["fetch_interval_min"]
     fails = row["consecutive_failures"]
     cur_next = row["next_fetch_at"]
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
 
     if outcome == "failure":
       n = fails + 1
@@ -1036,7 +1034,7 @@ def mark_all_read(
   scope_clauses, params = _scope_clause(feed_id, folder_id)
   clauses: list[sql.Composable] = [sql.SQL("read_at IS NULL"), *scope_clauses]
   if older_than_hours is not None and older_than_hours > 0:
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=older_than_hours)
+    cutoff = datetime.now(tz=UTC) - timedelta(hours=older_than_hours)
     clauses.append(sql.SQL("COALESCE(published, fetched_at) < %s"))
     params.append(cutoff)
   query = sql.SQL("UPDATE articles SET read_at = NOW() WHERE {}").format(
@@ -1051,7 +1049,7 @@ def prune_articles(max_age_days: int) -> int:
   # 0 (or negative) disables pruning — articles are retained indefinitely.
   if max_age_days <= 0:
     return 0
-  cutoff = datetime.now(tz=timezone.utc) - timedelta(days=max_age_days)
+  cutoff = datetime.now(tz=UTC) - timedelta(days=max_age_days)
   with db.connection() as conn:
     cur = conn.execute("DELETE FROM articles WHERE fetched_at < %s", (cutoff,))
     return cur.rowcount

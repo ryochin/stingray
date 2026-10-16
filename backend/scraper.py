@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from html import escape as html_escape
-from typing import Any, Callable, cast
+from typing import Any, cast
 from urllib.parse import urljoin
 
 import soupsieve
@@ -78,14 +79,14 @@ def _parse_date(text: str | None) -> datetime | None:
   # Common formats
   for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%B %d, %Y", "%d %b %Y", "%b %d, %Y"):
     try:
-      return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+      return datetime.strptime(text, fmt).replace(tzinfo=UTC)
     except ValueError:
       continue
   # Japanese date: 2026年4月10日
   m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", text)
   if m:
     try:
-      return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=timezone.utc)
+      return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=UTC)
     except ValueError:
       pass
   return None
@@ -102,10 +103,7 @@ def _extract_own_text(el: Tag, item_ids: set[int], max_len: int = 500) -> str:
   for child in el.children:
     if hasattr(child, "name") and id(child) in item_ids:
       break
-    if hasattr(child, "name"):
-      text = child.get_text(" ", strip=True)
-    else:
-      text = str(child).strip()
+    text = child.get_text(" ", strip=True) if hasattr(child, "name") else str(child).strip()
     if text:
       parts.append(text)
       total += len(text)

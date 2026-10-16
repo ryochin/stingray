@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
@@ -220,7 +221,7 @@ def test_duplicate_feed_urls_stop_the_migration_and_name_the_url(conn: db.Conn) 
     ("b", "https://b.example.com/"),
   )
 
-  with pytest.raises(psycopg.errors.RaiseException, match="https://dup.example.com/"):
+  with pytest.raises(psycopg.errors.RaiseException, match=r"https://dup\.example\.com/"):
     db.migrate(conn)
   conn.rollback()
 

@@ -7,7 +7,7 @@ the handler reads is stashed on app.state by hand; the DB is provided by the
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,7 +33,7 @@ def _seed() -> None:
       "INSERT INTO feeds (name, url, enabled) VALUES ('F', 'https://f.example.com/rss', TRUE) RETURNING id"
     ).fetchone()
     assert row is not None
-  now = datetime.now(tz=timezone.utc)
+  now = datetime.now(tz=UTC)
   repo.upsert_articles([
     Article(title="T", url=url, source="F", published=now - timedelta(hours=h),
             content_snippet="body")

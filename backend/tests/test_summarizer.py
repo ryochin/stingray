@@ -156,7 +156,7 @@ def test_summarize_all_routes_by_source_and_url(fake: FakeOllama) -> None:
   )
 
   assert failures == 0
-  by_title = dict(zip([p.split("\n")[0] for p in fake.user_prompts], fake.prompts))
+  by_title = dict(zip([p.split("\n")[0] for p in fake.user_prompts], fake.prompts, strict=True))
   assert FULL in by_title["Title: Short"]
   assert TRANSLATE_SUMMARY in by_title["Title: Long"]
   assert TITLE_ONLY in by_title["Title: TitleOnly"]

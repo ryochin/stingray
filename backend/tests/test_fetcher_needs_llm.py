@@ -9,7 +9,7 @@ back into the queue forever.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fetcher import SHORT_SNIPPET_CHARS, _needs_llm
 from models import Article
@@ -29,7 +29,7 @@ def _art(
     title="t",
     url="u",
     source="s",
-    published=datetime.now(tz=timezone.utc),
+    published=datetime.now(tz=UTC),
     content_snippet=content_snippet,
     title_translated=title_translated,
     summary=summary,

@@ -8,7 +8,6 @@ import db
 import repo
 from schemas import FeedRow
 
-
 pytestmark = pytest.mark.usefixtures("clean_db")
 
 

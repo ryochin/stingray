@@ -59,12 +59,8 @@ class TestNormalize:
     ("EN", "en"),
     ("en-US", "en"),
     ("ja-JP", "ja"),
-    ("ja_jp", "ja_jp".split("-")[0].lower()[:2] if False else "ja"),  # underscore not split; see below
   ])
   def test_normalize_basic(self, raw: str, expected: str):
-    # NOTE: normalize only splits on "-", underscores are not BCP47. See dedicated test below.
-    if "_" in raw:
-      return
     assert lang.normalize_lang_code(raw) == expected
 
   def test_underscore_not_split(self):

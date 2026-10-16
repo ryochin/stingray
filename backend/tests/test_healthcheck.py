@@ -10,7 +10,7 @@ The _check_recent_job branch (covered below):
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -41,19 +41,19 @@ class TestCheckRecentJob:
     healthcheck._check_recent_job(max_age_minutes=45)
 
   def test_running_job_within_grace_is_healthy(self):
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     _insert_job(started_at=now - timedelta(minutes=10), finished_at=None)
     healthcheck._check_recent_job(max_age_minutes=45)
 
   def test_long_running_job_fails(self):
     # Job running for > 2× max_age_minutes → considered stuck.
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     _insert_job(started_at=now - timedelta(minutes=200), finished_at=None)
     with pytest.raises(RuntimeError, match="has been running"):
       healthcheck._check_recent_job(max_age_minutes=45)
 
   def test_finished_recent_is_healthy(self):
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     _insert_job(
       started_at=now - timedelta(minutes=20),
       finished_at=now - timedelta(minutes=5),
@@ -62,7 +62,7 @@ class TestCheckRecentJob:
     healthcheck._check_recent_job(max_age_minutes=45)
 
   def test_finished_stale_fails(self):
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     _insert_job(
       started_at=now - timedelta(hours=3),
       finished_at=now - timedelta(hours=2),

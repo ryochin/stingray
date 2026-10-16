@@ -12,7 +12,8 @@ No network — _probe_llm_once is always monkeypatched.
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 

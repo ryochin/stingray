@@ -85,9 +85,12 @@ def _own_body(fn: ast.AsyncFunctionDef) -> list[ast.AST]:
 
 def _called_name(node: ast.Call, imported: dict[str, str]) -> str | None:
   func = node.func
-  if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-    if func.value.id in _BLOCKING_MODULES:
-      return f"{func.value.id}.{func.attr}"
+  if (
+    isinstance(func, ast.Attribute)
+    and isinstance(func.value, ast.Name)
+    and func.value.id in _BLOCKING_MODULES
+  ):
+    return f"{func.value.id}.{func.attr}"
   if isinstance(func, ast.Name):
     return imported.get(func.id)
   return None
@@ -197,7 +200,7 @@ class TestTheDetectorItself:
 
   def test_every_allowed_name_still_exists(self):
     # A stale entry would silently widen the exception list.
-    import importlib  # noqa: PLC0415
+    import importlib
 
     for name in _ALLOWED:
       module_name, attr = name.split(".")

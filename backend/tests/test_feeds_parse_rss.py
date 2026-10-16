@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from feeds import _parse_rss
@@ -85,14 +85,14 @@ def test_title_and_url_are_read() -> None:
 
 def test_published_date_is_read() -> None:
   [article] = _parse_rss(_rss(f"<title>T</title>{LINK}<pubDate>Tue, 03 Feb 2026 04:05:06 GMT</pubDate>"), FEED_CFG)
-  assert article.published == datetime(2026, 2, 3, 4, 5, 6, tzinfo=timezone.utc)
+  assert article.published == datetime(2026, 2, 3, 4, 5, 6, tzinfo=UTC)
 
 
 def test_atom_updated_is_used_without_published() -> None:
   [article] = _parse_rss(_atom(
     '<title>T</title><link href="https://site.example/a"/><updated>2026-02-03T04:05:06Z</updated>'
   ), FEED_CFG)
-  assert article.published == datetime(2026, 2, 3, 4, 5, 6, tzinfo=timezone.utc)
+  assert article.published == datetime(2026, 2, 3, 4, 5, 6, tzinfo=UTC)
 
 
 def test_atom_published_is_preferred_over_updated() -> None:
@@ -100,7 +100,7 @@ def test_atom_published_is_preferred_over_updated() -> None:
     '<title>T</title><link href="https://site.example/a"/>'
     "<published>2026-01-01T00:00:00Z</published><updated>2026-02-03T04:05:06Z</updated>"
   ), FEED_CFG)
-  assert article.published == datetime(2026, 1, 1, tzinfo=timezone.utc)
+  assert article.published == datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def test_missing_date_is_none() -> None:

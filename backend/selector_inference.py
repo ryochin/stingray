@@ -8,8 +8,9 @@ preview — it is never persisted automatically.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx

@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import io
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import date
-from typing import Any, AsyncIterator, Iterator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
