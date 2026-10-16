@@ -44,9 +44,10 @@ tasks:
       - task: lint:frontend
 
   lint:backend:
-    desc: "Lint the backend with ruff"
+    desc: "Lint the backend with ruff and check its formatting"
     cmds:
       - uv run ruff check backend
+      - uv run ruff format --check backend
 
   lint:frontend:
     desc: "Lint the frontend with Biome"
@@ -61,9 +62,10 @@ tasks:
       - task: lint:fix:frontend
 
   lint:fix:backend:
-    desc: "Lint and auto-fix the backend with ruff"
+    desc: "Lint, auto-fix and format the backend with ruff"
     cmds:
       - uv run ruff check backend --fix
+      - uv run ruff format backend
 
   lint:fix:frontend:
     desc: "Lint and auto-fix the frontend with Biome"

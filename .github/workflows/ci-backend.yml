@@ -47,6 +47,8 @@ jobs:
         run: uv sync --locked
       - name: Lint (ruff)
         run: uv run ruff check backend --output-format=github
+      - name: Format check (ruff)
+        run: uv run ruff format --check backend
       - name: Type check (pyright)
         run: uv run pyright
       - name: Run tests (pytest)

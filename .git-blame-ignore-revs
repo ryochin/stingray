@@ -1,0 +1,5 @@
+# Bulk formatting commits, skipped by `git blame` (GitHub reads this file
+# automatically; locally run `git config blame.ignoreRevsFile .git-blame-ignore-revs`).
+
+# Format the backend with ruff
+361867c98882d54f09773818755a207b05ffa804
