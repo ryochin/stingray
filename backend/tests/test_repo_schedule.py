@@ -39,9 +39,13 @@ def _make_feed(
          VALUES (%s, %s, %s, %s, %s, %s, %s)
          RETURNING id""",
       (
-        name, f"https://{name}.example.com/rss",
-        enabled, fetch_interval_min, next_fetch_at,
-        consecutive_failures, last_error,
+        name,
+        f"https://{name}.example.com/rss",
+        enabled,
+        fetch_interval_min,
+        next_fetch_at,
+        consecutive_failures,
+        last_error,
       ),
     ).fetchone()
     assert row is not None
@@ -133,8 +137,7 @@ class TestScheduleNextAt:
 
 class TestRecordFeedAttempt:
   def test_fresh_shrinks_bucket(self, clean_db):
-    fid = _make_feed(fetch_interval_min=60, consecutive_failures=2,
-                     last_error="prev")
+    fid = _make_feed(fetch_interval_min=60, consecutive_failures=2, last_error="prev")
     repo.record_feed_attempt(fid, "fresh")
     row = _read_feed(fid)
     assert row["fetch_interval_min"] == 30
@@ -169,7 +172,9 @@ class TestRecordFeedAttempt:
   def test_failure_never_moves_schedule_earlier(self, clean_db):
     far_future = datetime.now(tz=UTC) + timedelta(hours=12)
     fid = _make_feed(
-      fetch_interval_min=360, next_fetch_at=far_future, consecutive_failures=0,
+      fetch_interval_min=360,
+      next_fetch_at=far_future,
+      consecutive_failures=0,
     )
     repo.record_feed_attempt(fid, "failure", error="err")
     row = _read_feed(fid)
@@ -179,7 +184,9 @@ class TestRecordFeedAttempt:
 
   def test_recovery_clears_failures_and_error(self, clean_db):
     fid = _make_feed(
-      fetch_interval_min=60, consecutive_failures=3, last_error="prev",
+      fetch_interval_min=60,
+      consecutive_failures=3,
+      last_error="prev",
     )
     repo.record_feed_attempt(fid, "fresh")
     row = _read_feed(fid)
@@ -189,7 +196,9 @@ class TestRecordFeedAttempt:
 
   def test_degraded_keeps_bucket_and_state(self, clean_db):
     fid = _make_feed(
-      fetch_interval_min=120, consecutive_failures=2, last_error="prev",
+      fetch_interval_min=120,
+      consecutive_failures=2,
+      last_error="prev",
     )
     repo.record_feed_attempt(fid, "degraded")
     row = _read_feed(fid)
@@ -202,7 +211,9 @@ class TestRecordFeedAttempt:
   def test_degraded_with_error_overwrites_last_error(self, clean_db):
     fid = _make_feed(fetch_interval_min=60, last_error=None)
     repo.record_feed_attempt(
-      fid, "degraded", error="extraction rules not configured",
+      fid,
+      "degraded",
+      error="extraction rules not configured",
     )
     assert _read_feed(fid)["last_error"] == "extraction rules not configured"
 
@@ -370,7 +381,8 @@ _TEST_LOCK_KEY = 0x5EED_0001
 
 
 def _make_connection_fail(
-  monkeypatch: pytest.MonkeyPatch, step: Literal["commit", "unlock"],
+  monkeypatch: pytest.MonkeyPatch,
+  step: Literal["commit", "unlock"],
 ) -> list[db.Conn]:
   """Patch db.connection so `step` raises on the lock connection.
 
@@ -427,8 +439,10 @@ def _lock_holder_states(key: int) -> list[str]:
 class TestClassifyOutcome:
   def test_fetch_exception_is_failure(self):
     outcome, error = _classify_outcome(
-      source_tag="fresh", feed_kind="rss",
-      fetch_exc=RuntimeError("boom"), persist_exc=None,
+      source_tag="fresh",
+      feed_kind="rss",
+      fetch_exc=RuntimeError("boom"),
+      persist_exc=None,
       inserted_count=0,
     )
     assert outcome == "failure"
@@ -436,16 +450,21 @@ class TestClassifyOutcome:
 
   def test_persist_exception_is_failure(self):
     outcome, _ = _classify_outcome(
-      source_tag="fresh", feed_kind="rss",
-      fetch_exc=None, persist_exc=RuntimeError("db"),
+      source_tag="fresh",
+      feed_kind="rss",
+      fetch_exc=None,
+      persist_exc=RuntimeError("db"),
       inserted_count=0,
     )
     assert outcome == "failure"
 
   def test_web_norules_is_degraded_with_error(self):
     outcome, error = _classify_outcome(
-      source_tag=None, feed_kind="web-norules",
-      fetch_exc=None, persist_exc=None, inserted_count=0,
+      source_tag=None,
+      feed_kind="web-norules",
+      fetch_exc=None,
+      persist_exc=None,
+      inserted_count=0,
     )
     assert outcome == "degraded"
     assert error == "extraction rules not configured"
@@ -454,46 +473,64 @@ class TestClassifyOutcome:
     # Serving a stale cached copy must surface a diagnostic so the feed does
     # not silently look healthy on old content.
     outcome, error = _classify_outcome(
-      source_tag="net-cache", feed_kind="rss",
-      fetch_exc=None, persist_exc=None, inserted_count=0,
+      source_tag="net-cache",
+      feed_kind="rss",
+      fetch_exc=None,
+      persist_exc=None,
+      inserted_count=0,
     )
     assert outcome == "degraded"
     assert error is not None and "network error" in error
 
   def test_5xx_cache_is_degraded(self):
     outcome, error = _classify_outcome(
-      source_tag="5xx-cache", feed_kind="rss",
-      fetch_exc=None, persist_exc=None, inserted_count=0,
+      source_tag="5xx-cache",
+      feed_kind="rss",
+      fetch_exc=None,
+      persist_exc=None,
+      inserted_count=0,
     )
     assert outcome == "degraded"
     assert error is not None and "stale cache" in error
 
   def test_304_empty_is_degraded(self):
     outcome, error = _classify_outcome(
-      source_tag="304-empty", feed_kind="rss",
-      fetch_exc=None, persist_exc=None, inserted_count=0,
+      source_tag="304-empty",
+      feed_kind="rss",
+      fetch_exc=None,
+      persist_exc=None,
+      inserted_count=0,
     )
     assert outcome == "degraded"
     assert error is not None and "304" in error
 
   def test_fresh_with_inserts(self):
     outcome, _ = _classify_outcome(
-      source_tag="fresh", feed_kind="rss",
-      fetch_exc=None, persist_exc=None, inserted_count=3,
+      source_tag="fresh",
+      feed_kind="rss",
+      fetch_exc=None,
+      persist_exc=None,
+      inserted_count=3,
     )
     assert outcome == "fresh"
 
   def test_fresh_with_zero_inserts_is_miss(self):
     outcome, _ = _classify_outcome(
-      source_tag="fresh", feed_kind="rss",
-      fetch_exc=None, persist_exc=None, inserted_count=0,
+      source_tag="fresh",
+      feed_kind="rss",
+      fetch_exc=None,
+      persist_exc=None,
+      inserted_count=0,
     )
     assert outcome == "miss"
 
   def test_web_feed_success(self):
     # Web feeds have source_tag=None but feed_kind="web".
     outcome, _ = _classify_outcome(
-      source_tag=None, feed_kind="web",
-      fetch_exc=None, persist_exc=None, inserted_count=2,
+      source_tag=None,
+      feed_kind="web",
+      fetch_exc=None,
+      persist_exc=None,
+      inserted_count=2,
     )
     assert outcome == "fresh"

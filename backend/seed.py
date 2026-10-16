@@ -40,9 +40,7 @@ def enrich_from_legacy_cache(
   for url_key, val in raw.items():
     if isinstance(val, dict):
       entry = cast(dict[str, object], val)
-      legacy[url_key] = {
-        str(k): str(v) for k, v in entry.items()
-      }
+      legacy[url_key] = {str(k): str(v) for k, v in entry.items()}
 
   restored: list[Article] = []
   for article in articles:

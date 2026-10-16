@@ -397,8 +397,12 @@ class TestContainsFilterSql:
   def test_url_target_ignores_title_and_body(self):
     fid = _feed()
     _insert_article(
-      fid, url="u1", title="sponsored", title_translated="sponsored",
-      content_snippet="sponsored", summary="sponsored",
+      fid,
+      url="u1",
+      title="sponsored",
+      title_translated="sponsored",
+      content_snippet="sponsored",
+      summary="sponsored",
     )
     repo.add_filter("sponsored", target="url")
     assert _visible(fid) == {"u1"}

@@ -187,9 +187,7 @@ class TestOpmlImportExclusion:
   double registration that follows.
   """
 
-  def test_a_second_import_waits_for_the_first(
-    self, monkeypatch: pytest.MonkeyPatch
-  ) -> None:
+  def test_a_second_import_waits_for_the_first(self, monkeypatch: pytest.MonkeyPatch) -> None:
     started, release = threading.Event(), threading.Event()
     tracker = _PeakTracker()
 

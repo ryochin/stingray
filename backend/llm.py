@@ -131,7 +131,10 @@ async def call_ollama(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
         {"role": "assistant", "content": content[:200]},
-        {"role": "user", "content": "Wrong. Output ONLY a valid JSON object. No text, no explanation, no markdown. Just {\"key\": \"value\"}."},
+        {
+          "role": "user",
+          "content": 'Wrong. Output ONLY a valid JSON object. No text, no explanation, no markdown. Just {"key": "value"}.',
+        },
       ]
 
   raise last_error  # type: ignore[misc]

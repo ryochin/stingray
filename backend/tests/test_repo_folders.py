@@ -52,9 +52,7 @@ class TestReorderFolders:
 
 class TestMoveFeedToFolder:
   def _add_feed(self, name: str) -> int:
-    return repo.add_feed(
-      FeedRow(name=name, url=f"https://{name}.example.com/rss")
-    ).id
+    return repo.add_feed(FeedRow(name=name, url=f"https://{name}.example.com/rss")).id
 
   def test_move_into_folder(self):
     fid = self._add_feed("F1")
@@ -98,24 +96,16 @@ class TestAddFeedPosition:
 
   def test_at_top_false_appends_preserving_order(self):
     # Bulk callers (OPML import) append in input order instead of reversing it.
-    a = repo.add_feed(
-      FeedRow(name="A", url="https://a.example.com/rss"), at_top=False
-    )
-    b = repo.add_feed(
-      FeedRow(name="B", url="https://b.example.com/rss"), at_top=False
-    )
-    c = repo.add_feed(
-      FeedRow(name="C", url="https://c.example.com/rss"), at_top=False
-    )
+    a = repo.add_feed(FeedRow(name="A", url="https://a.example.com/rss"), at_top=False)
+    b = repo.add_feed(FeedRow(name="B", url="https://b.example.com/rss"), at_top=False)
+    c = repo.add_feed(FeedRow(name="C", url="https://c.example.com/rss"), at_top=False)
     assert a.position < b.position < c.position
     assert [f.id for f in repo.list_feeds()] == [a.id, b.id, c.id]
 
 
 class TestReorderFeeds:
   def _add(self, name: str) -> int:
-    return repo.add_feed(
-      FeedRow(name=name, url=f"https://{name}.example.com/rss")
-    ).id
+    return repo.add_feed(FeedRow(name=name, url=f"https://{name}.example.com/rss")).id
 
   def test_reorder_reflects_in_list_feeds(self):
     a = self._add("A")
@@ -224,9 +214,7 @@ class TestFetchStatus:
     # A manual fetch of a web feed with no extraction rules is a soft degraded
     # state, not a hard failure.
     fid = repo.add_feed(FeedRow(name="F", url="https://f.example.com/")).id
-    repo.update_feed_fetch_status(
-      fid, health="degraded", error="extraction rules not configured"
-    )
+    repo.update_feed_fetch_status(fid, health="degraded", error="extraction rules not configured")
     feed = repo.get_feed_by_id(fid)
     assert feed is not None
     assert feed.consecutive_failures == 0

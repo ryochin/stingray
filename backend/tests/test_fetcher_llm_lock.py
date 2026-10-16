@@ -35,7 +35,9 @@ def llm_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
   calls: list[tuple[str, str]] = []
 
   async def fake_run_summarize(
-    need_llm: list[Article], *_args: Any, **_kwargs: Any,
+    need_llm: list[Article],
+    *_args: Any,
+    **_kwargs: Any,
   ) -> int:
     for article in need_llm:
       calls.append((article.url, article.content_snippet))
@@ -53,8 +55,11 @@ def _feed() -> FeedRow:
 
 def _store(feed: FeedRow, url: str, snippet: str) -> Article:
   article = Article(
-    title="T", url=url, source=feed.name,
-    published=datetime.now(tz=UTC), content_snippet=snippet,
+    title="T",
+    url=url,
+    source=feed.name,
+    published=datetime.now(tz=UTC),
+    content_snippet=snippet,
   )
   repo.upsert_articles([article], {feed.name: feed.id})
   return article
@@ -114,7 +119,8 @@ class TestRefreshLlmPass:
         repo.update_article_summary("u1", None, "by the other process")
         with db.connection() as conn:
           conn.execute(
-            "UPDATE articles SET content_snippet = %s WHERE url = 'u2'", (LONG_B,),
+            "UPDATE articles SET content_snippet = %s WHERE url = 'u2'",
+            (LONG_B,),
           )
       return await task
 
@@ -152,7 +158,10 @@ class TestRefreshLlmPass:
 
 class TestLegacyCacheRestore:
   def test_restored_fields_are_stored_before_the_llm_pass_rereads(
-    self, llm_calls, monkeypatch, tmp_path: Path,
+    self,
+    llm_calls,
+    monkeypatch,
+    tmp_path: Path,
   ):
     """The pass rebuilds articles from DB rows, so values restored only in
     memory would be lost (the legacy file is renamed after one read)."""
@@ -161,7 +170,8 @@ class TestLegacyCacheRestore:
     )
     article = _store(feed, "u1", LONG_A)
     (tmp_path / "articles.json").write_text(
-      '{"u1": {"title_ja": "restored title"}}', encoding="utf-8",
+      '{"u1": {"title_ja": "restored title"}}',
+      encoding="utf-8",
     )
 
     async def fake_fetch(*_args: Any, **_kwargs: Any) -> tuple[list[Article], int]:

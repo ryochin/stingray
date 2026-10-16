@@ -46,9 +46,7 @@ def _admin_url(test_url: str) -> str:
 def _ensure_test_db(test_url: str) -> None:
   test_db = urlparse(test_url).path.lstrip("/")
   with psycopg.connect(_admin_url(test_url), autocommit=True) as conn:
-    exists = conn.execute(
-      "SELECT 1 FROM pg_database WHERE datname = %s", (test_db,)
-    ).fetchone()
+    exists = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (test_db,)).fetchone()
     if not exists:
       # Identifier quoting: test_db is derived from env/config, not user input.
       conn.execute(f'CREATE DATABASE "{test_db}"')
@@ -74,7 +72,6 @@ def clean_db(db_session):
   """Truncate all app tables before each test. RESTART IDENTITY resets sequences."""
   with db.connection() as conn:
     conn.execute(
-      "TRUNCATE TABLE articles, feeds, folders, refresh_jobs, filters "
-      "RESTART IDENTITY CASCADE"
+      "TRUNCATE TABLE articles, feeds, folders, refresh_jobs, filters RESTART IDENTITY CASCADE"
     )
   yield

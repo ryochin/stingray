@@ -61,7 +61,11 @@ class TestConfigLoadedOnce:
 
   def _lifespan(self) -> ast.AsyncFunctionDef:
     fn = next(
-      (n for n in ast.walk(self._tree()) if isinstance(n, ast.AsyncFunctionDef) and n.name == "lifespan"),
+      (
+        n
+        for n in ast.walk(self._tree())
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "lifespan"
+      ),
       None,
     )
     assert fn is not None, "lifespan function not found in app.py"

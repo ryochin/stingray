@@ -89,11 +89,13 @@ def extract_feed_candidates(body: str, base_url: str) -> list[dict[str, str]]:
       if absolute in seen:
         continue
       seen.add(absolute)
-      candidates.append({
-        "href": absolute,
-        "title": (attr_str(link, "title") or "").strip(),
-        "type": link_type,
-      })
+      candidates.append(
+        {
+          "href": absolute,
+          "title": (attr_str(link, "title") or "").strip(),
+          "type": link_type,
+        }
+      )
   return candidates
 
 
@@ -232,7 +234,9 @@ async def _fetch_with_cache(
     resp = await client.get(url, headers=req_headers)
   except (httpx.TransportError, OSError) as e:
     if cached_body is not None:
-      log.warn(f"    Network error, using cached feed: {url} ({type(e).__name__}: {e or 'no details'})")
+      log.warn(
+        f"    Network error, using cached feed: {url} ({type(e).__name__}: {e or 'no details'})"
+      )
       return cached_body, True, "net-cache"
     raise
   elapsed_ms = int((time.perf_counter() - start) * 1000)
@@ -385,14 +389,16 @@ def _parse_rss(
     raw_html = absolutize_html_urls(raw_html, raw_link)
 
     title = _normalize_title(_str_field(entry, "title")) or "(no title)"
-    articles.append(Article(
-      title=title,
-      url=cleaned_link,
-      source=source,
-      published=published,
-      content_snippet=_truncate(snippet),
-      content_html=raw_html,
-    ))
+    articles.append(
+      Article(
+        title=title,
+        url=cleaned_link,
+        source=source,
+        published=published,
+        content_snippet=_truncate(snippet),
+        content_html=raw_html,
+      )
+    )
 
   return articles
 
@@ -418,6 +424,7 @@ async def fetch_rss(
 
 
 _CONCURRENCY = 5
+
 
 async def _delayed_fetch(
   client: SafeClient,
@@ -446,7 +453,9 @@ async def _delayed_fetch(
       if rules.get("item"):
         start = time.perf_counter()
         articles, was_cached = await fetch_web_page(
-          client, feed, clean_url_fn=clean_url_fn,
+          client,
+          feed,
+          clean_url_fn=clean_url_fn,
         )
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         source = "cache" if was_cached else "fresh"
@@ -459,7 +468,9 @@ async def _delayed_fetch(
       return [], False, "web-norules", None
     start = time.perf_counter()
     articles, was_cached, source_tag = await fetch_rss(
-      client, feed, clean_url_fn=clean_url_fn,
+      client,
+      feed,
+      clean_url_fn=clean_url_fn,
     )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     source = "cache" if was_cached else "fresh"
@@ -519,11 +530,15 @@ async def fetch_all(
   cutoff = datetime.now(tz=UTC) - timedelta(hours=max_age_hours)
 
   async def _run_one(
-    client: SafeClient, feed: dict[str, Any],
+    client: SafeClient,
+    feed: dict[str, Any],
   ) -> tuple[list[Article], bool, str, Exception | None]:
     try:
       articles, was_cached, kind, source_tag = await _delayed_fetch(
-        client, feed, random.uniform(0, 2), sem,
+        client,
+        feed,
+        random.uniform(0, 2),
+        sem,
         clean_url_fn=clean_url_fn,
       )
       fetch_exc: Exception | None = None

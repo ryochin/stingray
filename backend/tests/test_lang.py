@@ -32,11 +32,14 @@ class TestDetectByScript:
 
 
 class TestDetectByTld:
-  @pytest.mark.parametrize("url", [
-    "https://example.jp/rss",
-    "https://www.asahi.com.jp/",  # .jp suffix wins even with .com in middle
-    "http://sub.domain.co.jp/feed",
-  ])
+  @pytest.mark.parametrize(
+    "url",
+    [
+      "https://example.jp/rss",
+      "https://www.asahi.com.jp/",  # .jp suffix wins even with .com in middle
+      "http://sub.domain.co.jp/feed",
+    ],
+  )
   def test_jp_tld(self, url: str):
     assert lang.detect_lang_by_tld(url) == "ja"
 
@@ -54,12 +57,15 @@ class TestDetectByTld:
 
 
 class TestNormalize:
-  @pytest.mark.parametrize("raw,expected", [
-    ("en", "en"),
-    ("EN", "en"),
-    ("en-US", "en"),
-    ("ja-JP", "ja"),
-  ])
+  @pytest.mark.parametrize(
+    "raw,expected",
+    [
+      ("en", "en"),
+      ("EN", "en"),
+      ("en-US", "en"),
+      ("ja-JP", "ja"),
+    ],
+  )
   def test_normalize_basic(self, raw: str, expected: str):
     assert lang.normalize_lang_code(raw) == expected
 

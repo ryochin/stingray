@@ -101,6 +101,7 @@ EXPECTED_CHECKS = ["feeds_fetch_interval_bucket", "feeds_health_state"]
 
 # --- starting states ---
 
+
 def test_empty_database_is_created_at_latest_version(conn: db.Conn) -> None:
   db.migrate(conn)
   conn.commit()
@@ -139,6 +140,7 @@ def test_version_table_without_a_row_counts_as_version_zero(conn: db.Conn) -> No
 
 # --- incremental and idempotent runs ---
 
+
 def test_only_pending_migrations_run(conn: db.Conn) -> None:
   db.migrate(conn, PROBES[:2])
   conn.commit()
@@ -164,7 +166,8 @@ def test_up_to_date_database_runs_no_lock_and_no_DDL(conn: db.Conn) -> None:
 
 
 def test_version_is_reread_after_taking_the_lock(
-  conn: db.Conn, monkeypatch: pytest.MonkeyPatch,
+  conn: db.Conn,
+  monkeypatch: pytest.MonkeyPatch,
 ) -> None:
   # Another process migrated between our unlocked read and the lock: the
   # stale first read must not make us re-run migrations.
@@ -189,8 +192,8 @@ def test_version_is_reread_after_taking_the_lock(
   assert _probe_rows(conn) == [2, 3]
 
 
-
 # --- migration 3: unique feed URLs ---
+
 
 def _at_version_2(conn: db.Conn, *feeds: tuple[str, str | None]) -> None:
   db.migrate(conn, db._MIGRATIONS[:2])
@@ -230,6 +233,7 @@ def test_duplicate_feed_urls_stop_the_migration_and_name_the_url(conn: db.Conn) 
 
 
 # --- failures ---
+
 
 def test_failed_migration_rolls_everything_back(conn: db.Conn) -> None:
   db.migrate(conn, PROBES[:2])

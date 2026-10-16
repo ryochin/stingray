@@ -97,9 +97,7 @@ class TestSlowRepoCall:
     async def scenario() -> None:
       monkeypatch.setattr(app, "_refresh_lock", asyncio.Lock())
       async with _client() as client:
-        resp, elapsed = await _health_latency_during(
-          client, client.delete("/api/feeds"), started
-        )
+        resp, elapsed = await _health_latency_during(client, client.delete("/api/feeds"), started)
         assert resp.status_code == 200
         assert elapsed < _MAX_HEALTH_SECONDS, (
           f"/api/health took {elapsed:.2f}s while repo.delete_all_data was running "

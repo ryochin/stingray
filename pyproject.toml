@@ -53,3 +53,6 @@ ignore = [
   "E501",  # Line length is left to the formatter; it does not split long strings.
 ]
 allowed-confusables = ["×"]
+
+[tool.ruff.format]
+quote-style = "double"

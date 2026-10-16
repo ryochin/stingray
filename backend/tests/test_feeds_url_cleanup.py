@@ -62,7 +62,9 @@ def test_image_injection_survives_cleanup():
   # The raw <link> is what `_extract_item_images` keyed on; thumbnail
   # injection must still find the image after the article URL is cleaned.
   articles = _parse_rss(
-    RSS_WITH_TRACKER_AND_MEDIA, _feed_cfg(), clean_url_fn=clean_url,
+    RSS_WITH_TRACKER_AND_MEDIA,
+    _feed_cfg(),
+    clean_url_fn=clean_url,
   )
   assert len(articles) == 1
   art = articles[0]

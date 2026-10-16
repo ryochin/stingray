@@ -185,9 +185,7 @@ class TestInferAndValidate:
     assert calls["n"] == 2
     assert all("/post/" in a.url for a in result.sample_articles)
 
-  def test_only_index_list_returned_as_ok_best_effort(
-    self, monkeypatch: pytest.MonkeyPatch
-  ):
+  def test_only_index_list_returned_as_ok_best_effort(self, monkeypatch: pytest.MonkeyPatch):
     # If nothing cleaner ever appears, the count-meeting index list is still
     # returned (ok) as a best-effort starting point for the user to review.
     fake, _ = _fake_ollama([TAG_RULES])
@@ -197,9 +195,7 @@ class TestInferAndValidate:
     assert len(result.sample_articles) == 3
     assert all("/tag/" in a.url for a in result.sample_articles)
 
-  def test_count_meeting_match_beats_cleaner_too_small_one(
-    self, monkeypatch: pytest.MonkeyPatch
-  ):
+  def test_count_meeting_match_beats_cleaner_too_small_one(self, monkeypatch: pytest.MonkeyPatch):
     # A clean 1-article match scores higher, but a count-meeting (3) index list
     # is the usable result, so the final best-effort must be the count-meeting
     # one (ok), not the cleaner-but-too-small one (which would be empty).

@@ -52,11 +52,14 @@ async def run(args: argparse.Namespace) -> None:
 def main() -> None:
   parser = argparse.ArgumentParser(description="Stingray feed fetcher")
   parser.add_argument(
-    "--config", type=Path, default=Path("config.yml"),
+    "--config",
+    type=Path,
+    default=Path("config.yml"),
     help="Path to config file",
   )
   parser.add_argument(
-    "--no-summary", action="store_true",
+    "--no-summary",
+    action="store_true",
     help="Skip LLM summarization",
   )
   args = parser.parse_args()

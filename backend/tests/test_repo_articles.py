@@ -500,9 +500,7 @@ class TestListArticlesOrderStability:
 
     # Default is oldest-first; `order="newest"` keeps the SQL descending order.
     assert [r.url for r in repo.list_articles()] == ["u-old", "u-new"]
-    assert [
-      r.url for r in repo.list_articles(order="newest")
-    ] == ["u-new", "u-old"]
+    assert [r.url for r in repo.list_articles(order="newest")] == ["u-new", "u-old"]
 
   def test_order_newest_full_tie_is_url_desc(self):
     fid = _make_feed()
@@ -519,9 +517,7 @@ class TestListArticlesOrderStability:
     # `reversed()`, so a full tie is visible as `url DESC`.
     assert [r.url for r in repo.list_articles(order="newest")] == ["u-c", "u-b", "u-a"]
     # The limit cut keeps the SQL top slice {u-c, u-b}; newest order preserves it.
-    assert [
-      r.url for r in repo.list_articles(order="newest", limit=2)
-    ] == ["u-c", "u-b"]
+    assert [r.url for r in repo.list_articles(order="newest", limit=2)] == ["u-c", "u-b"]
 
 
 def _set_read_at(url: str, hours_ago: float) -> None:
@@ -540,13 +536,16 @@ class TestListArticlesReadWithinHours:
   def _seed(self) -> None:
     fid = _make_feed(name="F")
     now = datetime.now(tz=UTC)
-    repo.upsert_articles([
-      _art(url="old-unread", published=now - timedelta(days=30)),
-      _art(url="read-stale", published=now - timedelta(days=2)),
-      _art(url="read-1", published=now - timedelta(hours=3)),
-      _art(url="read-2", published=now - timedelta(hours=2)),
-      _art(url="read-3", published=now - timedelta(hours=1)),
-    ], {"F": fid})
+    repo.upsert_articles(
+      [
+        _art(url="old-unread", published=now - timedelta(days=30)),
+        _art(url="read-stale", published=now - timedelta(days=2)),
+        _art(url="read-1", published=now - timedelta(hours=3)),
+        _art(url="read-2", published=now - timedelta(hours=2)),
+        _art(url="read-3", published=now - timedelta(hours=1)),
+      ],
+      {"F": fid},
+    )
     _set_read_at("read-stale", hours_ago=48)
     for url in ("read-1", "read-2", "read-3"):
       _set_read_at(url, hours_ago=1)
@@ -559,7 +558,10 @@ class TestListArticlesReadWithinHours:
   def test_limit_drops_read_rows_before_old_unread(self):
     self._seed()
     newest = repo.list_articles(
-      unread=True, read_within_hours=24, limit=2, order="newest",
+      unread=True,
+      read_within_hours=24,
+      limit=2,
+      order="newest",
     )
     assert [r.url for r in newest] == ["read-3", "old-unread"]
     oldest = repo.list_articles(unread=True, read_within_hours=24, limit=2)
@@ -571,14 +573,20 @@ class TestListArticlesReadWithinHours:
     # nothing here so only the trim decides what survives.
     repo.add_filter("/^never-matches$/")
     rows = repo.list_articles(
-      unread=True, read_within_hours=24, limit=2, order="newest",
+      unread=True,
+      read_within_hours=24,
+      limit=2,
+      order="newest",
     )
     assert [r.url for r in rows] == ["read-3", "old-unread"]
 
   def test_since_days_still_applies(self):
     self._seed()
     rows = repo.list_articles(
-      unread=True, read_within_hours=24, since_days=7, order="newest",
+      unread=True,
+      read_within_hours=24,
+      since_days=7,
+      order="newest",
     )
     assert [r.url for r in rows] == ["read-3", "read-2", "read-1"]
 
@@ -591,5 +599,9 @@ class TestListArticlesReadWithinHours:
     # The stale read row proves the hour cutoff was not applied.
     rows = repo.list_articles(read_within_hours=24, order="newest")
     assert [r.url for r in rows] == [
-      "read-3", "read-2", "read-1", "read-stale", "old-unread",
+      "read-3",
+      "read-2",
+      "read-1",
+      "read-stale",
+      "old-unread",
     ]

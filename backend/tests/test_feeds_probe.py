@@ -129,10 +129,14 @@ class TestExtractFeedCandidates:
       <link rel="alternate" type="application/rss+xml" href="/feed.xml" title="Main">
     </head></html>"""
     out = extract_feed_candidates(html, "https://example.com/blog")
-    assert out == [{"href": "https://example.com/feed.xml", "title": "Main", "type": "application/rss+xml"}]
+    assert out == [
+      {"href": "https://example.com/feed.xml", "title": "Main", "type": "application/rss+xml"}
+    ]
 
   def test_absolute_href_passes_through(self):
-    html = """<link rel="alternate" type="application/atom+xml" href="https://cdn.example.com/atom">"""
+    html = (
+      """<link rel="alternate" type="application/atom+xml" href="https://cdn.example.com/atom">"""
+    )
     out = extract_feed_candidates(html, "https://example.com/")
     assert out[0]["href"] == "https://cdn.example.com/atom"
 

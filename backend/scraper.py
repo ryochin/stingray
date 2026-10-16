@@ -19,10 +19,18 @@ from safe_http import SafeClient
 # Extraction rule keys. The required three identify the repeating item and its
 # title/link; the rest are optional refinements. "link" accepts the sentinel
 # "_self" meaning the item element itself is the <a> (see parse_web_page).
-ALLOWED_RULE_KEYS = frozenset({
-  "item", "title", "link", "link_attr",
-  "date", "date_attr", "thumbnail", "thumbnail_attr",
-})
+ALLOWED_RULE_KEYS = frozenset(
+  {
+    "item",
+    "title",
+    "link",
+    "link_attr",
+    "date",
+    "date_attr",
+    "thumbnail",
+    "thumbnail_attr",
+  }
+)
 REQUIRED_RULE_KEYS = ("item", "title", "link")
 SELECTOR_RULE_KEYS = ("item", "title", "link", "date", "thumbnail")
 MAX_RULE_VALUE_LEN = 200
@@ -197,14 +205,16 @@ def parse_web_page(
           thumb_url = urljoin(page_url, thumb_url)
           thumbnail_html = f'<img src="{html_escape(thumb_url)}" alt="" />'
 
-    articles.append(Article(
-      title=title,
-      url=cleaned_url,
-      source=source,
-      published=published,
-      content_snippet=snippet,
-      content_html=thumbnail_html,
-    ))
+    articles.append(
+      Article(
+        title=title,
+        url=cleaned_url,
+        source=source,
+        published=published,
+        content_snippet=snippet,
+        content_html=thumbnail_html,
+      )
+    )
 
   return articles
 

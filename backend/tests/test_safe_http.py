@@ -45,6 +45,7 @@ def _resolver(table: dict[str, list[str]]) -> safe_http.Resolver:
     if host not in table:
       raise socket.gaierror(socket.EAI_NONAME, "unknown host")
     return table[host]
+
   return resolve
 
 
@@ -70,6 +71,7 @@ def _fetch(
       resolver=None if real_dns else _resolver(dns or {}),
     ) as client:
       return await client.get(url, max_bytes=max_bytes, truncate=truncate)
+
   return asyncio.run(run())
 
 
@@ -82,31 +84,37 @@ def test_public_host_is_fetched():
   assert resp.text == "ok"
 
 
-@pytest.mark.parametrize("address", [
-  "127.0.0.1",
-  "10.0.0.5",
-  "172.16.0.1",
-  "192.168.1.10",
-  "169.254.169.254",
-  "100.64.0.1",
-  "0.0.0.0",
-  "224.0.0.1",
-  "::1",
-  "fe80::1%eth0",
-  "fc00::1",
-  "::ffff:127.0.0.1",
-  "64:ff9b::7f00:1",
-])
+@pytest.mark.parametrize(
+  "address",
+  [
+    "127.0.0.1",
+    "10.0.0.5",
+    "172.16.0.1",
+    "192.168.1.10",
+    "169.254.169.254",
+    "100.64.0.1",
+    "0.0.0.0",
+    "224.0.0.1",
+    "::1",
+    "fe80::1%eth0",
+    "fc00::1",
+    "::ffff:127.0.0.1",
+    "64:ff9b::7f00:1",
+  ],
+)
 def test_non_public_resolution_is_blocked(address: str):
   with pytest.raises(BlockedDestinationError):
     _fetch("http://evil.example/", dns={"evil.example": [address]})
 
 
-@pytest.mark.parametrize("url", [
-  "http://169.254.169.254/latest/meta-data/",
-  "http://[::1]:20080/api/health",
-  "http://127.0.0.1:5432/",
-])
+@pytest.mark.parametrize(
+  "url",
+  [
+    "http://169.254.169.254/latest/meta-data/",
+    "http://[::1]:20080/api/health",
+    "http://127.0.0.1:5432/",
+  ],
+)
 def test_ip_literal_destinations_are_blocked(url: str):
   with pytest.raises(BlockedDestinationError):
     _fetch(url)
@@ -139,10 +147,13 @@ def test_allowed_network_does_not_open_other_ranges():
     _fetch("http://nas.lan/feed", dns={"nas.lan": ["192.168.2.20"]}, allow=("192.168.1.0/24",))
 
 
-@pytest.mark.parametrize(("allowed", "url"), [
-  ("bücher.local", "http://xn--bcher-kva.local/feed"),
-  ("xn--bcher-kva.local", "http://bücher.local/feed"),
-])
+@pytest.mark.parametrize(
+  ("allowed", "url"),
+  [
+    ("bücher.local", "http://xn--bcher-kva.local/feed"),
+    ("xn--bcher-kva.local", "http://bücher.local/feed"),
+  ],
+)
 def test_allowed_hostname_matches_across_idna_forms(allowed: str, url: str):
   assert _fetch(url, allow=(allowed,)).status_code == 200
 
@@ -166,7 +177,8 @@ def test_redirect_to_a_private_address_is_blocked():
 
   with pytest.raises(BlockedDestinationError):
     _fetch(
-      "https://example.com/feed", handler=handler,
+      "https://example.com/feed",
+      handler=handler,
       dns={"example.com": [PUBLIC_IP], "internal.example": ["10.0.0.7"]},
     )
   assert seen == ["example.com"]
@@ -179,7 +191,8 @@ def test_redirect_is_followed_and_url_is_the_final_one():
     return httpx.Response(200, text="final")
 
   resp = _fetch(
-    "https://example.com/feed", handler=handler,
+    "https://example.com/feed",
+    handler=handler,
     dns={"example.com": [PUBLIC_IP], "www.example.com": [PUBLIC_IP]},
   )
   assert resp.text == "final"
@@ -225,7 +238,10 @@ def test_dns_timeout_is_a_connect_timeout(monkeypatch: pytest.MonkeyPatch):
 
   async def run() -> None:
     async with SafeClient(
-      _settings(), timeout=5, transport=httpx.MockTransport(_ok), resolver=slow,
+      _settings(),
+      timeout=5,
+      transport=httpx.MockTransport(_ok),
+      resolver=slow,
     ) as client:
       await client.get("https://example.com/")
 
@@ -246,6 +262,7 @@ def _chunked(chunks: int, size: int, served: list[int]) -> Handler:
 
   def handler(_request: httpx.Request) -> httpx.Response:
     return httpx.Response(200, content=body())
+
   return handler
 
 
@@ -287,8 +304,11 @@ def test_truncate_cuts_a_declared_oversized_body():
 def test_truncate_cuts_an_undeclared_oversized_body():
   served: list[int] = []
   resp = _fetch(
-    "https://example.com/", handler=_chunked(100, 300, served), dns=_DNS,
-    max_bytes=1000, truncate=True,
+    "https://example.com/",
+    handler=_chunked(100, 300, served),
+    dns=_DNS,
+    max_bytes=1000,
+    truncate=True,
   )
   assert resp.content == b"x" * 1000
   assert len(served) < 100
@@ -301,10 +321,11 @@ def _compressed_stream(encoding: str, payload: bytes, served: list[int] | None =
     for i in range(0, len(payload), 512):
       if served is not None:
         served.append(1)
-      yield payload[i:i + 512]
+      yield payload[i : i + 512]
 
   def handler(_request: httpx.Request) -> httpx.Response:
     return httpx.Response(200, headers={"content-encoding": encoding}, content=body())
+
   return handler
 
 
@@ -313,8 +334,10 @@ def test_limit_applies_to_the_decompressed_size():
   assert len(compressed) < 100_000
   with pytest.raises(ResponseTooLargeError):
     _fetch(
-      "https://example.com/", handler=_compressed_stream("gzip", compressed),
-      dns=_DNS, max_bytes=100_000,
+      "https://example.com/",
+      handler=_compressed_stream("gzip", compressed),
+      dns=_DNS,
+      max_bytes=100_000,
     )
 
 
@@ -324,7 +347,9 @@ def test_unsupported_encodings_are_refused_before_reading(encoding: str):
   payload = gzip.compress(gzip.compress(b"x" * 1000))
   with pytest.raises(httpx.DecodingError):
     _fetch(
-      "https://example.com/", handler=_compressed_stream(encoding, payload, served), dns=_DNS,
+      "https://example.com/",
+      handler=_compressed_stream(encoding, payload, served),
+      dns=_DNS,
     )
   assert served == []
 
@@ -363,9 +388,20 @@ def test_decoded_body_keeps_its_charset():
 # -- config --
 
 
-@pytest.mark.parametrize("entry", [
-  "", "  ", "10.0.0.0/33", "not-a-cidr/8", "nas:8080", ":80", "user@nas", "nas?x", "[nas]",
-])
+@pytest.mark.parametrize(
+  "entry",
+  [
+    "",
+    "  ",
+    "10.0.0.0/33",
+    "not-a-cidr/8",
+    "nas:8080",
+    ":80",
+    "user@nas",
+    "nas?x",
+    "[nas]",
+  ],
+)
 def test_invalid_allow_private_entries_are_rejected(entry: str):
   with pytest.raises(pydantic.ValidationError):
     AppConfig.model_validate({"fetch": {"allow_private": [entry]}})
@@ -379,7 +415,9 @@ def test_blocked_feed_does_not_fall_back_to_the_cache(monkeypatch: pytest.Monkey
 
   async def run() -> tuple[str, bool, str]:
     async with SafeClient(
-      _settings(), timeout=5, transport=httpx.MockTransport(_ok),
+      _settings(),
+      timeout=5,
+      transport=httpx.MockTransport(_ok),
       resolver=_resolver({"internal.example": ["10.0.0.7"]}),
     ) as client:
       return await feeds._fetch_with_cache(client, "http://internal.example/feed")
@@ -399,7 +437,10 @@ def test_not_modified_is_served_from_the_cache_whatever_its_length(
 
   async def run() -> tuple[str, bool, str]:
     async with SafeClient(
-      _settings(), timeout=5, transport=httpx.MockTransport(handler), resolver=_resolver(_DNS),
+      _settings(),
+      timeout=5,
+      transport=httpx.MockTransport(handler),
+      resolver=_resolver(_DNS),
     ) as client:
       return await feeds._fetch_with_cache(client, "https://example.com/feed")
 
@@ -411,7 +452,10 @@ def test_dns_failure_still_falls_back_to_the_cache(monkeypatch: pytest.MonkeyPat
 
   async def run() -> tuple[str, bool, str]:
     async with SafeClient(
-      _settings(), timeout=5, transport=httpx.MockTransport(_ok), resolver=_resolver({}),
+      _settings(),
+      timeout=5,
+      transport=httpx.MockTransport(_ok),
+      resolver=_resolver({}),
     ) as client:
       return await feeds._fetch_with_cache(client, "https://gone.example/feed")
 
@@ -428,11 +472,14 @@ def test_adding_a_feed_on_a_private_address_is_refused(monkeypatch: pytest.Monke
     return httpx.Response(200, text=_RSS, headers={"content-type": "application/rss+xml"})
 
   monkeypatch.setattr(
-    app_module, "SafeClient", partial(SafeClient, transport=httpx.MockTransport(handler)),
+    app_module,
+    "SafeClient",
+    partial(SafeClient, transport=httpx.MockTransport(handler)),
   )
   app_module.app.state.config = AppConfig()
   resp = TestClient(app_module.app).post(
-    "/api/feeds", json={"name": "", "url": "http://169.254.169.254/latest/meta-data/"},
+    "/api/feeds",
+    json={"name": "", "url": "http://169.254.169.254/latest/meta-data/"},
   )
   assert resp.status_code == 422
   assert served == []

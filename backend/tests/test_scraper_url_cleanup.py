@@ -34,7 +34,10 @@ def _feed_cfg() -> dict:
 
 def test_clean_url_fn_strips_trackers_from_scraped_url():
   articles = parse_web_page(
-    HTML_WITH_TRACKER, RULES, _feed_cfg(), clean_url_fn=clean_url,
+    HTML_WITH_TRACKER,
+    RULES,
+    _feed_cfg(),
+    clean_url_fn=clean_url,
   )
   assert [a.url for a in articles] == [
     "https://example.com/post?id=1",
@@ -44,7 +47,10 @@ def test_clean_url_fn_strips_trackers_from_scraped_url():
 
 def test_disabled_passes_through_scraped_url():
   articles = parse_web_page(
-    HTML_WITH_TRACKER, RULES, _feed_cfg(), clean_url_fn=None,
+    HTML_WITH_TRACKER,
+    RULES,
+    _feed_cfg(),
+    clean_url_fn=None,
   )
   assert [a.url for a in articles] == [
     "https://example.com/post?utm_source=site&id=1",

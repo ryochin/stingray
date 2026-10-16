@@ -53,9 +53,7 @@ class TestReorder:
     ids = [_make_feed(name) for name in ("A", "B", "C")]
     assert _feed_names() == ["A", "B", "C"]
 
-    res = _client().put(
-      "/api/feeds/reorder", json={"feed_ids": [ids[2], ids[0], ids[1]]}
-    )
+    res = _client().put("/api/feeds/reorder", json={"feed_ids": [ids[2], ids[0], ids[1]]})
 
     assert res.status_code == 204
     assert _feed_names() == ["C", "A", "B"]
@@ -64,9 +62,7 @@ class TestReorder:
     ids = [repo.create_folder(name).id for name in ("A", "B", "C")]
     assert _folder_names() == ["A", "B", "C"]
 
-    res = _client().put(
-      "/api/folders/reorder", json={"folder_ids": [ids[2], ids[0], ids[1]]}
-    )
+    res = _client().put("/api/folders/reorder", json={"folder_ids": [ids[2], ids[0], ids[1]]})
 
     assert res.status_code == 204
     assert _folder_names() == ["C", "A", "B"]
@@ -91,9 +87,7 @@ class TestFeedUpdates:
     folder = repo.create_folder("Tech")
     feed_id = _make_feed("A")
 
-    res = _client().patch(
-      f"/api/feeds/{feed_id}/folder", json={"folder_id": folder.id}
-    )
+    res = _client().patch(f"/api/feeds/{feed_id}/folder", json={"folder_id": folder.id})
 
     assert res.status_code == 200
     assert res.json()["folder_id"] == folder.id

@@ -34,11 +34,15 @@ def _seed() -> None:
     ).fetchone()
     assert row is not None
   now = datetime.now(tz=UTC)
-  repo.upsert_articles([
-    Article(title="T", url=url, source="F", published=now - timedelta(hours=h),
-            content_snippet="body")
-    for url, h in (("unread", 5), ("read", 1))
-  ], {"F": int(row["id"])})
+  repo.upsert_articles(
+    [
+      Article(
+        title="T", url=url, source="F", published=now - timedelta(hours=h), content_snippet="body"
+      )
+      for url, h in (("unread", 5), ("read", 1))
+    ],
+    {"F": int(row["id"])},
+  )
   repo.mark_read(["read"])
 
 

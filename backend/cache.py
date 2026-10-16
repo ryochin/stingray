@@ -55,13 +55,16 @@ def load_feed_cache(url: str) -> dict[str, object] | None:
 def save_feed_cache(url: str, etag: str | None, last_modified: str | None, body: str) -> None:
   content_hash = hashlib.sha256(body.encode()).hexdigest()
   path = _feed_cache_dir / f"{_feed_key(url)}.json"
-  data = json.dumps({
-    "url": url,
-    "etag": etag,
-    "last_modified": last_modified,
-    "content_hash": content_hash,
-    "body": body,
-  }, ensure_ascii=False)
+  data = json.dumps(
+    {
+      "url": url,
+      "etag": etag,
+      "last_modified": last_modified,
+      "content_hash": content_hash,
+      "body": body,
+    },
+    ensure_ascii=False,
+  )
   _atomic_write(path, data)
 
 

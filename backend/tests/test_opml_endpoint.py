@@ -140,9 +140,7 @@ class TestImport:
     positions = {f.name: f.position for f in repo.list_feeds()}
     assert positions["F1"] < positions["F2"] < positions["F3"] < positions["Loose"]
 
-  def test_skips_feeds_whose_url_already_exists(
-    self, client: TestClient, refreshes: list[str]
-  ):
+  def test_skips_feeds_whose_url_already_exists(self, client: TestClient, refreshes: list[str]):
     repo.add_feed(FeedRow(name="Existing", url="https://a.example.com/feed"))
 
     result = _import(client, OPML_TWO_FOLDERS)
@@ -192,17 +190,13 @@ class TestImport:
 
   def test_rejects_invalid_xml(self, client: TestClient):
     payload = io.BytesIO(b"<opml><body>")
-    resp = client.post(
-      "/api/opml/import", files={"file": ("bad.opml", payload, "text/xml")}
-    )
+    resp = client.post("/api/opml/import", files={"file": ("bad.opml", payload, "text/xml")})
     assert resp.status_code == 400
     assert "Invalid OPML XML" in resp.json()["detail"]
 
   def test_rejects_undecodable_bytes(self, client: TestClient):
     payload = io.BytesIO(b"\xff\xfe\x00invalid")
-    resp = client.post(
-      "/api/opml/import", files={"file": ("bad.opml", payload, "text/xml")}
-    )
+    resp = client.post("/api/opml/import", files={"file": ("bad.opml", payload, "text/xml")})
     assert resp.status_code == 400
     assert "Invalid file encoding" in resp.json()["detail"]
 

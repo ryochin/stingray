@@ -34,17 +34,25 @@ class FakeOllama:
   """Records calls and returns a canned reply (or raises) per article title."""
 
   def __init__(self, reply: dict[str, Any] | None = None) -> None:
-    self.reply: dict[str, Any] = reply if reply is not None else {
-      "title_translated": "T",
-      "summary": "S",
-      "content_translated": "C",
-    }
+    self.reply: dict[str, Any] = (
+      reply
+      if reply is not None
+      else {
+        "title_translated": "T",
+        "summary": "S",
+        "content_translated": "C",
+      }
+    )
     self.prompts: list[str] = []
     self.user_prompts: list[str] = []
     self.fail_titles: set[str] = set()
 
   async def __call__(
-    self, client: httpx.AsyncClient, model: str, system_prompt: str, user_prompt: str,
+    self,
+    client: httpx.AsyncClient,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
   ) -> dict[str, Any]:
     self.prompts.append(system_prompt)
     self.user_prompts.append(user_prompt)
@@ -65,10 +73,12 @@ def _process(article: Article, **kwargs: Any) -> tuple[str, str, str]:
   async def run() -> tuple[str, str, str]:
     async with httpx.AsyncClient() as client:
       return await summarizer.process_article(client, article, "m", native_lang="ja", **kwargs)
+
   return asyncio.run(run())
 
 
 # --- process_article: mode selection ---
+
 
 @pytest.mark.parametrize("summarize", [True, False])
 def test_translate_short_uses_full_translation(fake: FakeOllama, summarize: bool) -> None:
@@ -106,20 +116,31 @@ def test_user_prompt_contains_title_and_snippet(fake: FakeOllama) -> None:
   [("ja", "into Japanese"), ("en", "in English"), ("fr", "in fr")],
 )
 def test_prompt_uses_native_language_display_name(
-  fake: FakeOllama, native_lang: str, expected: str,
+  fake: FakeOllama,
+  native_lang: str,
+  expected: str,
 ) -> None:
   async def run() -> None:
     async with httpx.AsyncClient() as client:
       await summarizer.process_article(
-        client, _article(), "m", translate=True, summarize=True, native_lang=native_lang,
+        client,
+        _article(),
+        "m",
+        translate=True,
+        summarize=True,
+        native_lang=native_lang,
       )
+
   asyncio.run(run())
   assert expected in fake.prompts[0]
 
 
 # --- process_article: fallbacks for missing or non-str fields ---
 
-@pytest.mark.parametrize("reply", [{}, {"title_translated": 1, "summary": ["x"], "content_translated": None}])
+
+@pytest.mark.parametrize(
+  "reply", [{}, {"title_translated": 1, "summary": ["x"], "content_translated": None}]
+)
 @pytest.mark.parametrize(
   ("kwargs", "expected"),
   [
@@ -130,13 +151,17 @@ def test_prompt_uses_native_language_display_name(
   ],
 )
 def test_bad_llm_fields_fall_back(
-  fake: FakeOllama, reply: dict[str, Any], kwargs: dict[str, bool], expected: tuple[str, str, str],
+  fake: FakeOllama,
+  reply: dict[str, Any],
+  kwargs: dict[str, bool],
+  expected: tuple[str, str, str],
 ) -> None:
   fake.reply = reply
   assert _process(_article(), **kwargs) == expected
 
 
 # --- summarize_all ---
+
 
 def _summarize_all(articles: list[Article], **kwargs: Any) -> int:
   return asyncio.run(summarizer.summarize_all(articles, native_lang="ja", **kwargs))
@@ -180,7 +205,9 @@ def test_summarize_all_empty_list(fake: FakeOllama) -> None:
   assert fake.prompts == []
 
 
-def test_summarize_all_counts_failures_and_leaves_failed_articles_untouched(fake: FakeOllama) -> None:
+def test_summarize_all_counts_failures_and_leaves_failed_articles_untouched(
+  fake: FakeOllama,
+) -> None:
   ok = _article(url="https://x/ok", title="Ok")
   bad = _article(url="https://x/bad", title="Bad")
   bad.title_translated = "old title"
@@ -193,5 +220,7 @@ def test_summarize_all_counts_failures_and_leaves_failed_articles_untouched(fake
   assert failures == 1
   assert (ok.title_translated, ok.summary) == ("T", "S")
   assert (bad.title_translated, bad.summary, bad.content_translated) == (
-    "old title", "old summary", "old content",
+    "old title",
+    "old summary",
+    "old content",
   )

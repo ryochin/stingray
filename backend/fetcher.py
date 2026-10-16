@@ -135,7 +135,9 @@ async def _fetch_and_persist_feeds(
     if feed_articles:
       try:
         inserted_count = await asyncio.to_thread(
-          repo.upsert_articles, feed_articles, feed_id_map,
+          repo.upsert_articles,
+          feed_articles,
+          feed_id_map,
         )
       except Exception as e:
         persist_exc = e
@@ -151,16 +153,21 @@ async def _fetch_and_persist_feeds(
     if feed_id is None:
       return
     outcome, error = _classify_outcome(
-      source_tag, feed_kind, fetch_exc, persist_exc, inserted_count,
+      source_tag,
+      feed_kind,
+      fetch_exc,
+      persist_exc,
+      inserted_count,
     )
     try:
       await asyncio.to_thread(
-        repo.record_feed_attempt, feed_id, outcome, error=error,
+        repo.record_feed_attempt,
+        feed_id,
+        outcome,
+        error=error,
       )
     except Exception as e:
-      log.error(
-        f"  [schedule-error] {feed_cfg.get('name')}: {type(e).__name__}: {e}"
-      )
+      log.error(f"  [schedule-error] {feed_cfg.get('name')}: {type(e).__name__}: {e}")
 
   articles = await fetch_all(
     feeds_cfg,
@@ -187,16 +194,20 @@ async def _run_summarize(
   path and the background `summarize_pending` path.
   """
   short_set = {
-    a.url for a in need_llm
-    if a.content_snippet and len(a.content_snippet) < SHORT_SNIPPET_CHARS
+    a.url for a in need_llm if a.content_snippet and len(a.content_snippet) < SHORT_SNIPPET_CHARS
   }
   model = config.ollama.model
   base_url = os.environ.get("OLLAMA_BASE_URL") or config.ollama.base_url
   timeout = config.ollama.timeout
   log.step(f"{log_prefix} {len(need_llm)} articles with {model}...")
   failures: int = await summarize_all(
-    need_llm, model=model, base_url=base_url, timeout=timeout,
-    translate_set=translate_set, summarize_set=summarize_set, short_set=short_set,
+    need_llm,
+    model=model,
+    base_url=base_url,
+    timeout=timeout,
+    translate_set=translate_set,
+    summarize_set=summarize_set,
+    short_set=short_set,
     native_lang=config.native_lang,
   )
   if failures:
@@ -243,7 +254,8 @@ async def _run_llm_pass(
   # _needs_llm internalizes the feed-level gate: a feed with neither translate
   # nor summarize yields False for every article, so no separate gate is needed.
   candidate_urls = [
-    a.url for a in articles
+    a.url
+    for a in articles
     if _needs_llm(
       a,
       translate=translate_map.get(a.source, False),
@@ -253,7 +265,9 @@ async def _run_llm_pass(
   if candidate_urls:
     async with _wait_for_summarize_lock():
       pending = await asyncio.to_thread(
-        repo.list_pending_summaries, limit=None, urls=candidate_urls,
+        repo.list_pending_summaries,
+        limit=None,
+        urls=candidate_urls,
       )
       if pending:
         return await _summarize_rows(pending, config, log_prefix="Processing")
@@ -261,9 +275,7 @@ async def _run_llm_pass(
   return 0
 
 
-async def _backfill_site_urls(
-  feeds: list[FeedRow], fetch_settings: FetchSettings
-) -> None:
+async def _backfill_site_urls(feeds: list[FeedRow], fetch_settings: FetchSettings) -> None:
   """Look up `site_url` for any feed missing it by fetching the feed URL and
   scraping its declared site link. Runs feeds in parallel (capped) to keep
   refresh latency from scaling linearly with the missing count.
@@ -325,7 +337,11 @@ async def refresh_all(
       if not got_lock:
         log.info("Refresh skipped: another refresh is already running.")
         await asyncio.to_thread(
-          repo.finish_refresh_job, job_id, "skipped", 0, "another refresh is running",
+          repo.finish_refresh_job,
+          job_id,
+          "skipped",
+          0,
+          "another refresh is running",
         )
         return result
 
@@ -343,7 +359,9 @@ async def refresh_all(
 
       log.step(f"Fetching feeds... ({len(feeds)} due, force={force})")
       articles, new_count = await _fetch_and_persist_feeds(
-        feeds_cfg, feed_id_map, config,
+        feeds_cfg,
+        feed_id_map,
+        config,
       )
       log.info(f"  {len(articles)} articles total, {new_count} new saved.")
       result.total_articles = len(articles)
@@ -355,7 +373,9 @@ async def refresh_all(
         return result
 
       restored = await asyncio.to_thread(
-        enrich_from_legacy_cache, articles, Path(config.cache_dir),
+        enrich_from_legacy_cache,
+        articles,
+        Path(config.cache_dir),
       )
       if restored:
         # The LLM pass re-reads rows from the DB, so store these first.
@@ -401,7 +421,10 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
 
 
 async def _summarize_rows(
-  rows: list[ArticleRow], config: AppConfig, *, log_prefix: str,
+  rows: list[ArticleRow],
+  config: AppConfig,
+  *,
+  log_prefix: str,
 ) -> int:
   """Run the LLM over pending DB rows and store its output. Callers must hold
   the LLM lock through the store. Returns the number of LLM failures.
@@ -425,24 +448,25 @@ async def _summarize_rows(
     for row in rows
   ]
   translate_set: set[str] = {
-    row.source for row in rows
-    if row.feed_id and feed_translate.get(row.feed_id, False)
+    row.source for row in rows if row.feed_id and feed_translate.get(row.feed_id, False)
   }
   summarize_set: set[str] = {
-    row.source for row in rows
-    if row.feed_id and feed_summarize.get(row.feed_id, False)
+    row.source for row in rows if row.feed_id and feed_summarize.get(row.feed_id, False)
   }
   need_llm = [
-    a for a in articles
-    if _needs_llm(
-      a, translate=a.source in translate_set, summarize=a.source in summarize_set
-    )
+    a
+    for a in articles
+    if _needs_llm(a, translate=a.source in translate_set, summarize=a.source in summarize_set)
   ]
   if not need_llm:
     return 0
 
   failures = await _run_summarize(
-    need_llm, translate_set, summarize_set, config, log_prefix=log_prefix,
+    need_llm,
+    translate_set,
+    summarize_set,
+    config,
+    log_prefix=log_prefix,
   )
   for article in need_llm:
     if article.title_translated or article.summary or article.content_translated:

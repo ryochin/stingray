@@ -213,8 +213,11 @@ def get_articles(
 ) -> list[ArticleRow]:
   config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
   return repo.list_articles(
-    feed_id=feed_id, unread=unread, since_days=since_days,
-    read_within_hours=read_within_hours, limit=limit,
+    feed_id=feed_id,
+    unread=unread,
+    since_days=since_days,
+    read_within_hours=read_within_hours,
+    limit=limit,
     order=config.article_order,
   )
 
@@ -364,9 +367,7 @@ def _is_html(content_type: str, body: str) -> bool:
   return "<html" in prefix
 
 
-async def _probe_feed(
-  url: str, *, native_lang: str, fetch_settings: FetchSettings
-) -> ProbeResult:
+async def _probe_feed(url: str, *, native_lang: str, fetch_settings: FetchSettings) -> ProbeResult:
   """Fetch a feed URL and extract its title, translate flag, and site URL.
 
   If the URL is not a valid RSS/Atom feed, detect it as a web page.
@@ -438,18 +439,24 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
     async with SafeClient(fetch_settings, timeout=30) as client:
       if feed.extraction_rules and feed.extraction_rules != "{}":
         articles, was_cached = await fetch_web_page(
-          client, feed_cfg, clean_url_fn=clean_url_fn,
+          client,
+          feed_cfg,
+          clean_url_fn=clean_url_fn,
         )
       elif feed.extraction_rules is not None:
         log.warn(f"  Skipping '{feed.name}': extraction rules not configured yet.")
         await asyncio.to_thread(
-          repo.update_feed_fetch_status, feed.id,
-          health="degraded", error="extraction rules not configured",
+          repo.update_feed_fetch_status,
+          feed.id,
+          health="degraded",
+          error="extraction rules not configured",
         )
         return
       else:
         articles, was_cached, source_tag = await fetch_rss(
-          client, feed_cfg, clean_url_fn=clean_url_fn,
+          client,
+          feed_cfg,
+          clean_url_fn=clean_url_fn,
         )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     source = "cache" if was_cached else "fresh"
@@ -461,7 +468,9 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
       log.info("  No articles returned.")
     if not feed.site_url and feed.url:
       probe = await _probe_feed(
-        feed.url, native_lang=config.native_lang, fetch_settings=fetch_settings,
+        feed.url,
+        native_lang=config.native_lang,
+        fetch_settings=fetch_settings,
       )
       if probe.site_url:
         await asyncio.to_thread(repo.update_feed_site_url, feed.id, probe.site_url)
@@ -480,7 +489,8 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
   config: AppConfig = request.app.state.config  # type: ignore[attr-defined]
   log.step(f"Probing feed: {body.url}")
   probe = await _probe_feed(
-    body.url, native_lang=config.native_lang,
+    body.url,
+    native_lang=config.native_lang,
     fetch_settings=FetchSettings.from_config(config),
   )
   if not body.name.strip():
@@ -501,7 +511,9 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
     # to the client instead of silently creating a web-scrape placeholder —
     # the user almost certainly wants to subscribe to the real feed.
     if probe.feed_candidates:
-      log.info(f"  HTML page with {len(probe.feed_candidates)} feed candidate(s). Returning for user selection.")
+      log.info(
+        f"  HTML page with {len(probe.feed_candidates)} feed candidate(s). Returning for user selection."
+      )
       raise HTTPException(
         422,
         detail={
@@ -511,10 +523,14 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
         },
       )
     extraction_rules = "{}"
-    log.info("  Web page detected with no feed candidates. Extraction rules can be set in feed settings.")
+    log.info(
+      "  Web page detected with no feed candidates. Extraction rules can be set in feed settings."
+    )
   else:
     if not probe.title and not probe.site_url:
-      raise HTTPException(422, "Could not parse this URL. Check the URL and server logs for details.")
+      raise HTTPException(
+        422, "Could not parse this URL. Check the URL and server logs for details."
+      )
     log.info(f"  RSS feed: {probe.title or '(no title)'}")
 
   feed = FeedRow(**body.model_dump(), site_url=probe.site_url, extraction_rules=extraction_rules)
@@ -661,7 +677,9 @@ async def infer_feed_rules(feed_id: int, request: Request) -> InferRulesResponse
   try:
     async with SafeClient(FetchSettings.from_config(config), timeout=30) as client:
       resp = await client.get(
-        feed.url, max_bytes=_INFER_MAX_HTML_FETCH_BYTES, truncate=True,
+        feed.url,
+        max_bytes=_INFER_MAX_HTML_FETCH_BYTES,
+        truncate=True,
       )
       resp.raise_for_status()
       html = resp.content.decode(resp.encoding or "utf-8", errors="ignore")
@@ -670,9 +688,13 @@ async def infer_feed_rules(feed_id: int, request: Request) -> InferRulesResponse
     raise HTTPException(502, f"Failed to fetch page: {e}") from e
 
   clean_url_fn = clean_url if config.url_cleanup.enabled else None
-  async with _infer_semaphore, httpx.AsyncClient(
-    base_url=ollama_url, timeout=config.ollama.timeout,
-  ) as ollama_client:
+  async with (
+    _infer_semaphore,
+    httpx.AsyncClient(
+      base_url=ollama_url,
+      timeout=config.ollama.timeout,
+    ) as ollama_client,
+  ):
     result = await infer_and_validate(
       ollama_client,
       config.ollama.model,
@@ -690,8 +712,7 @@ async def infer_feed_rules(feed_id: int, request: Request) -> InferRulesResponse
   return InferRulesResponse(
     rules=result.rules,
     sample_articles=[
-      SampleArticle(title=a.title, url=a.url, published=a.published)
-      for a in result.sample_articles
+      SampleArticle(title=a.title, url=a.url, published=a.published) for a in result.sample_articles
     ],
     attempts=result.attempts,
     status=result.status,
@@ -927,7 +948,9 @@ async def _persist_opml_import(
   """
   async with _opml_import_lock:
     return await asyncio.to_thread(
-      _persist_opml_feeds, imported_folders, uncategorized,
+      _persist_opml_feeds,
+      imported_folders,
+      uncategorized,
     )
 
 
@@ -1040,7 +1063,9 @@ def get_status(request: Request) -> StatusResponse:
   llm_enabled = config.ollama.enabled
   job = repo.get_latest_refresh_job()
   if job is None:
-    return StatusResponse(running=False, llm_enabled=llm_enabled, llm_available=llm_ok, llm_error=llm_err)
+    return StatusResponse(
+      running=False, llm_enabled=llm_enabled, llm_available=llm_ok, llm_error=llm_err
+    )
   return StatusResponse(
     running=job.status == "running",
     last_started_at=job.started_at,

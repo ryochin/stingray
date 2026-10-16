@@ -76,9 +76,15 @@ def _run_main(monkeypatch, *, enabled: bool, argv: list[str]) -> tuple[int, dict
   """Run healthcheck.main() with all checks stubbed, counting each check call."""
   calls = {"db": 0, "job": 0, "llm": 0}
   monkeypatch.setattr(healthcheck, "_check_db", lambda: calls.update(db=calls["db"] + 1))
-  monkeypatch.setattr(healthcheck, "_check_recent_job", lambda max_age_minutes: calls.update(job=calls["job"] + 1))
-  monkeypatch.setattr(healthcheck, "_check_llm", lambda base_url, timeout: calls.update(llm=calls["llm"] + 1))
-  monkeypatch.setattr(healthcheck, "_load_config", lambda: AppConfig(ollama=OllamaConfig(enabled=enabled)))
+  monkeypatch.setattr(
+    healthcheck, "_check_recent_job", lambda max_age_minutes: calls.update(job=calls["job"] + 1)
+  )
+  monkeypatch.setattr(
+    healthcheck, "_check_llm", lambda base_url, timeout: calls.update(llm=calls["llm"] + 1)
+  )
+  monkeypatch.setattr(
+    healthcheck, "_load_config", lambda: AppConfig(ollama=OllamaConfig(enabled=enabled))
+  )
   monkeypatch.setattr("sys.argv", ["healthcheck.py", *argv])
   return healthcheck.main(), calls
 
@@ -101,7 +107,9 @@ class TestLlmGating:
     llm_calls: list[str] = []
     monkeypatch.setattr(healthcheck, "_check_db", lambda: None)
     monkeypatch.setattr(healthcheck, "_check_recent_job", lambda max_age_minutes: None)
-    monkeypatch.setattr(healthcheck, "_check_llm", lambda base_url, timeout: llm_calls.append(base_url))
+    monkeypatch.setattr(
+      healthcheck, "_check_llm", lambda base_url, timeout: llm_calls.append(base_url)
+    )
 
     def _fail() -> AppConfig:
       raise AssertionError("_load_config must not be called with --skip-llm-check")
@@ -115,7 +123,9 @@ class TestLlmGating:
     llm_calls: list[str] = []
     monkeypatch.setattr(healthcheck, "_check_db", lambda: None)
     monkeypatch.setattr(healthcheck, "_check_recent_job", lambda max_age_minutes: None)
-    monkeypatch.setattr(healthcheck, "_check_llm", lambda base_url, timeout: llm_calls.append(base_url))
+    monkeypatch.setattr(
+      healthcheck, "_check_llm", lambda base_url, timeout: llm_calls.append(base_url)
+    )
 
     def _boom() -> AppConfig:
       raise ValueError("bad config")

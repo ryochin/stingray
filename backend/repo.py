@@ -149,9 +149,7 @@ def list_due_feeds(force: bool = False) -> list[FeedRow]:
   """
   with db.connection() as conn:
     if force:
-      rows = conn.execute(
-        f"SELECT * FROM feeds WHERE enabled {_FEED_ORDER}"
-      ).fetchall()
+      rows = conn.execute(f"SELECT * FROM feeds WHERE enabled {_FEED_ORDER}").fetchall()
     else:
       rows = conn.execute(
         f"SELECT * FROM feeds "
@@ -654,7 +652,8 @@ def get_feed_stats() -> dict[int, FeedStats]:
     sql.Identifier(c) for c in ("feed_id", "read_at", "published", *match_columns)
   )
   query = sql.SQL("SELECT {columns} FROM articles WHERE {where}").format(
-    columns=columns, where=where,
+    columns=columns,
+    where=where,
   )
   with db.connection() as conn:
     rows = conn.execute(query, match_params).fetchall()
@@ -696,8 +695,7 @@ def update_feed_fetch_status(
   with db.connection() as conn:
     if health == "ok":
       conn.execute(
-        "UPDATE feeds SET last_fetched_at = NOW(), last_error = NULL, "
-        "health = 'ok' WHERE id = %s",
+        "UPDATE feeds SET last_fetched_at = NOW(), last_error = NULL, health = 'ok' WHERE id = %s",
         (feed_id,),
       )
     elif health == "degraded":
@@ -712,8 +710,7 @@ def update_feed_fetch_status(
         )
       else:
         conn.execute(
-          "UPDATE feeds SET last_fetched_at = NOW(), health = 'degraded' "
-          "WHERE id = %s",
+          "UPDATE feeds SET last_fetched_at = NOW(), health = 'degraded' WHERE id = %s",
           (feed_id,),
         )
     else:  # failing: a hard failure must not advance last_fetched_at
@@ -790,7 +787,7 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
   total = 0
   with db.connection() as conn, conn.cursor() as cur:
     for start in range(0, len(unique_articles), _UPSERT_CHUNK):
-      chunk = unique_articles[start:start + _UPSERT_CHUNK]
+      chunk = unique_articles[start : start + _UPSERT_CHUNK]
       values_sql = sql.SQL(", ").join(
         sql.SQL("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)") for _ in chunk
       )
@@ -809,18 +806,20 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
       ).format(values=values_sql)
       params: list[Any] = []
       for a in chunk:
-        params.extend((
-          a.url,
-          feed_id_map.get(a.source),
-          a.title,
-          a.title_translated or None,
-          a.source,
-          a.published,
-          a.content_snippet or None,
-          a.summary or None,
-          a.content_html or None,
-          a.content_translated or None,
-        ))
+        params.extend(
+          (
+            a.url,
+            feed_id_map.get(a.source),
+            a.title,
+            a.title_translated or None,
+            a.source,
+            a.published,
+            a.content_snippet or None,
+            a.summary or None,
+            a.content_html or None,
+            a.content_translated or None,
+          )
+        )
       rows = cur.execute(query, params).fetchall()
       total += sum(1 for r in rows if r["inserted"])
   return total
@@ -854,16 +853,12 @@ def list_articles(
     params.append(feed_id)
   prefer_unread = unread and read_within_hours is not None
   if prefer_unread:
-    clauses.append(sql.SQL(
-      "(read_at IS NULL OR read_at >= NOW() - %s * INTERVAL '1 hour')"
-    ))
+    clauses.append(sql.SQL("(read_at IS NULL OR read_at >= NOW() - %s * INTERVAL '1 hour')"))
     params.append(read_within_hours)
   elif unread:
     clauses.append(sql.SQL("read_at IS NULL"))
   if since_days is not None:
-    clauses.append(sql.SQL(
-      "COALESCE(published, fetched_at) >= NOW() - %s * INTERVAL '1 day'"
-    ))
+    clauses.append(sql.SQL("COALESCE(published, fetched_at) >= NOW() - %s * INTERVAL '1 day'"))
     params.append(since_days)
   if match_expr is not None:
     clauses.append(sql.SQL("NOT (") + match_expr + sql.SQL(")"))
@@ -883,9 +878,7 @@ def list_articles(
   # fetch batch whose feed emits a coarse-granularity pubDate) come back in
   # an implementation-defined order that shuffles between requests.
   # `url` is the PK so the ordering is fully deterministic.
-  date_order = sql.SQL(
-    "COALESCE(published, fetched_at) DESC NULLS LAST, fetched_at DESC, url DESC"
-  )
+  date_order = sql.SQL("COALESCE(published, fetched_at) DESC NULLS LAST, fetched_at DESC, url DESC")
   if prefer_unread:
     # Pick which rows survive LIMIT unread-first, then hand them back in the
     # usual date order.
@@ -896,9 +889,9 @@ def list_articles(
       ") picked ORDER BY {date_order}"
     ).format(where=where, date_order=date_order)
   else:
-    query = sql.SQL(
-      "SELECT * FROM articles {where} ORDER BY {date_order} LIMIT %s"
-    ).format(where=where, date_order=date_order)
+    query = sql.SQL("SELECT * FROM articles {where} ORDER BY {date_order} LIMIT %s").format(
+      where=where, date_order=date_order
+    )
   with db.connection() as conn:
     rows = conn.execute(query, params).fetchall()
   if regex_filters:
@@ -917,13 +910,14 @@ def _trim_unread_first(articles: list[ArticleRow], limit: int) -> list[ArticleRo
   if len(articles) <= limit:
     return articles
   unread = [a for a in articles if a.read_at is None][:limit]
-  read = [a for a in articles if a.read_at is not None][:limit - len(unread)]
+  read = [a for a in articles if a.read_at is not None][: limit - len(unread)]
   keep: set[str] = {a.url for a in unread} | {a.url for a in read}
   return [a for a in articles if a.url in keep]
 
 
 def list_pending_summaries(
-  limit: int | None = 5, urls: list[str] | None = None,
+  limit: int | None = 5,
+  urls: list[str] | None = None,
 ) -> list[ArticleRow]:
   """Find articles of enabled feeds needing LLM processing, oldest first.
 

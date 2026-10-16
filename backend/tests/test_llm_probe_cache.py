@@ -111,7 +111,9 @@ class TestTtlCache:
 
   def test_retry_stops_at_first_success(self, monkeypatch: pytest.MonkeyPatch):
     results: list[tuple[bool, str | None]] = [
-      (False, "timeout"), (True, None), (True, None),
+      (False, "timeout"),
+      (True, None),
+      (True, None),
     ]
     calls: list[str] = []
 
@@ -179,9 +181,7 @@ class _SuspendedProbe:
 
   def __enter__(self) -> _SuspendedProbe:
     _stub_once(self._monkeypatch, self._once)
-    self._thread = threading.Thread(
-      target=lambda: self.returned.update(value=app._probe_llm(URL))
-    )
+    self._thread = threading.Thread(target=lambda: self.returned.update(value=app._probe_llm(URL)))
     self._thread.start()
     if not self._entered.wait(timeout=5):
       # __exit__ does not run when __enter__ raises, so reap the thread here.
@@ -215,9 +215,7 @@ class TestInflightDeduplication:
 
     assert probe.returned["value"] == (False, "ReadTimeout")
 
-  def test_concurrent_first_caller_shares_the_running_probe(
-    self, monkeypatch: pytest.MonkeyPatch
-  ):
+  def test_concurrent_first_caller_shares_the_running_probe(self, monkeypatch: pytest.MonkeyPatch):
     """The case that matters when Ollama is down at startup: nothing is cached,
     so there is no stale value to serve. The second caller must wait for the
     running probe and reuse its result instead of starting a second one.
@@ -257,9 +255,7 @@ class TestInflightDeduplication:
     app._probe_llm(URL)
     assert URL not in app._llm_probe_inflight
 
-  def test_inflight_marker_is_cleared_when_the_probe_raises(
-    self, monkeypatch: pytest.MonkeyPatch
-  ):
+  def test_inflight_marker_is_cleared_when_the_probe_raises(self, monkeypatch: pytest.MonkeyPatch):
     """_probe_llm_once swallows exceptions today, but a leaked marker would
     wedge the endpoint into permanently serving stale results."""
 

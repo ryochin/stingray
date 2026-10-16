@@ -253,7 +253,10 @@ class TestExportOpml:
     assert "xmlUrl" not in xml
 
   def test_round_trip_preserves_translate(self):
-    feeds = [_feed(name="F1", translate=True), _feed(id=2, name="F2", translate=False, url="https://example.jp/")]
+    feeds = [
+      _feed(name="F1", translate=True),
+      _feed(id=2, name="F2", translate=False, url="https://example.jp/"),
+    ]
     xml = opml.export_opml([], feeds)
     _, parsed = opml.parse_opml(xml, native_lang="ja")
     by_name = {f.name: f for f in parsed}

@@ -25,8 +25,15 @@ from scraper import parse_web_page, validate_extraction_rules
 # is intentionally excluded: article cards commonly wrap their title/link in a
 # nested <header>, so stripping it would erase the very structure we infer.
 _NOISE_TAGS = (
-  "script", "style", "svg", "noscript", "template", "iframe",
-  "nav", "aside", "footer",
+  "script",
+  "style",
+  "svg",
+  "noscript",
+  "template",
+  "iframe",
+  "nav",
+  "aside",
+  "footer",
 )
 # Attributes worth keeping for selector inference; everything else is stripped
 # to cut tokens (inline styles, event handlers, framework data-* noise).
@@ -121,10 +128,20 @@ def _coerce_str_dict(value: Any) -> dict[str, str]:
 # rather than an individual article — a weak signal used only to rank candidates.
 # Matched per segment (not substring) so "/tag", "/tag/x", "/category" all hit
 # while an article slug that merely contains "page" does not.
-_INDEX_PATH_SEGMENTS = frozenset({
-  "tag", "tags", "category", "categories", "author", "authors",
-  "page", "archive", "archives", "search",
-})
+_INDEX_PATH_SEGMENTS = frozenset(
+  {
+    "tag",
+    "tags",
+    "category",
+    "categories",
+    "author",
+    "authors",
+    "page",
+    "archive",
+    "archives",
+    "search",
+  }
+)
 
 
 def _looks_like_article_url(url: str) -> bool:

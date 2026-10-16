@@ -134,21 +134,15 @@ class TestSummarizeOnly:
     )
 
   def test_short_content_no_llm(self):
-    assert not _needs_llm(
-      _art(content_snippet=SHORT), translate=False, summarize=True
-    )
+    assert not _needs_llm(_art(content_snippet=SHORT), translate=False, summarize=True)
 
   def test_long_content_without_summary_needs_llm(self):
-    assert _needs_llm(
-      _art(content_snippet=LONG), translate=False, summarize=True
-    )
+    assert _needs_llm(_art(content_snippet=LONG), translate=False, summarize=True)
 
   def test_empty_content_not_needed(self):
     # Empty snippet is treated as short, mirroring the SQL pending query which
     # excludes native feeds whose content is shorter than the threshold.
-    assert not _needs_llm(
-      _art(content_snippet=""), translate=False, summarize=True
-    )
+    assert not _needs_llm(_art(content_snippet=""), translate=False, summarize=True)
 
 
 class TestNeitherFlag:

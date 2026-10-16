@@ -47,9 +47,7 @@ def _insert_feed(*, web: bool) -> int:
 
 def _stored_rules(feed_id: int) -> str | None:
   with db.connection() as conn:
-    row = conn.execute(
-      "SELECT extraction_rules FROM feeds WHERE id = %s", (feed_id,)
-    ).fetchone()
+    row = conn.execute("SELECT extraction_rules FROM feeds WHERE id = %s", (feed_id,)).fetchone()
   assert row is not None
   return row["extraction_rules"]
 
@@ -66,11 +64,11 @@ def _mock_inference(monkeypatch: pytest.MonkeyPatch, rules: dict[str, Any]) -> N
   async def public_dns(_host: str, _port: int) -> list[str]:
     return ["93.184.216.34"]
 
-  transport = httpx.MockTransport(
-    lambda _req: httpx.Response(200, html=LIST_HTML)
-  )
+  transport = httpx.MockTransport(lambda _req: httpx.Response(200, html=LIST_HTML))
   monkeypatch.setattr(
-    app_module, "SafeClient", partial(SafeClient, transport=transport, resolver=public_dns),
+    app_module,
+    "SafeClient",
+    partial(SafeClient, transport=transport, resolver=public_dns),
   )
 
   async def fake_ollama(*_a: Any, **_kw: Any) -> dict[str, Any]:
@@ -126,7 +124,9 @@ class _Captured(Exception):
   pass
 
 
-def test_page_is_truncated_at_5_mib_whatever_the_fetch_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_page_is_truncated_at_5_mib_whatever_the_fetch_limit(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
   feed_id = _insert_feed(web=True)
   monkeypatch.setattr(app_module, "_probe_llm", lambda _url: (True, None))
   served: list[int] = []
@@ -141,7 +141,9 @@ def test_page_is_truncated_at_5_mib_whatever_the_fetch_limit(monkeypatch: pytest
 
   transport = httpx.MockTransport(lambda _req: httpx.Response(200, content=huge_page()))
   monkeypatch.setattr(
-    app_module, "SafeClient", partial(SafeClient, transport=transport, resolver=public_dns),
+    app_module,
+    "SafeClient",
+    partial(SafeClient, transport=transport, resolver=public_dns),
   )
   seen: list[int] = []
 

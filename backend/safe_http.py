@@ -224,13 +224,13 @@ def _check_content_encoding(response: httpx.Response) -> None:
   would void the expansion bound above.
   """
   tokens = [
-    t.strip().lower()
-    for t in response.headers.get_list("content-encoding", split_commas=True)
+    t.strip().lower() for t in response.headers.get_list("content-encoding", split_commas=True)
   ]
   layers = [t for t in tokens if t and t != "identity"]
   if any(t not in _COMPRESSIONS for t in layers) or len(layers) > 1:
     raise httpx.DecodingError(
-      f"Unsupported content encoding: {', '.join(tokens)}", request=response.request,
+      f"Unsupported content encoding: {', '.join(tokens)}",
+      request=response.request,
     )
 
 
@@ -245,7 +245,8 @@ async def _read_limited(response: httpx.Response, limit: int, *, truncate: bool)
     and int(declared) > limit
   ):
     raise ResponseTooLargeError(
-      f"Response is {declared} bytes, over the {limit}-byte limit", request=response.request,
+      f"Response is {declared} bytes, over the {limit}-byte limit",
+      request=response.request,
     )
   chunks: list[bytes] = []
   size = 0
@@ -254,7 +255,8 @@ async def _read_limited(response: httpx.Response, limit: int, *, truncate: bool)
     if len(chunk) > remaining:
       if not truncate:
         raise ResponseTooLargeError(
-          f"Response exceeds the {limit}-byte limit", request=response.request,
+          f"Response exceeds the {limit}-byte limit",
+          request=response.request,
         )
       chunks.append(chunk[:remaining])
       break

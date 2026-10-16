@@ -152,7 +152,9 @@ async def summarize_all(
         log.dim(f"  [{idx + 1}/{total}] {article.title[:60]}...")
         try:
           title_translated, summary, content_translated = await process_article(
-            client, article, model,
+            client,
+            article,
+            model,
             translate=article.source in _translate_set,
             summarize=article.source in _summarize_set,
             native_lang=native_lang,

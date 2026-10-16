@@ -92,10 +92,6 @@ def clean_url(url: str) -> str:
   parts = urlsplit(url)
   if not parts.query:
     return url
-  kept = [
-    (k, v)
-    for k, v in parse_qsl(parts.query, keep_blank_values=True)
-    if not _is_tracker(k)
-  ]
+  kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _is_tracker(k)]
   new_query = urlencode(kept, doseq=False)
   return urlunsplit(parts._replace(query=new_query))

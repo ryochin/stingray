@@ -19,16 +19,19 @@ class TestValidateExtractionRules:
 
   def test_optional_fields_are_kept(self):
     raw = {
-      "item": "li", "title": "h2", "link": "a",
-      "link_attr": "href", "date": "time", "date_attr": "datetime",
-      "thumbnail": "img", "thumbnail_attr": "src",
+      "item": "li",
+      "title": "h2",
+      "link": "a",
+      "link_attr": "href",
+      "date": "time",
+      "date_attr": "datetime",
+      "thumbnail": "img",
+      "thumbnail_attr": "src",
     }
     assert validate_extraction_rules(raw) == raw
 
   def test_values_are_trimmed_and_empty_dropped(self):
-    rules = validate_extraction_rules(
-      {"item": " li ", "title": "a", "link": "a", "date": "  "}
-    )
+    rules = validate_extraction_rules({"item": " li ", "title": "a", "link": "a", "date": "  "})
     assert rules["item"] == "li"
     assert "date" not in rules  # blank optional value is dropped
 
@@ -50,9 +53,7 @@ class TestValidateExtractionRules:
 
   def test_null_optional_is_treated_as_omitted(self):
     # LLMs fill optional fields with null instead of omitting them; drop, not reject.
-    rules = validate_extraction_rules(
-      {"item": "li", "title": "a", "link": "a", "thumbnail": None}
-    )
+    rules = validate_extraction_rules({"item": "li", "title": "a", "link": "a", "thumbnail": None})
     assert rules == {"item": "li", "title": "a", "link": "a"}
 
   def test_null_required_field_still_rejected(self):

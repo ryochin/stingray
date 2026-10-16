@@ -45,9 +45,15 @@ def _make_article(
             content_snippet, summary, content_translated)
          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
       (
-        url, feed_id, title, title_translated, "test",
+        url,
+        feed_id,
+        title,
+        title_translated,
+        "test",
         published or datetime.now(tz=UTC),
-        content_snippet, summary, content_translated,
+        content_snippet,
+        summary,
+        content_translated,
       ),
     )
 
@@ -91,7 +97,8 @@ class TestTranslateOnlyFeed:
   def test_short_article_fully_translated_not_pending(self):
     fid = _make_feed(translate=True, summarize=False)
     _make_article(
-      feed_id=fid, url="u1",
+      feed_id=fid,
+      url="u1",
       title_translated="Translated title",
       content_translated="Translated body",
       content_snippet="short",
@@ -115,8 +122,10 @@ class TestTranslatingFeed:
   def test_title_translated_but_no_summary_or_content_is_pending(self):
     fid = _make_feed(translate=True, summarize=True)
     _make_article(
-      feed_id=fid, url="u1",
-      title_translated="Translated title", content_snippet="any",
+      feed_id=fid,
+      url="u1",
+      title_translated="Translated title",
+      content_snippet="any",
     )
     assert _urls(repo.list_pending_summaries()) == {"u1"}
 
@@ -124,8 +133,10 @@ class TestTranslatingFeed:
     # Even without summary, having content_translated is enough for the "short path".
     fid = _make_feed(translate=True, summarize=True)
     _make_article(
-      feed_id=fid, url="u1",
-      title_translated="Translated title", content_translated="Translated body",
+      feed_id=fid,
+      url="u1",
+      title_translated="Translated title",
+      content_translated="Translated body",
     )
     assert repo.list_pending_summaries() == []
 
@@ -140,8 +151,11 @@ class TestTranslatingFeed:
     # body translation, so title + summary completes it.
     fid = _make_feed(translate=True, summarize=True)
     _make_article(
-      feed_id=fid, url="u1",
-      title_translated="Translated title", summary="Summary text", content_snippet="x" * 400,
+      feed_id=fid,
+      url="u1",
+      title_translated="Translated title",
+      summary="Summary text",
+      content_snippet="x" * 400,
     )
     assert repo.list_pending_summaries() == []
 

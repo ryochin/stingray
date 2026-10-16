@@ -64,8 +64,12 @@ def main() -> int:
   parser = argparse.ArgumentParser()
   parser.add_argument("--max-age-minutes", type=int, default=45)
   parser.add_argument("--llm-timeout", type=float, default=5.0)
-  parser.add_argument("--skip-job-check", action="store_true", help="Skip the refresh_jobs age check (use for web).")
-  parser.add_argument("--skip-llm-check", action="store_true", help="Skip the LLM reachability check (use for web).")
+  parser.add_argument(
+    "--skip-job-check", action="store_true", help="Skip the refresh_jobs age check (use for web)."
+  )
+  parser.add_argument(
+    "--skip-llm-check", action="store_true", help="Skip the LLM reachability check (use for web)."
+  )
   args = parser.parse_args()
 
   base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
