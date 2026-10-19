@@ -15,10 +15,14 @@ runs; the DB comes from the `clean_db` fixture.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 import app as app_module
+import cache
 import db
 import repo
 
@@ -46,6 +50,25 @@ def _feed_names() -> list[str]:
 
 def _folder_names() -> list[str]:
   return [f.name for f in repo.list_folders()]
+
+
+def _row_count(table: str) -> int:
+  with db.connection() as conn:
+    row = conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()
+    assert row is not None
+    return int(row["n"])
+
+
+@pytest.fixture
+def cache_dir(tmp_path: Path) -> Iterator[Path]:
+  """Point the feed cache at a tmp dir. DELETE /api/feeds purges it, and the
+  default location is the repo's cache/ — the live one inside the container."""
+  original_cache = cache._cache_dir
+  original_feed = cache._feed_cache_dir
+  cache.configure(tmp_path)
+  yield tmp_path
+  cache._cache_dir = original_cache
+  cache._feed_cache_dir = original_feed
 
 
 class TestReorder:
@@ -77,6 +100,67 @@ class TestDeleteFeed:
 
     assert res.status_code == 204
     assert [f.id for f in repo.list_feeds()] == [keep]
+
+
+class TestDeleteFolder:
+  def test_deletes_only_the_requested_folder(self):
+    keep = repo.create_folder("keep")
+    doomed = repo.create_folder("doomed")
+
+    res = _client().delete(f"/api/folders/{doomed.id}")
+
+    assert res.status_code == 204
+    assert [f.id for f in repo.list_folders()] == [keep.id]
+
+  def test_feeds_in_the_folder_survive_unfiled(self):
+    folder = repo.create_folder("Tech")
+    feed_id = _make_feed("A", folder.id)
+
+    _client().delete(f"/api/folders/{folder.id}")
+
+    feed = repo.get_feed_by_id(feed_id)
+    assert feed is not None
+    assert feed.folder_id is None
+
+
+class TestDeleteAllData:
+  def _seed(self, cache_dir: Path) -> None:
+    folder = repo.create_folder("Tech")
+    feed_id = _make_feed("A", folder.id)
+    with db.connection() as conn:
+      conn.execute(
+        "INSERT INTO articles (url, title, source, feed_id) VALUES (%s, %s, %s, %s)",
+        ("https://a.example.com/1", "Title", "A", feed_id),
+      )
+      conn.execute("INSERT INTO refresh_jobs (source) VALUES ('manual')")
+      conn.execute("INSERT INTO filters (pattern) VALUES ('spam')")
+    cache.save_feed_cache("https://A.example.com/rss", None, None, "<rss/>")
+    assert any((cache_dir / "feeds").iterdir())
+
+  def test_wipes_feeds_articles_folders_and_jobs(self, cache_dir: Path):
+    self._seed(cache_dir)
+
+    res = _client().delete("/api/feeds")
+
+    assert res.status_code == 204
+    for table in ("feeds", "articles", "folders", "refresh_jobs"):
+      assert _row_count(table) == 0, table
+
+  def test_keeps_filters(self, cache_dir: Path):
+    # Pins current behavior: the confirm dialog promises to delete feeds,
+    # folders, and articles only, so NG-word filters outlive a wipe.
+    self._seed(cache_dir)
+
+    _client().delete("/api/feeds")
+
+    assert _row_count("filters") == 1
+
+  def test_purges_the_feed_cache(self, cache_dir: Path):
+    self._seed(cache_dir)
+
+    _client().delete("/api/feeds")
+
+    assert list((cache_dir / "feeds").iterdir()) == []
 
 
 class TestFeedUpdates:
@@ -120,3 +204,52 @@ class TestFeedUpdates:
 
   def test_toggle_unknown_feed_is_404(self):
     assert _client().post("/api/feeds/9999/toggle").status_code == 404
+
+  # Both directions: one alone would pass a handler that ignores the body
+  # and always writes the same value.
+  @pytest.mark.parametrize("translate", [True, False])
+  def test_translate(self, translate: bool):
+    feed_id = _make_feed("A")
+    repo.update_feed_translate(feed_id, not translate)
+
+    res = _client().patch(f"/api/feeds/{feed_id}/translate", json={"translate": translate})
+
+    assert res.status_code == 200
+    assert res.json()["translate"] is translate
+    feed = repo.get_feed_by_id(feed_id)
+    assert feed is not None
+    assert feed.translate is translate
+
+  def test_translate_unknown_feed_is_404(self):
+    res = _client().patch("/api/feeds/9999/translate", json={"translate": True})
+    assert res.status_code == 404
+
+  def test_site_url_is_stored_stripped(self):
+    feed_id = _make_feed("A")
+
+    res = _client().patch(
+      f"/api/feeds/{feed_id}/site_url", json={"site_url": "  https://a.example.com/  "}
+    )
+
+    assert res.status_code == 200
+    assert res.json()["site_url"] == "https://a.example.com/"
+    feed = repo.get_feed_by_id(feed_id)
+    assert feed is not None
+    assert feed.site_url == "https://a.example.com/"
+
+  @pytest.mark.parametrize("cleared", ["   ", None])
+  def test_blank_or_null_site_url_clears_it(self, cleared: str | None):
+    feed_id = _make_feed("A")
+    repo.update_feed_site_url(feed_id, "https://a.example.com/")
+
+    res = _client().patch(f"/api/feeds/{feed_id}/site_url", json={"site_url": cleared})
+
+    assert res.status_code == 200
+    assert res.json()["site_url"] is None
+    feed = repo.get_feed_by_id(feed_id)
+    assert feed is not None
+    assert feed.site_url is None
+
+  def test_site_url_unknown_feed_is_404(self):
+    res = _client().patch("/api/feeds/9999/site_url", json={"site_url": "https://x.example/"})
+    assert res.status_code == 404
