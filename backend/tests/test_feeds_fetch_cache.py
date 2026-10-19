@@ -1,12 +1,15 @@
 """_fetch_with_cache: conditional headers and cache fallbacks.
 
 The 304 and network-error fallbacks are covered in test_safe_http.py; these
-cover the request headers, the HTTP-error fallback, and unusable cache entries.
+cover the request headers, the HTTP-error fallback, unusable cache entries,
+the content-hash shortcut, what gets saved, and a network error with no cache.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+from collections.abc import Callable
 
 import httpx
 import pytest
@@ -91,3 +94,55 @@ def test_empty_cached_body_is_still_served(
 
 def test_fresh_body_is_returned(monkeypatch: pytest.MonkeyPatch) -> None:
   assert _fetch(monkeypatch, {"body": "<rss/>"}, 200) == ("<rss>new</rss>", False, "fresh")
+
+
+def _get(handler: Callable[[httpx.Request], httpx.Response]) -> tuple[str, bool, str]:
+  async def run() -> tuple[str, bool, str]:
+    settings = FetchSettings.from_config(AppConfig.model_validate({}))
+    async with SafeClient(
+      settings,
+      timeout=5,
+      transport=httpx.MockTransport(handler),
+      resolver=_resolve,
+    ) as client:
+      return await feeds._fetch_with_cache(client, _URL)
+
+  return asyncio.run(run())
+
+
+def test_body_matching_the_cached_hash_is_unchanged_and_not_saved(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  body = "<rss>same</rss>"
+  cached: dict[str, object] = {
+    "body": body,
+    "content_hash": hashlib.sha256(body.encode()).hexdigest(),
+  }
+  saved: list[tuple[object, ...]] = []
+  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: cached)
+  monkeypatch.setattr(feeds, "save_feed_cache", lambda *args: saved.append(args))
+
+  assert _get(lambda _req: httpx.Response(200, text=body)) == (body, True, "unchanged")
+  assert saved == []
+
+
+def test_fresh_body_is_saved_with_the_response_validators(monkeypatch: pytest.MonkeyPatch) -> None:
+  saved: list[tuple[object, ...]] = []
+  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: None)
+  monkeypatch.setattr(feeds, "save_feed_cache", lambda *args: saved.append(args))
+  headers = {"ETag": '"e2"', "Last-Modified": "Tue, 02 Jan 2026 00:00:00 GMT"}
+
+  result = _get(lambda _req: httpx.Response(200, text="<rss>new</rss>", headers=headers))
+
+  assert result == ("<rss>new</rss>", False, "fresh")
+  assert saved == [(_URL, '"e2"', "Tue, 02 Jan 2026 00:00:00 GMT", "<rss>new</rss>")]
+
+
+def test_network_error_without_a_cache_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: None)
+
+  def handler(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("refused", request=request)
+
+  with pytest.raises(httpx.ConnectError):
+    _get(handler)
