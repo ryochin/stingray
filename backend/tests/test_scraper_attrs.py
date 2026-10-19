@@ -55,7 +55,7 @@ def test_date_attr_is_used() -> None:
     date="time",
     date_attr="datetime",
   )
-  assert article.published == datetime(2026, 1, 2)
+  assert article.published == datetime(2026, 1, 2, tzinfo=UTC)
 
 
 @pytest.mark.parametrize("attr", ["", 'datetime=""'])
@@ -65,7 +65,7 @@ def test_date_attr_missing_or_empty_falls_back_to_text(attr: str) -> None:
     date="time",
     date_attr="datetime",
   )
-  assert article.published == datetime(2026, 3, 4)
+  assert article.published == datetime(2026, 3, 4, tzinfo=UTC)
 
 
 def test_date_without_attr_uses_text() -> None:
@@ -114,7 +114,7 @@ def test_empty_multi_valued_attrs_fall_back() -> None:
     thumbnail_attr="class",
   )
   assert article.url == "https://example.com/h"
-  assert article.published == datetime(2026, 3, 4)
+  assert article.published == datetime(2026, 3, 4, tzinfo=UTC)
   assert article.content_html == '<img src="https://example.com/s.png" alt="" />'
 
 

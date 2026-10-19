@@ -75,13 +75,19 @@ def validate_extraction_rules(raw: object) -> dict[str, str]:
 
 
 def _parse_date(text: str | None) -> datetime | None:
-  """Try to parse a date string. Returns None on failure."""
+  """Try to parse a date string into an aware datetime. Returns None on failure.
+
+  Naive results are pinned to UTC: callers such as the manual single-feed
+  fetch upsert them directly, and the DB would otherwise read them in the
+  session's TimeZone.
+  """
   if not text:
     return None
   text = text.strip()
   # ISO 8601
   try:
-    return datetime.fromisoformat(text)
+    parsed = datetime.fromisoformat(text)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
   except ValueError:
     pass
   # Common formats
