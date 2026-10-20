@@ -5,6 +5,7 @@ concurrency cap. The network is a MockTransport (see fetch_stubs).
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -14,7 +15,7 @@ import pytest
 import feeds
 from models import Article
 from safe_http import FetchSettings
-from schemas import AppConfig
+from schemas import AppConfig, FeedRow
 from tests.fetch_stubs import by_host, rss, stub_network
 
 NOW = datetime.now(tz=UTC)
@@ -155,3 +156,97 @@ def test_at_most_five_feeds_are_fetched_at_once(monkeypatch: pytest.MonkeyPatch)
 
   assert blocked_peak == 5
   assert final_peak == 5
+
+
+# -- web feeds (extraction rules) --
+
+RULES: dict[str, str] = {"item": "li", "title": "a", "link": "a"}
+PAGE: str = '<ul><li><a href="/1">One</a></li><li><a href="/2">Two</a></li></ul>'
+
+
+def _web_feed(rules: object) -> dict[str, Any]:
+  return {"name": "web", "url": "https://web.example.com/news", "extraction_rules": rules}
+
+
+def _fetch_web(
+  monkeypatch: pytest.MonkeyPatch,
+  rules: object,
+  response: httpx.Response | None = None,
+) -> tuple[Call, list[str], dict[str, dict[str, object]]]:
+  """Fetch one web feed; return its callback call, the requested URLs, and the feed cache."""
+  requested: list[str] = []
+  cache: dict[str, dict[str, object]] = {}
+
+  def handler(request: httpx.Request) -> httpx.Response:
+    requested.append(str(request.url))
+    return response if response is not None else httpx.Response(200, text=PAGE)
+
+  stub_network(monkeypatch, handler, cache)
+  calls: list[Call] = []
+  asyncio.run(
+    feeds.fetch_all([_web_feed(rules)], on_feed_done=_recorder(calls), fetch_settings=SETTINGS)
+  )
+  assert len(calls) == 1
+  return calls[0], requested, cache
+
+
+@pytest.mark.parametrize("rules", [json.dumps(RULES), RULES], ids=["json", "dict"])
+def test_web_feed_scrapes_the_page_with_its_rules(
+  monkeypatch: pytest.MonkeyPatch,
+  rules: object,
+) -> None:
+  call, requested, cache = _fetch_web(monkeypatch, rules)
+  assert call[1:] == (
+    ["https://web.example.com/1", "https://web.example.com/2"],
+    None,
+    "web",
+    None,
+  )
+  assert requested == ["https://web.example.com/news"]
+  assert cache == {}  # web pages bypass the feed cache
+
+
+@pytest.mark.parametrize(
+  ("rules", "warning"),
+  [
+    ("{}", "no extraction rules configured"),
+    (json.dumps({"title": "a", "link": "a"}), "extraction rules incomplete"),
+  ],
+  ids=["unconfigured", "no_item"],
+)
+def test_web_feed_without_usable_rules_is_skipped(
+  monkeypatch: pytest.MonkeyPatch,
+  capsys: pytest.CaptureFixture[str],
+  rules: str,
+  warning: str,
+) -> None:
+  call, requested, _cache = _fetch_web(monkeypatch, rules)
+  assert call[1:] == ([], None, "web-norules", None)
+  assert requested == []
+  assert f"[web/skip] web: {warning}" in capsys.readouterr().out
+
+
+def test_broken_rules_json_is_reported_as_an_rss_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+  # Pins current behavior: the exception path labels every failure "rss".
+  call, requested, _cache = _fetch_web(monkeypatch, "{")
+  assert call[1:4] == ([], None, "rss")
+  assert isinstance(call[4], json.JSONDecodeError)
+  assert requested == []
+
+
+def test_web_page_http_error_is_reported_as_an_rss_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+  call, requested, _cache = _fetch_web(monkeypatch, json.dumps(RULES), httpx.Response(404))
+  assert call[1:4] == ([], None, "rss")
+  assert isinstance(call[4], httpx.HTTPStatusError)
+  assert requested == ["https://web.example.com/news"]
+
+
+@pytest.mark.parametrize(
+  ("rules", "has_key"),
+  [(None, False), ("", False), ("{}", True)],
+)
+def test_feed_cfg_carries_rules_only_when_non_empty(rules: str | None, has_key: bool) -> None:
+  # "" drops out here, so such a feed is fetched as RSS (export and manual
+  # fetch treat it as web; normal write paths never store "").
+  cfg = FeedRow(name="F", url="https://f.example.com/", extraction_rules=rules).to_feed_cfg()
+  assert ("extraction_rules" in cfg) is has_key
