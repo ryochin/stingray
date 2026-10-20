@@ -279,8 +279,14 @@ async def _backfill_site_urls(feeds: list[FeedRow], fetch_settings: FetchSetting
   """Look up `site_url` for any feed missing it by fetching the feed URL and
   scraping its declared site link. Runs feeds in parallel (capped) to keep
   refresh latency from scaling linearly with the missing count.
+
+  Web feeds are skipped: their `url` already is the site page, and an HTML
+  page rarely declares a feed-style link, so they would be re-fetched on
+  every refresh for nothing.
   """
-  missing: list[tuple[FeedRow, str]] = [(f, f.url) for f in feeds if not f.site_url and f.url]
+  missing: list[tuple[FeedRow, str]] = [
+    (f, f.url) for f in feeds if not f.site_url and f.url and f.extraction_rules is None
+  ]
   if not missing:
     return
   log.step(f"Backfilling site_url for {len(missing)} feeds...")

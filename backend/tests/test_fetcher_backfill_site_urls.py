@@ -44,9 +44,14 @@ def _stub_http(
   return requested
 
 
-def _feed(name: str, site_url: str | None = None) -> FeedRow:
+def _feed(name: str, site_url: str | None = None, extraction_rules: str | None = None) -> FeedRow:
   return repo.add_feed(
-    FeedRow(name=name, url=f"https://{name}.example.com/rss", site_url=site_url),
+    FeedRow(
+      name=name,
+      url=f"https://{name}.example.com/rss",
+      site_url=site_url,
+      extraction_rules=extraction_rules,
+    ),
   )
 
 
@@ -73,6 +78,28 @@ def test_feeds_that_have_a_site_url_are_not_fetched(monkeypatch: pytest.MonkeyPa
   _backfill()
   assert requested == ["https://empty.example.com/rss"]
   assert _site_url("known") == "https://known.example.com/"
+
+
+def test_web_feeds_are_not_fetched(monkeypatch: pytest.MonkeyPatch):
+  # A web feed's url is the site page itself; the RSS link lookup has nothing
+  # to offer it, with or without rules configured.
+  requested = _stub_http(monkeypatch, by_host({"ok": httpx.Response(200, text=rss())}))
+  _feed("unconfigured", extraction_rules="{}")
+  _feed("scraped", extraction_rules='{"item": ".x", "title": ".t", "link": ".t"}')
+  _feed("ok")
+  _backfill()
+  assert requested == ["https://ok.example.com/rss"]
+  assert _site_url("unconfigured") is None
+  assert _site_url("scraped") is None
+
+
+def test_no_client_is_built_when_only_web_feeds_are_missing(monkeypatch: pytest.MonkeyPatch):
+  def no_client(*_args: Any, **_kwargs: Any) -> SafeClient:
+    raise AssertionError("SafeClient must not be built")
+
+  monkeypatch.setattr(fetcher, "SafeClient", no_client)
+  _feed("unconfigured", extraction_rules="{}")
+  _backfill()
 
 
 def test_no_client_is_built_when_nothing_is_missing(monkeypatch: pytest.MonkeyPatch):
