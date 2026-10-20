@@ -18,11 +18,26 @@ from urllib.parse import urlparse, urlunparse
 
 import psycopg
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 import db
 
 
 def _test_db_url() -> str:
+  url: str = _resolve_test_db_url()
+  # clean_db TRUNCATEs every table, so refuse anything that is not clearly a
+  # test database. Check the database libpq will actually connect to: a
+  # `?dbname=` query overrides the path, and a missing name falls back to
+  # PGDATABASE or the user name.
+  dbname: str | None = conninfo_to_dict(url).get("dbname")
+  if not (isinstance(dbname, str) and dbname.endswith("_test")):
+    raise RuntimeError(
+      f"Refusing to run tests against database {dbname!r}: name must end with '_test'"
+    )
+  return url
+
+
+def _resolve_test_db_url() -> str:
   # Explicit override wins.
   explicit: str | None = os.environ.get("TEST_DATABASE_URL")
   if explicit:
