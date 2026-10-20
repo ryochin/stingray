@@ -151,14 +151,14 @@ class TestParseOpmlStructure:
     xml = """<?xml version="1.0"?>
     <opml version="2.0"><body>
       <outline text="Web">
-        <outline type="web" text="Scraped" htmlUrl="https://example.com/page" data-extraction-rules='{"selector":"article"}'/>
+        <outline type="web" text="Scraped" htmlUrl="https://example.com/page" data-extraction-rules='{"item":"article","title":"h2","link":"a"}'/>
       </outline>
     </body></opml>"""
     folders, _ = opml.parse_opml(xml, native_lang="en")
     assert len(folders) == 1 and len(folders[0].feeds) == 1
     f = folders[0].feeds[0]
     assert f.url == "https://example.com/page"
-    assert f.extraction_rules == '{"selector":"article"}'
+    assert f.extraction_rules == '{"item": "article", "title": "h2", "link": "a"}'
 
   def test_web_feed_default_extraction_rules(self):
     xml = """<?xml version="1.0"?>
@@ -197,6 +197,56 @@ class TestParseOpmlStructure:
     assert len(folders) == 1
     assert folders[0].name == "Folder"
     assert [f.url for f in folders[0].feeds] == ["https://example.com/rss"]
+
+
+def _import_rules(rules_attr: str, *, feed_type: str = "web") -> str | None:
+  """Parse one top-level outline carrying `data-extraction-rules` and return
+  what the import would store."""
+  url_attr = (
+    'htmlUrl="https://example.com/page"'
+    if feed_type == "web"
+    else 'xmlUrl="https://example.com/rss"'
+  )
+  xml = f"""<?xml version="1.0"?>
+  <opml version="2.0"><body>
+    <outline type="{feed_type}" text="W" {url_attr} data-extraction-rules='{rules_attr}'/>
+  </body></opml>"""
+  _, uncat = opml.parse_opml(xml, native_lang="en")
+  assert len(uncat) == 1
+  return uncat[0].extraction_rules
+
+
+class TestParseOpmlExtractionRules:
+  def test_valid_rules_are_normalized_like_patch(self):
+    # Same normalization as PATCH /rules: values trimmed, null/empty dropped.
+    stored = _import_rules('{"item":" .x ","title":".t","link":"_self","date":null,"thumbnail":""}')
+    assert stored == '{"item": ".x", "title": ".t", "link": "_self"}'
+
+  @pytest.mark.parametrize(
+    "rules_attr",
+    [
+      pytest.param("{", id="broken-json"),
+      pytest.param("[]", id="not-an-object"),
+      pytest.param('{"item":".x","title":".t","link":".t","bogus":"1"}', id="unknown-key"),
+      pytest.param('{"item":".x","title":".t"}', id="missing-required"),
+      pytest.param('{"item":".x[","title":".t","link":".t"}', id="bad-selector"),
+      pytest.param("[" * 100_000, id="deep-nesting"),
+    ],
+  )
+  def test_invalid_rules_fall_back_to_unconfigured(
+    self, rules_attr: str, capsys: pytest.CaptureFixture[str]
+  ):
+    # The feed is kept as a web feed with no rules rather than dropped.
+    assert _import_rules(rules_attr) == "{}"
+    assert "dropped invalid extraction rules for 'W'" in capsys.readouterr().out
+
+  @pytest.mark.parametrize("rules_attr", ["{}", " { } ", ""])
+  def test_empty_rules_mean_unconfigured(self, rules_attr: str, capsys: pytest.CaptureFixture[str]):
+    assert _import_rules(rules_attr) == "{}"
+    assert capsys.readouterr().out == ""
+
+  def test_rss_outline_ignores_rules(self):
+    assert _import_rules("{", feed_type="rss") is None
 
 
 class TestExportOpml:

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 import defusedxml.ElementTree as SafeET
 
 import lang
+import log
 from schemas import FeedRow, FolderRow
+from scraper import validate_extraction_rules
 
 
 @dataclass
@@ -157,7 +160,9 @@ def _parse_feed_outline(el: ET.Element, native_lang: str) -> ImportFeed | None:
   translate = translate_str == "1" if translate_str else _should_translate(name, url, native_lang)
   summarize_str = el.get("data-summarize")
   summarize = summarize_str == "1" if summarize_str else False
-  extraction_rules = el.get("data-extraction-rules") if is_web else None
+  extraction_rules = (
+    _parse_extraction_rules(name, el.get("data-extraction-rules")) if is_web else None
+  )
 
   return ImportFeed(
     name=name,
@@ -165,5 +170,28 @@ def _parse_feed_outline(el: ET.Element, native_lang: str) -> ImportFeed | None:
     site_url=site_url,
     translate=translate,
     summarize=summarize,
-    extraction_rules=extraction_rules or ("{}" if is_web else None),
+    extraction_rules=extraction_rules,
   )
+
+
+def _parse_extraction_rules(name: str, raw: str | None) -> str:
+  """Validate a web feed's imported rules the same way PATCH /rules does.
+
+  Invalid rules fall back to "{}" (a web feed with no rules yet) instead of
+  dropping the row: the subscription itself is fine, and the rules editor can
+  fix it later. Without this, broken JSON would fail every fetch.
+  """
+  if not raw:
+    return "{}"
+  try:
+    parsed: object = json.loads(raw)
+    # An empty object is the "not configured yet" state, which PATCH rejects
+    # but a hand-written OPML may legitimately carry.
+    if parsed == {}:
+      return "{}"
+    return json.dumps(validate_extraction_rules(parsed))
+  # json.loads raises RecursionError on deeply nested input; letting it escape
+  # would fail the whole import, valid feeds included.
+  except (ValueError, RecursionError) as e:
+    log.warn(f"  OPML import: dropped invalid extraction rules for '{name}': {e}")
+    return "{}"

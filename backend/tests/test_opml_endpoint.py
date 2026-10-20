@@ -188,6 +188,22 @@ class TestImport:
     assert result == {"folders_created": 0, "feeds_created": 0, "feeds_skipped": 4}
     assert len(repo.list_feeds()) == 4
 
+  def test_invalid_extraction_rules_import_as_unconfigured_web_feed(
+    self, client: TestClient, refreshes: list[str]
+  ):
+    xml = """<?xml version="1.0"?>
+    <opml version="2.0"><body>
+      <outline type="web" text="Broken" htmlUrl="https://w.example.com/" data-extraction-rules="{"/>
+      <outline type="rss" text="Fine" xmlUrl="https://a.example.com/feed"/>
+    </body></opml>"""
+
+    result = _import(client, xml)
+
+    assert result == {"folders_created": 0, "feeds_created": 2, "feeds_skipped": 0}
+    by_name = {f.name: f for f in repo.list_feeds()}
+    assert by_name["Broken"].extraction_rules == "{}"
+    assert by_name["Fine"].extraction_rules is None
+
   def test_rejects_invalid_xml(self, client: TestClient):
     payload = io.BytesIO(b"<opml><body>")
     resp = client.post("/api/opml/import", files={"file": ("bad.opml", payload, "text/xml")})
