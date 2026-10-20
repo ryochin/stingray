@@ -22,7 +22,8 @@ from safe_http import SafeClient
 Handler = Callable[[httpx.Request], httpx.Response | Awaitable[httpx.Response]]
 
 
-async def _resolve(_host: str, _port: int) -> list[str]:
+async def resolve_public(_host: str, _port: int) -> list[str]:
+  """A resolver that maps every host to a public IP, so SafeClient lets it through."""
   return ["93.184.216.34"]
 
 
@@ -37,7 +38,7 @@ def stub_network(
   monkeypatch.setattr(
     feeds,
     "SafeClient",
-    partial(SafeClient, transport=httpx.MockTransport(handler), resolver=_resolve),
+    partial(SafeClient, transport=httpx.MockTransport(handler), resolver=resolve_public),
   )
   # Replace feeds' own `random` name, not the shared module, so the
   # scheduler's jitter elsewhere is unaffected.

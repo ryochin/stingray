@@ -280,27 +280,26 @@ async def _backfill_site_urls(feeds: list[FeedRow], fetch_settings: FetchSetting
   scraping its declared site link. Runs feeds in parallel (capped) to keep
   refresh latency from scaling linearly with the missing count.
   """
-  missing = [f for f in feeds if not f.site_url and f.url]
+  missing: list[tuple[FeedRow, str]] = [(f, f.url) for f in feeds if not f.site_url and f.url]
   if not missing:
     return
   log.step(f"Backfilling site_url for {len(missing)} feeds...")
   sem = asyncio.Semaphore(8)
 
-  async def _one(client: SafeClient, f: FeedRow) -> None:
-    if not f.url:
-      return
+  async def _one(client: SafeClient, f: FeedRow, url: str) -> None:
     async with sem:
       try:
-        resp = await client.get(f.url)
+        resp = await client.get(url)
         resp.raise_for_status()
         site_url = extract_site_url(resp.text)
         if site_url:
           await asyncio.to_thread(repo.update_feed_site_url, f.id, site_url)
-      except Exception:
-        return
+      except Exception as exc:
+        # Best effort: one feed failing must not stop the others or the refresh.
+        log.warn(f"  site_url backfill failed for {f.name}: {exc}")
 
   async with SafeClient(fetch_settings, timeout=15) as client:
-    await asyncio.gather(*(_one(client, f) for f in missing))
+    await asyncio.gather(*(_one(client, f, url) for f, url in missing))
 
 
 async def refresh_all(
