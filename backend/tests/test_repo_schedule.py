@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
-from typing import Literal
+from types import SimpleNamespace
+from typing import Any, Literal
 
 import psycopg
 import pytest
@@ -225,6 +226,55 @@ class TestRecordFeedAttempt:
   def test_missing_feed_is_noop(self, clean_db):
     # Should silently ignore IDs that don't exist.
     repo.record_feed_attempt(999999, "fresh")
+
+
+# On a tick boundary, so the expected delays below are exact.
+_FROZEN_NOW = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+
+
+class _FrozenDatetime(datetime):
+  @classmethod
+  def now(cls, tz: tzinfo | None = None) -> datetime:
+    return _FROZEN_NOW
+
+
+class TestFailureBackoff:
+  """Failures push the next attempt out exponentially, capped at 360 min."""
+
+  @pytest.fixture(autouse=True)
+  def _deterministic_clock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(repo, "datetime", _FrozenDatetime)
+    monkeypatch.setattr(repo, "random", SimpleNamespace(uniform=lambda _a, _b: 0))
+
+  def _delay_after_failure(self, **feed: Any) -> timedelta:
+    fid = _make_feed(**feed)
+    repo.record_feed_attempt(fid, "failure", error="boom")
+    return _read_feed(fid)["next_fetch_at"] - _FROZEN_NOW
+
+  @pytest.mark.parametrize(
+    ("prior_failures", "expected_min"),
+    [
+      (0, 20),  # 15 min, ceiled to the 10-min tick
+      (1, 30),
+      (2, 60),
+      (3, 120),
+      (4, 240),
+      (5, 360),  # 480 capped
+      (6, 360),
+      (9, 360),
+    ],
+  )
+  def test_delay_doubles_per_failure_up_to_the_cap(
+    self,
+    clean_db,
+    prior_failures: int,
+    expected_min: int,
+  ):
+    delay = self._delay_after_failure(consecutive_failures=prior_failures)
+    assert delay == timedelta(minutes=expected_min)
+
+  def test_longer_current_interval_wins_over_backoff(self, clean_db):
+    assert self._delay_after_failure(fetch_interval_min=240) == timedelta(minutes=240)
 
 
 class TestRecordFeedAttemptHealth:

@@ -72,6 +72,20 @@ def _summary(url: str) -> str | None:
   return row["summary"]
 
 
+def _summarize_lock_held() -> bool:
+  # pg_locks, not a re-acquire: a pooled connection that kept the lock
+  # would grant it again to itself.
+  with db.connection() as conn:
+    row = conn.execute(
+      """SELECT COUNT(*) AS n FROM pg_locks
+         WHERE locktype = 'advisory' AND objsubid = 1
+           AND classid = %s AND objid = %s""",
+      (repo.SUMMARIZE_LOCK_KEY >> 32, repo.SUMMARIZE_LOCK_KEY & 0xFFFF_FFFF),
+    ).fetchone()
+  assert row is not None
+  return row["n"] > 0
+
+
 class TestBackgroundSummarizer:
   def test_skips_the_round_while_the_lock_is_held_elsewhere(self, llm_calls):
     _store(_feed(), "u1", LONG_A)
@@ -86,6 +100,12 @@ class TestBackgroundSummarizer:
     assert asyncio.run(fetcher.summarize_pending(AppConfig())) == 1
     assert llm_calls == [("u1", LONG_A)]
     assert _summary("u1") == "summary of u1"
+
+  def test_releases_the_lock_afterwards(self, llm_calls):
+    _store(_feed(), "u1", LONG_A)
+    asyncio.run(fetcher.summarize_pending(AppConfig()))
+    assert llm_calls == [("u1", LONG_A)]
+    assert not _summarize_lock_held()
 
 
 class TestRefreshLlmPass:
@@ -134,16 +154,7 @@ class TestRefreshLlmPass:
     article = _store(feed, "u1", LONG_A)
     asyncio.run(fetcher._run_llm_pass([article], [feed], AppConfig()))
     assert llm_calls == [("u1", LONG_A)]
-    # pg_locks, not a re-acquire: a pooled connection that kept the lock
-    # would grant it again to itself.
-    with db.connection() as conn:
-      row = conn.execute(
-        """SELECT COUNT(*) AS n FROM pg_locks
-           WHERE locktype = 'advisory' AND objsubid = 1
-             AND classid = %s AND objid = %s""",
-        (repo.SUMMARIZE_LOCK_KEY >> 32, repo.SUMMARIZE_LOCK_KEY & 0xFFFF_FFFF),
-      ).fetchone()
-    assert row is not None and row["n"] == 0
+    assert not _summarize_lock_held()
 
   def test_leaves_pending_rows_outside_this_refresh_to_the_background(self, llm_calls):
     """A backlog (say, a feed that just turned translation on) would otherwise

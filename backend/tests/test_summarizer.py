@@ -14,6 +14,7 @@ import pytest
 
 import summarizer
 from models import Article
+from tests.llm_stubs import FakeOllama
 
 # Distinctive fragments of each system prompt, used to tell which one was sent.
 FULL = "full article content translated"
@@ -28,38 +29,6 @@ def _article(
   title: str = "Original",
 ) -> Article:
   return Article(title=title, url=url, source=source, published=None, content_snippet="body")
-
-
-class FakeOllama:
-  """Records calls and returns a canned reply (or raises) per article title."""
-
-  def __init__(self, reply: dict[str, Any] | None = None) -> None:
-    self.reply: dict[str, Any] = (
-      reply
-      if reply is not None
-      else {
-        "title_translated": "T",
-        "summary": "S",
-        "content_translated": "C",
-      }
-    )
-    self.prompts: list[str] = []
-    self.user_prompts: list[str] = []
-    self.fail_titles: set[str] = set()
-
-  async def __call__(
-    self,
-    client: httpx.AsyncClient,
-    model: str,
-    system_prompt: str,
-    user_prompt: str,
-  ) -> dict[str, Any]:
-    self.prompts.append(system_prompt)
-    self.user_prompts.append(user_prompt)
-    for title in self.fail_titles:
-      if user_prompt.startswith(f"Title: {title}\n"):
-        raise RuntimeError("boom")
-    return self.reply
 
 
 @pytest.fixture
