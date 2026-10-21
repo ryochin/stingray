@@ -100,7 +100,7 @@ async def call_ollama(
   options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
   """Send a chat completion request to Ollama and return parsed JSON."""
-  last_error = None
+  last_error: ValueError | None = None
   messages = [
     {"role": "system", "content": system_prompt},
     {"role": "user", "content": user_prompt},
@@ -137,4 +137,5 @@ async def call_ollama(
         },
       ]
 
-  raise last_error  # type: ignore[misc]
+  # last_error is unset only when a negative `retries` skipped every attempt.
+  raise last_error or ValueError(f"no LLM attempt was made (retries={retries})")
