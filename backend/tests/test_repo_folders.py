@@ -94,14 +94,6 @@ class TestAddFeedPosition:
     c = self._add("C")
     assert [f.id for f in repo.list_feeds()] == [c.id, b.id, a.id]
 
-  def test_at_top_false_appends_preserving_order(self):
-    # Bulk callers (OPML import) append in input order instead of reversing it.
-    a = repo.add_feed(FeedRow(name="A", url="https://a.example.com/rss"), at_top=False)
-    b = repo.add_feed(FeedRow(name="B", url="https://b.example.com/rss"), at_top=False)
-    c = repo.add_feed(FeedRow(name="C", url="https://c.example.com/rss"), at_top=False)
-    assert a.position < b.position < c.position
-    assert [f.id for f in repo.list_feeds()] == [a.id, b.id, c.id]
-
 
 class TestReorderFeeds:
   def _add(self, name: str) -> int:

@@ -135,7 +135,7 @@ class TestImport:
     assert len(repo.list_feeds()) == 4
 
   def test_preserves_file_order(self, client: TestClient, refreshes: list[str]):
-    """Imported feeds append (at_top=False), so the OPML order survives."""
+    """Imported feeds append (MAX + 1), so the OPML order survives."""
     _import(client, OPML_TWO_FOLDERS)
     positions = {f.name: f.position for f in repo.list_feeds()}
     assert positions["F1"] < positions["F2"] < positions["F3"] < positions["Loose"]
@@ -149,21 +149,19 @@ class TestImport:
     assert result["feeds_skipped"] == 1
     assert len(repo.list_feeds()) == 4
 
-  def test_counts_a_feed_added_mid_import_as_skipped(
-    self, client: TestClient, refreshes: list[str], monkeypatch: pytest.MonkeyPatch
-  ):
-    """A feed that slips in after the import read the existing URLs hits the
-    unique index; it is skipped rather than failing the whole import."""
-    repo.add_feed(FeedRow(name="Existing", url="https://a.example.com/feed"))
-    real_list_feeds = repo.list_feeds
-    monkeypatch.setattr(repo, "list_feeds", lambda **_kw: [])
+  def test_skips_a_url_repeated_within_the_file(self, client: TestClient, refreshes: list[str]):
+    xml = """<?xml version="1.0"?>
+    <opml version="2.0"><body>
+      <outline text="Tech">
+        <outline type="rss" text="First" xmlUrl="https://a.example.com/feed"/>
+      </outline>
+      <outline type="rss" text="Again" xmlUrl="https://a.example.com/feed"/>
+    </body></opml>"""
 
-    result = _import(client, OPML_TWO_FOLDERS)
+    result = _import(client, xml)
 
-    monkeypatch.setattr(repo, "list_feeds", real_list_feeds)
-    assert result["feeds_created"] == 3
-    assert result["feeds_skipped"] == 1
-    assert len(repo.list_feeds()) == 4
+    assert result == {"folders_created": 1, "feeds_created": 1, "feeds_skipped": 1}
+    assert [f.name for f in repo.list_feeds()] == ["First"]
 
   def test_reuses_an_existing_folder_with_the_same_name(
     self, client: TestClient, refreshes: list[str]

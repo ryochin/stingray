@@ -846,59 +846,26 @@ def _persist_opml_feeds(
   imported_folders: list[ImportFolder],
   uncategorized: list[ImportFeed],
 ) -> tuple[int, int, int]:
-  """Create any missing folders/feeds from parsed OPML.
+  """Create any missing folders/feeds from parsed OPML in one transaction.
 
   Returns (folders_created, feeds_created, feeds_skipped). Feeds whose URL
   already exists in the DB are skipped rather than re-added.
   """
-  existing_urls = {f.url for f in repo.list_feeds() if f.url}
-  existing_folders = {f.name: f.id for f in repo.list_folders()}
-  folders_created = 0
-  feeds_created = 0
-  feeds_skipped = 0
 
-  def _add_feed(feed_data: ImportFeed, folder_id: int | None) -> None:
-    nonlocal feeds_created, feeds_skipped
-    if feed_data.url in existing_urls:
-      feeds_skipped += 1
-      return
-    # Append in file order so an imported OPML keeps its original ordering,
-    # rather than reversing it (the interactive add-at-top default).
-    try:
-      repo.add_feed(
-        FeedRow(
-          name=feed_data.name,
-          url=feed_data.url,
-          site_url=feed_data.site_url,
-          translate=feed_data.translate,
-          summarize=feed_data.summarize,
-          folder_id=folder_id,
-          extraction_rules=feed_data.extraction_rules,
-        ),
-        at_top=False,
-      )
-    except repo.DuplicateFeedError:
-      # Added since existing_urls was read (e.g. via POST /api/feeds).
-      feeds_skipped += 1
-      return
-    existing_urls.add(feed_data.url)
-    feeds_created += 1
+  def _to_row(feed_data: ImportFeed) -> FeedRow:
+    return FeedRow(
+      name=feed_data.name,
+      url=feed_data.url,
+      site_url=feed_data.site_url,
+      translate=feed_data.translate,
+      summarize=feed_data.summarize,
+      extraction_rules=feed_data.extraction_rules,
+    )
 
-  for imp_folder in imported_folders:
-    if imp_folder.name in existing_folders:
-      folder_id = existing_folders[imp_folder.name]
-    else:
-      folder = repo.create_folder(imp_folder.name)
-      folder_id = folder.id
-      existing_folders[imp_folder.name] = folder_id
-      folders_created += 1
-    for feed_data in imp_folder.feeds:
-      _add_feed(feed_data, folder_id)
-
-  for feed_data in uncategorized:
-    _add_feed(feed_data, None)
-
-  return folders_created, feeds_created, feeds_skipped
+  return repo.import_opml(
+    [(f.name, [_to_row(feed) for feed in f.feeds]) for f in imported_folders],
+    [_to_row(feed) for feed in uncategorized],
+  )
 
 
 async def _persist_opml_import(
@@ -907,19 +874,15 @@ async def _persist_opml_import(
 ) -> tuple[int, int, int]:
   """Persist a parsed OPML import, serialized against other imports.
 
-  _persist_opml_feeds reads the existing URL/folder sets before writing them.
-  While that ran on the event loop it was implicitly exclusive; now that it
-  runs in a worker thread, two concurrent imports would interleave and
-  double-register, and feeds.url has no UNIQUE constraint to fall back on.
-  Guards a single process only — a multi-worker deployment needs the DB to
-  enforce it.
+  Duplicate feed URLs are caught by the unique index, but folders have no
+  such constraint: two concurrent imports would each see a folder missing and
+  create it twice. Guards a single process only — a multi-worker deployment
+  needs the DB to enforce it.
 
   Callers must shield this: the lock has to outlive the request, or cancelling
   it would free the lock while the worker is still inserting. Shielding the
   to_thread call alone would not do — the `async with` would still unwind.
 
-  The lock does not make this one transaction; every repo.add_feed inside
-  still commits on its own.
   """
   async with _opml_import_lock:
     return await asyncio.to_thread(

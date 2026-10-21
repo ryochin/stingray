@@ -181,10 +181,10 @@ class TestDeleteAllData:
 class TestOpmlImportExclusion:
   """Two imports must not interleave.
 
-  _persist_opml_feeds reads the existing feed/folder sets before writing them.
+  _persist_opml_feeds reads the existing folders before creating missing ones.
   On the event loop that read-modify-write was exclusive by accident; in a
-  worker thread it is not, and feeds.url has no UNIQUE constraint to catch the
-  double registration that follows.
+  worker thread it is not, and folder names have no UNIQUE constraint to catch
+  the duplicate folders that follow.
   """
 
   def test_a_second_import_waits_for_the_first(self, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -9,7 +9,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, LiteralString
 
 from psycopg import sql
 from psycopg.errors import UniqueViolation
@@ -412,14 +412,13 @@ def list_folders() -> list[FolderRow]:
     return [FolderRow(**r) for r in rows]
 
 
+_INSERT_FOLDER_SQL: LiteralString = """INSERT INTO folders (name, position)
+     VALUES (%s, COALESCE((SELECT MAX(position) + 1 FROM folders), 0))"""
+
+
 def create_folder(name: str) -> FolderRow:
   with db.connection() as conn:
-    row = conn.execute(
-      """INSERT INTO folders (name, position)
-         VALUES (%s, COALESCE((SELECT MAX(position) + 1 FROM folders), 0))
-         RETURNING *""",
-      (name,),
-    ).fetchone()
+    row = conn.execute(_INSERT_FOLDER_SQL + " RETURNING *", (name,)).fetchone()
     if row is None:
       raise RuntimeError("create_folder: INSERT returned no row")
     return FolderRow.model_validate(row)
@@ -478,42 +477,50 @@ def get_feed_by_id(feed_id: int) -> FeedRow | None:
     return _row_to_feed(row) if row else None
 
 
-def add_feed(feed: FeedRow, *, at_top: bool = True) -> FeedRow:
+# A new feed's position is one of these constants, never derived from user
+# input: interactive adds go to the top, OPML imports append in file order.
+_FEED_POSITION_TOP: LiteralString = "COALESCE((SELECT MIN(position) - 1 FROM feeds), 0)"
+_FEED_POSITION_BOTTOM: LiteralString = "COALESCE((SELECT MAX(position) + 1 FROM feeds), 0)"
+
+
+def _insert_feed_sql(
+  position_expr: LiteralString, *, on_conflict: LiteralString = ""
+) -> LiteralString:
+  return f"""INSERT INTO feeds
+       (name, url, site_url, translate, summarize, enabled, folder_id, position, extraction_rules)
+     VALUES
+       (%s, %s, %s, %s, %s, %s, %s,
+        {position_expr},
+        %s)
+     {on_conflict}"""
+
+
+def _insert_feed_params(feed: FeedRow, folder_id: int | None) -> tuple[object, ...]:
+  return (
+    feed.name,
+    feed.url,
+    feed.site_url,
+    feed.translate,
+    feed.summarize,
+    feed.enabled,
+    folder_id,
+    feed.extraction_rules,
+  )
+
+
+def add_feed(feed: FeedRow) -> FeedRow:
   """Insert a new feed and return the persisted row.
 
-  Positions are global and ordered ascending. By default a new feed gets the
-  smallest position (MIN - 1) so an interactively added feed surfaces at the
-  front of its section. Bulk callers that must preserve input order (OPML
-  import) pass `at_top=False` to append at the end (MAX + 1). Positions may
-  drift negative over many top inserts; that is acceptable for INTEGER and
-  `reorder_feeds` rebases from the group's MIN.
+  Positions are global and ordered ascending. A new feed gets the smallest
+  position (MIN - 1) so an interactively added feed surfaces at the front of
+  its section. Positions may drift negative over many inserts; that is
+  acceptable for INTEGER and `reorder_feeds` rebases from the group's MIN.
   """
-  # The position expression is a constant chosen by `at_top`, never user input.
-  position_expr: str = (
-    "COALESCE((SELECT MIN(position) - 1 FROM feeds), 0)"
-    if at_top
-    else "COALESCE((SELECT MAX(position) + 1 FROM feeds), 0)"
-  )
   with db.connection() as conn:
     try:
       row = conn.execute(
-        f"""INSERT INTO feeds
-             (name, url, site_url, translate, summarize, enabled, folder_id, position, extraction_rules)
-           VALUES
-             (%s, %s, %s, %s, %s, %s, %s,
-              {position_expr},
-              %s)
-           RETURNING *""",
-        (
-          feed.name,
-          feed.url,
-          feed.site_url,
-          feed.translate,
-          feed.summarize,
-          feed.enabled,
-          feed.folder_id,
-          feed.extraction_rules,
-        ),
+        _insert_feed_sql(_FEED_POSITION_TOP) + " RETURNING *",
+        _insert_feed_params(feed, feed.folder_id),
       ).fetchone()
     except UniqueViolation as exc:
       if exc.diag.constraint_name == db.FEEDS_URL_UNIQUE_INDEX:
@@ -522,6 +529,51 @@ def add_feed(feed: FeedRow, *, at_top: bool = True) -> FeedRow:
     if row is None:
       raise RuntimeError("add_feed: INSERT returned no row")
     return _row_to_feed(row)
+
+
+def import_opml(
+  folders: list[tuple[str, list[FeedRow]]],
+  uncategorized: list[FeedRow],
+) -> tuple[int, int, int]:
+  """Persist an OPML import in one transaction.
+
+  Folders are matched by name and created when missing. Feeds are appended in
+  the given order (MAX + 1), so the file's ordering survives. A feed whose URL
+  already exists — in the DB, earlier in the same import, or inserted
+  concurrently — is skipped via ON CONFLICT rather than failing the import.
+  Any other error rolls the whole import back.
+
+  Each feed's folder_id is ignored; the folder it is listed under decides it.
+  Returns (folders_created, feeds_created, feeds_skipped).
+  """
+  folders_created = 0
+  feeds_created = 0
+  feed_params: list[tuple[object, ...]] = []
+  with db.connection() as conn, conn.transaction():
+    folder_ids: dict[str, int] = {
+      r["name"]: r["id"]
+      for r in conn.execute("SELECT id, name FROM folders ORDER BY position, id").fetchall()
+    }
+    for name, feeds in folders:
+      if name not in folder_ids:
+        row = conn.execute(_INSERT_FOLDER_SQL + " RETURNING id", (name,)).fetchone()
+        if row is None:
+          raise RuntimeError("import_opml: folder INSERT returned no row")
+        folder_ids[name] = row["id"]
+        folders_created += 1
+      feed_params.extend(_insert_feed_params(f, folder_ids[name]) for f in feeds)
+    feed_params.extend(_insert_feed_params(f, None) for f in uncategorized)
+
+    if feed_params:
+      with conn.cursor() as cur:
+        # executemany pipelines the statements; rowcount sums the rows each
+        # one inserted (1, or 0 when ON CONFLICT skipped it).
+        cur.executemany(
+          _insert_feed_sql(_FEED_POSITION_BOTTOM, on_conflict="ON CONFLICT (url) DO NOTHING"),
+          feed_params,
+        )
+        feeds_created = cur.rowcount
+  return folders_created, feeds_created, len(feed_params) - feeds_created
 
 
 def reorder_feeds(feed_ids: list[int]) -> None:
