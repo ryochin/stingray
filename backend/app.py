@@ -184,6 +184,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
   config = AppConfig.load()
   db.configure()
   db.init_schema()
+  cache.configure(Path(config.cache_dir))
   app.state.config = config  # type: ignore[attr-defined]
   task = asyncio.create_task(_background_summarizer(config))
   _background_tasks.add(task)

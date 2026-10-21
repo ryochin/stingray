@@ -27,19 +27,10 @@ def load_config(path: Path) -> AppConfig:
 async def run(args: argparse.Namespace) -> None:
   config = load_config(args.config)
 
-  # Resolve paths relative to config file
-  config_base = args.config.resolve().parent
-  cache_dir = Path(config.cache_dir)
-  if not cache_dir.is_absolute():
-    cache_dir = config_base / cache_dir
-
   # Initialize DB and L1 cache
   db.configure()
   db.init_schema()
-  cache_mod.configure(cache_dir)
-
-  # Update config with resolved paths
-  config.cache_dir = str(cache_dir)
+  cache_mod.configure(Path(config.cache_dir))
 
   try:
     # Run the unified fetch/summarize/persist pipeline

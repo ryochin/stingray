@@ -58,6 +58,34 @@ class TestAppConfigLoad:
     path.write_text("ollama:\n  enabled: false\n", encoding="utf-8")
     assert AppConfig.load(path).ollama.enabled is False
 
+
+class TestAppConfigLoadCacheDir:
+  """A relative cache_dir resolves against the config file, not the cwd, so the
+  web app and the fetcher agree on it whatever directory they start in."""
+
+  @pytest.fixture(autouse=True)
+  def _cwd_elsewhere(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    elsewhere: Path = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+  def test_relative_resolves_against_config_dir(self, tmp_path: Path):
+    conf_dir: Path = tmp_path / "conf"
+    conf_dir.mkdir()
+    path: Path = conf_dir / "config.yml"
+    path.write_text('cache_dir: "data/cache"\n', encoding="utf-8")
+    assert AppConfig.load(path).cache_dir == str(conf_dir.resolve() / "data" / "cache")
+
+  def test_absolute_is_kept(self, tmp_path: Path):
+    target: Path = tmp_path / "abs-cache"
+    path: Path = tmp_path / "config.yml"
+    path.write_text(f'cache_dir: "{target}"\n', encoding="utf-8")
+    assert AppConfig.load(path).cache_dir == str(target)
+
+  def test_missing_file_resolves_default_against_its_dir(self, tmp_path: Path):
+    path: Path = tmp_path / "nope.yml"
+    assert AppConfig.load(path).cache_dir == str(tmp_path.resolve() / "cache")
+
   def test_default_path_relative_to_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Override with a non-default value so this actually proves the file is read.
     (tmp_path / "config.yml").write_text("native_lang: ja\n", encoding="utf-8")

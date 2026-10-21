@@ -36,6 +36,8 @@ _ALLOWED = {
   # Pure function over two strings: normalizes a filter into its dedupe key.
   # Touches no database.
   "repo.filter_key",
+  # Only assigns the module-level cache paths, once at startup. No file I/O.
+  "cache.configure",
   # A context manager holding a session-scoped Postgres advisory lock, taken
   # once per refresh or background summarizer round (not per request). It stays synchronous because splitting
   # acquire and release into two to_thread calls opens a window where a

@@ -219,7 +219,18 @@ class AppConfig(BaseModel):
     A missing file yields defaults unless `required` (the fetcher needs a real
     config). A non-mapping YAML is always an error: a broken config must surface
     consistently rather than being silently treated as defaults by some callers.
+
+    A relative `cache_dir` is resolved against the config file's directory, so
+    every caller sees the same absolute path regardless of its cwd.
     """
+    config: AppConfig = cls._read(path, required=required)
+    cache_dir: Path = Path(config.cache_dir)
+    if not cache_dir.is_absolute():
+      config.cache_dir = str(path.resolve().parent / cache_dir)
+    return config
+
+  @classmethod
+  def _read(cls, path: Path, *, required: bool) -> AppConfig:
     if not path.exists():
       if required:
         raise FileNotFoundError(path)
