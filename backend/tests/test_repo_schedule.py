@@ -3,7 +3,7 @@
 Covers repo.record_feed_attempt, repo.list_due_feeds, repo.toggle_feed's
 enabled-transition reset, repo.advisory_lock, and the schedule_next_at /
 step_bucket helpers. Also exercises the fetch_interval_min CHECK constraint
-and the outcome classifier in fetcher._classify_outcome.
+and the outcome classifier in fetcher.classify_outcome.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import pytest
 
 import db
 import repo
-from fetcher import _classify_outcome
+from fetcher import classify_outcome
 
 
 def _make_feed(
@@ -488,7 +488,7 @@ def _lock_holder_states(key: int) -> list[str]:
 
 class TestClassifyOutcome:
   def test_fetch_exception_is_failure(self):
-    outcome, error = _classify_outcome(
+    outcome, error = classify_outcome(
       source_tag="fresh",
       feed_kind="rss",
       fetch_exc=RuntimeError("boom"),
@@ -499,7 +499,7 @@ class TestClassifyOutcome:
     assert error is not None and "boom" in error
 
   def test_persist_exception_is_failure(self):
-    outcome, _ = _classify_outcome(
+    outcome, _ = classify_outcome(
       source_tag="fresh",
       feed_kind="rss",
       fetch_exc=None,
@@ -509,7 +509,7 @@ class TestClassifyOutcome:
     assert outcome == "failure"
 
   def test_web_norules_is_degraded_with_error(self):
-    outcome, error = _classify_outcome(
+    outcome, error = classify_outcome(
       source_tag=None,
       feed_kind="web-norules",
       fetch_exc=None,
@@ -522,7 +522,7 @@ class TestClassifyOutcome:
   def test_net_cache_is_degraded_with_diagnostic(self):
     # Serving a stale cached copy must surface a diagnostic so the feed does
     # not silently look healthy on old content.
-    outcome, error = _classify_outcome(
+    outcome, error = classify_outcome(
       source_tag="net-cache",
       feed_kind="rss",
       fetch_exc=None,
@@ -533,7 +533,7 @@ class TestClassifyOutcome:
     assert error is not None and "network error" in error
 
   def test_5xx_cache_is_degraded(self):
-    outcome, error = _classify_outcome(
+    outcome, error = classify_outcome(
       source_tag="5xx-cache",
       feed_kind="rss",
       fetch_exc=None,
@@ -544,7 +544,7 @@ class TestClassifyOutcome:
     assert error is not None and "stale cache" in error
 
   def test_304_empty_is_degraded(self):
-    outcome, error = _classify_outcome(
+    outcome, error = classify_outcome(
       source_tag="304-empty",
       feed_kind="rss",
       fetch_exc=None,
@@ -555,7 +555,7 @@ class TestClassifyOutcome:
     assert error is not None and "304" in error
 
   def test_fresh_with_inserts(self):
-    outcome, _ = _classify_outcome(
+    outcome, _ = classify_outcome(
       source_tag="fresh",
       feed_kind="rss",
       fetch_exc=None,
@@ -565,7 +565,7 @@ class TestClassifyOutcome:
     assert outcome == "fresh"
 
   def test_fresh_with_zero_inserts_is_miss(self):
-    outcome, _ = _classify_outcome(
+    outcome, _ = classify_outcome(
       source_tag="fresh",
       feed_kind="rss",
       fetch_exc=None,
@@ -576,7 +576,7 @@ class TestClassifyOutcome:
 
   def test_web_feed_success(self):
     # Web feeds have source_tag=None but feed_kind="web".
-    outcome, _ = _classify_outcome(
+    outcome, _ = classify_outcome(
       source_tag=None,
       feed_kind="web",
       fetch_exc=None,

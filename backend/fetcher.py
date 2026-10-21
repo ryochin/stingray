@@ -68,9 +68,7 @@ def _needs_llm(article: Article, *, translate: bool, summarize: bool) -> bool:
 
 
 # Source tags that mean "we served a stale cached copy" mapped to the
-# diagnostic recorded on the feed. Shared by the scheduled path
-# (_classify_outcome) and the manual single-feed path (app._fetch_single_feed)
-# so both classify stale cache identically.
+# diagnostic recorded on the feed.
 STALE_CACHE_DIAGNOSTICS: dict[str, str] = {
   "5xx-cache": "serving stale cache: origin returned HTTP 4xx/5xx (blocked?)",
   "net-cache": "serving stale cache: network error reaching origin",
@@ -78,7 +76,7 @@ STALE_CACHE_DIAGNOSTICS: dict[str, str] = {
 }
 
 
-def _classify_outcome(
+def classify_outcome(
   source_tag: str | None,
   feed_kind: str,
   fetch_exc: Exception | None,
@@ -86,6 +84,9 @@ def _classify_outcome(
   inserted_count: int,
 ) -> tuple[repo.Outcome, str | None]:
   """Fold the 5 per-feed observations into a scheduler outcome + error string.
+
+  Shared by the scheduled path and the manual single-feed fetch
+  (app._fetch_single_feed), so both classify a feed's health identically.
 
   Returns (outcome, error) where outcome is one of
   "fresh" / "miss" / "degraded" / "failure".
@@ -152,7 +153,7 @@ async def _fetch_and_persist_feeds(
     feed_id = feed_cfg.get("id")
     if feed_id is None:
       return
-    outcome, error = _classify_outcome(
+    outcome, error = classify_outcome(
       source_tag,
       feed_kind,
       fetch_exc,

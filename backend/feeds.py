@@ -435,6 +435,24 @@ async def _delayed_fetch(
 ) -> tuple[list[Article], bool, str, str | None]:
   """Fetch a single feed with concurrency limit and random delay.
 
+  See fetch_one_feed for the return value.
+  """
+  async with sem:
+    if delay > 0:
+      await asyncio.sleep(delay)
+    return await fetch_one_feed(client, feed, clean_url_fn=clean_url_fn)
+
+
+async def fetch_one_feed(
+  client: SafeClient,
+  feed: dict[str, Any],
+  clean_url_fn: Callable[[str], str] | None = None,
+) -> tuple[list[Article], bool, str, str | None]:
+  """Fetch a single feed as RSS or as a web page, depending on its rules.
+
+  Shared by the scheduled path (via _delayed_fetch) and the manual single-feed
+  fetch, so both branch on extraction rules the same way.
+
   Returns (articles, was_cached, kind, source_tag) where
     - `kind` is a short label indicating how the feed was fetched
       ("rss" / "web" / "web-norules") — used for per-feed summary logging.
@@ -443,39 +461,36 @@ async def _delayed_fetch(
       "5xx-cache"); None for web feeds (they don't go through the cache layer).
   """
   name: str = feed.get("name") or feed.get("url") or "?"
-  async with sem:
-    if delay > 0:
-      await asyncio.sleep(delay)
-    rules_json: Any = feed.get("extraction_rules")
-    is_web = rules_json is not None
-    if is_web and rules_json != "{}":
-      rules: dict[str, Any] = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
-      if rules.get("item"):
-        start = time.perf_counter()
-        articles, was_cached = await fetch_web_page(
-          client,
-          feed,
-          clean_url_fn=clean_url_fn,
-        )
-        elapsed_ms = int((time.perf_counter() - start) * 1000)
-        source = "cache" if was_cached else "fresh"
-        log.info(f"  [web/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
-        return articles, was_cached, "web", None
-      log.warn(f"  [web/skip] {name}: extraction rules incomplete")
-      return [], False, "web-norules", None
-    if is_web:
-      log.warn(f"  [web/skip] {name}: no extraction rules configured")
-      return [], False, "web-norules", None
-    start = time.perf_counter()
-    articles, was_cached, source_tag = await fetch_rss(
-      client,
-      feed,
-      clean_url_fn=clean_url_fn,
-    )
-    elapsed_ms = int((time.perf_counter() - start) * 1000)
-    source = "cache" if was_cached else "fresh"
-    log.info(f"  [rss/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
-    return articles, was_cached, "rss", source_tag
+  rules_json: Any = feed.get("extraction_rules")
+  is_web = rules_json is not None
+  if is_web and rules_json != "{}":
+    rules: dict[str, Any] = json.loads(rules_json) if isinstance(rules_json, str) else rules_json
+    if rules.get("item"):
+      start = time.perf_counter()
+      articles, was_cached = await fetch_web_page(
+        client,
+        feed,
+        clean_url_fn=clean_url_fn,
+      )
+      elapsed_ms = int((time.perf_counter() - start) * 1000)
+      source = "cache" if was_cached else "fresh"
+      log.info(f"  [web/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
+      return articles, was_cached, "web", None
+    log.warn(f"  [web/skip] {name}: extraction rules incomplete")
+    return [], False, "web-norules", None
+  if is_web:
+    log.warn(f"  [web/skip] {name}: no extraction rules configured")
+    return [], False, "web-norules", None
+  start = time.perf_counter()
+  articles, was_cached, source_tag = await fetch_rss(
+    client,
+    feed,
+    clean_url_fn=clean_url_fn,
+  )
+  elapsed_ms = int((time.perf_counter() - start) * 1000)
+  source = "cache" if was_cached else "fresh"
+  log.info(f"  [rss/{source}] {name}: {len(articles)} items ({elapsed_ms}ms)")
+  return articles, was_cached, "rss", source_tag
 
 
 def _filter_by_cutoff(feed_articles: list[Article], cutoff: datetime) -> list[Article]:

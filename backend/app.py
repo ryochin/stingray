@@ -27,8 +27,8 @@ import db
 import lang
 import log
 import repo
-from feeds import extract_feed_candidates, fetch_rss, probe_feed_body, read_file_url
-from fetcher import STALE_CACHE_DIAGNOSTICS, refresh_all, summarize_pending
+from feeds import extract_feed_candidates, fetch_one_feed, probe_feed_body, read_file_url
+from fetcher import classify_outcome, refresh_all, summarize_pending
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
 from safe_http import FetchSettings, SafeClient
 from schemas import (
@@ -41,7 +41,7 @@ from schemas import (
   FolderRow,
   StatusResponse,
 )
-from scraper import fetch_web_page, validate_extraction_rules
+from scraper import validate_extraction_rules
 from selector_inference import infer_and_validate
 from url_cleaner import clean_url
 
@@ -414,60 +414,33 @@ async def _probe_feed(url: str, *, native_lang: str, fetch_settings: FetchSettin
   return ProbeResult()
 
 
-def _manual_success_health(source_tag: str | None) -> tuple[FeedHealth, str | None]:
-  """Classify a successful manual fetch as degraded (stale cache) or ok.
-
-  Mirrors the scheduled path's stale-cache handling so a manual single-feed
-  fetch that only served a cached copy surfaces as "degraded" with the same
-  diagnostic, rather than silently looking healthy.
-  """
-  diagnostic = STALE_CACHE_DIAGNOSTICS.get(source_tag or "")
-  if diagnostic is not None:
-    return "degraded", diagnostic
-  return "ok", None
-
-
 async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
-  """Fetch articles from a single feed and persist to DB."""
+  """Fetch articles from a single feed and persist to DB.
+
+  Fetches and classifies the result the same way as the scheduled path, but
+  records it with update_feed_fetch_status so the adaptive schedule is left
+  alone. Unlike the scheduled path, no age cutoff is applied.
+  """
   start = time.perf_counter()
   try:
     clean_url_fn = clean_url if config.url_cleanup.enabled else None
     feed_cfg = feed.to_feed_cfg()
-    kind = "web" if feed.extraction_rules else "rss"
-    log.step(f"Fetching feed [{kind}]: {feed.name} ({feed.url})")
-    source_tag: str | None = None
+    feed_cfg["max_items"] = config.max_items_per_feed
+    log.step(f"Fetching feed: {feed.name} ({feed.url})")
     fetch_settings = FetchSettings.from_config(config)
     async with SafeClient(fetch_settings, timeout=30) as client:
-      if feed.extraction_rules and feed.extraction_rules != "{}":
-        articles, was_cached = await fetch_web_page(
-          client,
-          feed_cfg,
-          clean_url_fn=clean_url_fn,
-        )
-      elif feed.extraction_rules is not None:
-        log.warn(f"  Skipping '{feed.name}': extraction rules not configured yet.")
-        await asyncio.to_thread(
-          repo.update_feed_fetch_status,
-          feed.id,
-          health="degraded",
-          error="extraction rules not configured",
-        )
-        return
-      else:
-        articles, was_cached, source_tag = await fetch_rss(
-          client,
-          feed_cfg,
-          clean_url_fn=clean_url_fn,
-        )
-    elapsed_ms = int((time.perf_counter() - start) * 1000)
-    source = "cache" if was_cached else "fresh"
-    log.info(f"  [{source}] {len(articles)} items fetched in {elapsed_ms}ms.")
+      articles, _was_cached, kind, source_tag = await fetch_one_feed(
+        client,
+        feed_cfg,
+        clean_url_fn=clean_url_fn,
+      )
+    new_count = 0
     if articles:
       new_count = await asyncio.to_thread(repo.upsert_articles, articles, {feed.name: feed.id})
       log.info(f"  Saved: {new_count} new / {len(articles)} total (existing skipped).")
-    else:
-      log.info("  No articles returned.")
-    if not feed.site_url and feed.url:
+    # Unlike fetcher._backfill_site_urls, web feeds are probed too: once their
+    # page is fetched, _probe_feed fills site_url with the page URL in one go.
+    if kind != "web-norules" and not feed.site_url and feed.url:
       probe = await _probe_feed(
         feed.url,
         native_lang=config.native_lang,
@@ -476,7 +449,8 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
       if probe.site_url:
         await asyncio.to_thread(repo.update_feed_site_url, feed.id, probe.site_url)
         log.info(f"  Updated site_url: {probe.site_url}")
-    health, error = _manual_success_health(source_tag)
+    outcome, error = classify_outcome(source_tag, kind, None, None, new_count)
+    health: FeedHealth = "degraded" if outcome == "degraded" else "ok"
     await asyncio.to_thread(repo.update_feed_fetch_status, feed.id, health=health, error=error)
     log.success(f"  Done: {feed.name}")
   except Exception as e:
@@ -541,8 +515,8 @@ async def create_feed(body: FeedCreate, request: Request) -> FeedRow:
     raise HTTPException(409, str(exc)) from exc
   log.info(f"  Feed created: id={created.id}, name={created.name}")
   # Web-scrape feeds are created with empty rules ("{}"); fetching now would
-  # just fail (no "item" selector) and record an error. Defer the first fetch
-  # until rules are inferred and saved. RSS/Atom feeds fetch immediately.
+  # only be skipped and marked degraded. Defer the first fetch until rules are
+  # inferred and saved. RSS/Atom feeds fetch immediately.
   if extraction_rules is None:
     _spawn_background(_fetch_single_feed(created, config))
   return created

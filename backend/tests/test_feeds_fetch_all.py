@@ -246,7 +246,7 @@ def test_web_page_http_error_is_reported_as_an_rss_failure(monkeypatch: pytest.M
   [(None, False), ("", False), ("{}", True)],
 )
 def test_feed_cfg_carries_rules_only_when_non_empty(rules: str | None, has_key: bool) -> None:
-  # "" drops out here, so such a feed is fetched as RSS (export and manual
-  # fetch treat it as web; normal write paths never store "").
+  # "" drops out here, so such a feed is fetched as RSS (export treats it as
+  # web; normal write paths never store "").
   cfg = FeedRow(name="F", url="https://f.example.com/", extraction_rules=rules).to_feed_cfg()
   assert ("extraction_rules" in cfg) is has_key
