@@ -55,6 +55,10 @@ _background_tasks: set[asyncio.Task[object]] = set()
 _infer_semaphore = asyncio.Semaphore(2)
 # Cap the raw HTML download for inference before preprocessing/truncation.
 _INFER_MAX_HTML_FETCH_BYTES = 5 * 1024 * 1024
+# How long shutdown waits for cancelled background tasks. Kept well below
+# Docker's default 10 s stop grace period, which also covers the rest of
+# shutdown.
+_SHUTDOWN_TIMEOUT_S = 5.0
 
 
 def _log_task_exception(task: asyncio.Task[object]) -> None:
@@ -192,8 +196,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
   try:
     yield
   finally:
-    task.cancel()
+    await _cancel_background_tasks(_SHUTDOWN_TIMEOUT_S)
     db.close()
+
+
+async def _cancel_background_tasks(timeout: float) -> None:
+  """Cancel the app's background tasks and wait for them before the pool closes.
+
+  Their cleanup (e.g. closing a cancelled refresh's job row) still needs the
+  DB. Best effort: worker threads behind to_thread are not stopped by
+  cancellation, and tasks still pending after `timeout` are left behind. Only
+  this wait is bounded; waiting for in-flight requests and closing the pool
+  are not.
+  """
+  tasks = list(_background_tasks)
+  if not tasks:
+    return
+  for task in tasks:
+    task.cancel()
+  _, pending = await asyncio.wait(tasks, timeout=timeout)
+  if pending:
+    log.warn(f"Shutdown: {len(pending)} background task(s) did not finish in {timeout}s.")
 
 
 app = FastAPI(title="Stingray", lifespan=lifespan)
@@ -953,9 +976,17 @@ async def _run_refresh(
   config: AppConfig,
   *,
   trigger: str = "web",
-  job_id: int | None = None,
+  job_id: int,
   force: bool = False,
 ) -> None:
+  """Run a web-triggered refresh whose refresh_jobs row is already created.
+
+  refresh_all closes the row on success and on errors, but cancellation
+  (shutdown, or the delete-all endpoint) is not an Exception and may land
+  before refresh_all is even reached, while waiting for the summarizer lock.
+  Closing the row here covers both, so /api/status does not report a refresh
+  that is no longer running.
+  """
   global _refresh_task
   start = time.perf_counter()
   log.step(f"Refresh started (trigger={trigger}, force={force})")
@@ -969,6 +1000,10 @@ async def _run_refresh(
   except Exception as e:
     elapsed = time.perf_counter() - start
     log.error(f"Refresh failed after {elapsed:.1f}s (trigger={trigger}): {type(e).__name__}: {e}")
+    raise
+  except asyncio.CancelledError:
+    log.warn(f"Refresh cancelled (trigger={trigger}).")
+    await asyncio.to_thread(repo.finish_refresh_job, job_id, "failed", 0, "cancelled")
     raise
   finally:
     _refresh_task = None
