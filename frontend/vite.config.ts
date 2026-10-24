@@ -25,6 +25,11 @@ export default defineConfig(({ mode }) => {
       include: ["src/**/*.test.{ts,tsx}"],
       globals: false,
       setupFiles: ["src/test-timezone.ts", "src/test-setup.ts"],
+      coverage: {
+        provider: "v8",
+        include: ["src/**/*.{ts,tsx}"],
+        exclude: ["src/**/*.test.{ts,tsx}", "src/test-*.ts", "src/**/*.d.ts"],
+      },
     },
   }
 })

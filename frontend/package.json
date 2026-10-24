@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "format": "biome format --write"
@@ -34,10 +35,11 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
+    "@vitest/coverage-v8": "4.1.4",
     "happy-dom": "^20.9.0",
     "tailwindcss": "^4",
     "typescript": "^5.7",
     "vite": "^6",
-    "vitest": "^4.1.4"
+    "vitest": "4.1.4"
   }
 }

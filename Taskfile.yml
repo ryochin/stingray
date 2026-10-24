@@ -37,6 +37,24 @@ tasks:
     cmds:
       - npm test
 
+  coverage:
+    desc: "Report backend and frontend test coverage"
+    cmds:
+      - task: coverage:backend
+      - task: coverage:frontend
+
+  coverage:backend:
+    desc: "Report backend test coverage inside the web container"
+    cmds:
+      - docker compose up -d
+      - docker compose exec web uv run pytest backend --cov
+
+  coverage:frontend:
+    desc: "Report frontend test coverage"
+    dir: frontend
+    cmds:
+      - npm run test:coverage
+
   lint:
     desc: "Lint the backend and frontend"
     cmds:

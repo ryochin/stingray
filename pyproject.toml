@@ -20,6 +20,7 @@ dependencies = [
 dev = [
   "pyright>=1.1",
   "pytest>=8.3",
+  "pytest-cov>=7.1.0",
   "ruff>=0.17.0",
 ]
 
@@ -27,6 +28,14 @@ dev = [
 testpaths = ["backend/tests"]
 pythonpath = ["backend"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["backend"]
+omit = ["backend/tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
 
 [tool.pyright]
 pythonVersion = "3.12"
