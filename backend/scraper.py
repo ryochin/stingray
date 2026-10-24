@@ -115,9 +115,10 @@ def _extract_own_text(el: Tag, item_ids: set[int], max_len: int = 500) -> str:
   parts: list[str] = []
   total = 0
   for child in el.children:
-    if hasattr(child, "name") and id(child) in item_ids:
+    if isinstance(child, Tag) and id(child) in item_ids:
       break
-    text = child.get_text(" ", strip=True) if hasattr(child, "name") else str(child).strip()
+    # Strings too: get_text() returns their text, and "" for comments.
+    text = child.get_text(" ", strip=True)
     if text:
       parts.append(text)
       total += len(text)
