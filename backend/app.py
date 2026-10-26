@@ -30,6 +30,7 @@ import repo
 from feeds import extract_feed_candidates, fetch_one_feed, probe_feed_body, read_file_url
 from fetcher import classify_outcome, refresh_all, summarize_pending
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
+from origin_guard import OriginGuardMiddleware
 from safe_http import FetchSettings, SafeClient
 from schemas import (
   AppConfig,
@@ -220,6 +221,7 @@ async def _cancel_background_tasks(timeout: float) -> None:
 
 
 app = FastAPI(title="Stingray", lifespan=lifespan)
+app.add_middleware(OriginGuardMiddleware)
 
 
 # -- Articles --

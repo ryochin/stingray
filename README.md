@@ -124,6 +124,8 @@ docker compose up -d                # Start
 > [!IMPORTANT]
 > Stingray has no authentication. Anyone who can reach `WEB_PORT` can read articles and change subscriptions. If you ever expose it beyond your LAN or to the internet, put something in front of it — Basic auth on a reverse proxy, or a VPN — or bind the published port to loopback only.
 >
+> Write requests that a browser sends from another site are refused (judged by `Sec-Fetch-Site`, or by comparing `Origin` with `Host` when that header is absent), so a page on another site cannot mark articles read or change feeds behind your back. This does not cover DNS rebinding, so the advice above still applies. Over plain HTTP, a reverse proxy in front must pass the original `Host` header through, or the web UI's own write requests will be refused too.
+>
 > ```yaml
 > # the web service in compose.yml
 > ports:

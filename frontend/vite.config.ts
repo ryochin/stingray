@@ -17,7 +17,9 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss()],
     server: {
       proxy: {
-        "/api": apiProxy,
+        // Keep the browser's Host so the backend's Origin check sees the
+        // request as same-origin (a string target implies changeOrigin: true).
+        "/api": { target: apiProxy, changeOrigin: false },
       },
     },
     test: {
