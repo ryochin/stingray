@@ -1,5 +1,6 @@
 [project]
 name = "stingray"
+# Not maintained: changes are tracked by date in CHANGELOG.md
 version = "0.2.0"
 description = "Self-hosted RSS/Atom reader with translation and summarization from a local LLM"
 requires-python = ">=3.12"
