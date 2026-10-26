@@ -1,5 +1,13 @@
-import { beforeEach, describe, expect, it, type Mock, vi } from "vitest"
-import { api, type Feed, faviconUrl, type Selection } from "./client"
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type Mock,
+  vi,
+} from "vitest"
+import { ApiError, api, type Feed, faviconUrl, type Selection } from "./client"
 
 function makeFeed(overrides: Partial<Feed> = {}): Feed {
   return {
@@ -21,6 +29,11 @@ function makeFeed(overrides: Partial<Feed> = {}): Feed {
     ...overrides,
   }
 }
+
+// vi.stubGlobal is not undone by restoreAllMocks.
+afterEach((): void => {
+  vi.unstubAllGlobals()
+})
 
 describe("faviconUrl", () => {
   it("returns google favicon URL for site_url preference", () => {
@@ -104,6 +117,57 @@ describe("api fetchJson behavior", () => {
       ),
     )
     await expect(api.getFolders()).rejects.toThrow(/500/)
+  })
+
+  it("keeps an object detail's message and the parsed body", async () => {
+    const body: unknown = {
+      detail: {
+        message: "Not a feed",
+        candidates: [{ href: "https://e.com/feed", title: "E", type: "rss" }],
+      },
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (): Promise<Response> =>
+          Promise.resolve(
+            new Response(JSON.stringify(body), {
+              status: 422,
+              statusText: "Unprocessable Entity",
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+      ),
+    )
+    const error: unknown = await api
+      .createFeed({ url: "x" })
+      .catch((err: unknown): unknown => err)
+    expect(error).toBeInstanceOf(ApiError)
+    const apiError: ApiError = error as ApiError
+    expect(apiError.message).toBe("Not a feed")
+    expect(apiError.status).toBe(422)
+    // useFeedMutations reads body.detail.candidates from here.
+    expect(apiError.body).toEqual(body)
+  })
+
+  it("falls back to the status when an object detail has no message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (): Promise<Response> =>
+          Promise.resolve(
+            new Response(JSON.stringify({ detail: { candidates: [] } }), {
+              status: 422,
+              // happy-dom does not fill statusText in from the status.
+              statusText: "Unprocessable Entity",
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+      ),
+    )
+    await expect(api.createFeed({ url: "x" })).rejects.toThrow(
+      /^API error: 422 Unprocessable Entity$/,
+    )
   })
 
   it("204 returns undefined without parsing body", async () => {
@@ -265,5 +329,100 @@ describe("api fetchJson behavior", () => {
     const init: RequestInit = call[1]
     expect(init.method).toBe("POST")
     expect(init.body).toBe(JSON.stringify({ urls: ["u1", "u2"] }))
+  })
+})
+
+describe("api.exportFilters", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("downloads the response as filters.json", async () => {
+    const spy: Mock<(input: string) => Promise<Response>> = vi.fn(
+      (_input: string): Promise<Response> =>
+        Promise.resolve(
+          new Response('[{"pattern":"spam"}]', {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+    )
+    vi.stubGlobal("fetch", spy)
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:filters")
+    const revokeObjectURL = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation((): void => {})
+    let clicked: HTMLAnchorElement | null = null
+    let revokedBeforeClick: boolean | null = null
+    // Without the stub, happy-dom would navigate on click.
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ): void {
+      clicked = this
+      // Revoking before the click would break the download.
+      revokedBeforeClick = revokeObjectURL.mock.calls.length > 0
+    })
+
+    await api.exportFilters()
+
+    expect(spy).toHaveBeenCalledExactlyOnceWith("/api/filters/export")
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    const blob: Blob = createObjectURL.mock.calls[0][0] as Blob
+    expect(await blob.text()).toBe('[{"pattern":"spam"}]')
+    expect(clicked).not.toBeNull()
+    const anchor: HTMLAnchorElement = clicked as unknown as HTMLAnchorElement
+    expect(anchor.download).toBe("filters.json")
+    expect(anchor.href).toBe("blob:filters")
+    expect(revokedBeforeClick).toBe(false)
+    expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:filters")
+  })
+
+  it.each([
+    {
+      label: "a JSON body",
+      payload: JSON.stringify({ detail: "db down" }),
+      body: { detail: "db down" },
+    },
+    { label: "a non-JSON body", payload: "<html>oops</html>", body: null },
+  ])("rejects a failed export with $label and saves nothing", async ({
+    payload,
+    body,
+  }: {
+    payload: string
+    body: unknown
+  }) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (): Promise<Response> =>
+          Promise.resolve(
+            new Response(payload, {
+              status: 500,
+              statusText: "Internal Server Error",
+            }),
+          ),
+      ),
+    )
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:filters")
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation((): void => {})
+
+    const error: unknown = await api
+      .exportFilters()
+      .catch((err: unknown): unknown => err)
+
+    expect(error).toBeInstanceOf(ApiError)
+    const apiError: ApiError = error as ApiError
+    expect(apiError.message).toBe("Export failed: 500 Internal Server Error")
+    expect(apiError.status).toBe(500)
+    expect(apiError.body).toEqual(body)
+    // The error page must not be saved as filters.json.
+    expect(createObjectURL).not.toHaveBeenCalled()
+    expect(click).not.toHaveBeenCalled()
   })
 })

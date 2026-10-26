@@ -268,4 +268,147 @@ describe("ArticleCard", () => {
     fireEvent.click(area)
     expect(onClick).not.toHaveBeenCalled()
   })
+
+  it.each([
+    { label: "the plain title", translated: null, linkText: "Original Title" },
+    {
+      label: "the translated title",
+      translated: "Translated title",
+      linkText: "Translated title",
+    },
+    {
+      label: "the original under a translation",
+      translated: "Translated title",
+      linkText: "Original Title",
+    },
+  ])("treats a middle-click on $label as opening the article", ({
+    translated,
+    linkText,
+  }: {
+    translated: string | null
+    linkText: string
+  }): void => {
+    const onTitleClick: Mock = vi.fn()
+    const onWindowAuxClick: Mock = vi.fn()
+    window.addEventListener("auxclick", onWindowAuxClick)
+    try {
+      render(
+        <ArticleCard
+          article={article({ title_translated: translated })}
+          onTitleClick={onTitleClick}
+        />,
+      )
+      const link: HTMLAnchorElement = screen
+        .getByText(linkText)
+        .closest("a") as HTMLAnchorElement
+      // RTL has no fireEvent.auxClick, and auxclick never triggers the card's
+      // onClick, so the stopped propagation is observed from window.
+      const notPrevented: boolean = fireEvent(
+        link,
+        new MouseEvent("auxclick", {
+          bubbles: true,
+          cancelable: true,
+          button: 1,
+        }),
+      )
+      expect(onTitleClick).toHaveBeenCalledTimes(1)
+      expect(onWindowAuxClick).not.toHaveBeenCalled()
+      // The background tab still opens.
+      expect(notPrevented).toBe(true)
+    } finally {
+      window.removeEventListener("auxclick", onWindowAuxClick)
+    }
+  })
+
+  it("ignores a right-click on the title", (): void => {
+    const onTitleClick: Mock = vi.fn()
+    const onWindowAuxClick: Mock = vi.fn()
+    window.addEventListener("auxclick", onWindowAuxClick)
+    try {
+      render(<ArticleCard article={article()} onTitleClick={onTitleClick} />)
+      const link: HTMLAnchorElement = screen
+        .getByText("Original Title")
+        .closest("a") as HTMLAnchorElement
+      fireEvent(
+        link,
+        new MouseEvent("auxclick", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+        }),
+      )
+      expect(onTitleClick).not.toHaveBeenCalled()
+      expect(onWindowAuxClick).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener("auxclick", onWindowAuxClick)
+    }
+  })
+
+  // hspace / vspace are also on the strip list, but DOMPurify removes them
+  // first, so a test for them would pass with or without the strip.
+  it.each([
+    { attr: "width", value: "1290" },
+    { attr: "height", value: "800" },
+    { attr: "style", value: "width:1290px" },
+    { attr: "align", value: "left" },
+    { attr: "border", value: "1" },
+  ])("strips $attr from body images but keeps src", ({
+    attr,
+    value,
+  }: {
+    attr: string
+    value: string
+  }): void => {
+    const a: Article = article({
+      content_html: `<p><img src="https://img.example.com/a.png" ${attr}="${value}"></p>`,
+    })
+    const { container } = render(<ArticleCard article={a} />)
+    const img: HTMLImageElement = container.querySelector(
+      "img[src='https://img.example.com/a.png']",
+    ) as HTMLImageElement
+    expect(img).not.toBeNull()
+    expect(img).not.toHaveAttribute(attr)
+  })
+
+  it("clears only the width styling on every ancestor, even of a lazy image", (): void => {
+    const a: Article = article({
+      content_html:
+        '<div width="1290" style="width:1290px; max-width:1290px; min-width:10px; margin:0 auto"><p><img data-src="lazy.png"></p></div>',
+    })
+    const { container } = render(<ArticleCard article={a} />)
+    const img: HTMLImageElement = container.querySelector(
+      "img[data-src='lazy.png']",
+    ) as HTMLImageElement
+    expect(img).not.toBeNull()
+    // Two levels up, past the <p>.
+    const wrapper: HTMLElement = img.parentElement?.parentElement as HTMLElement
+    expect(wrapper.tagName).toBe("DIV")
+    expect(wrapper).not.toHaveAttribute("width")
+    expect(wrapper.style.getPropertyValue("width")).toBe("")
+    expect(wrapper.style.getPropertyValue("max-width")).toBe("")
+    expect(wrapper.style.getPropertyValue("min-width")).toBe("")
+    // Unrelated inline styling survives.
+    expect(wrapper.style.getPropertyValue("margin")).toContain("auto")
+  })
+
+  it("drops repeated images, with their link, and keeps one of each", (): void => {
+    const a: Article = article({
+      content_html: [
+        '<p><img src="https://img.example.com/a.png"></p>',
+        '<a href="https://example.com/dup"><img src="https://img.example.com/a.png"></a>',
+        '<p><img src="https://img.example.com/a.png"></p>',
+        '<p><img src="https://img.example.com/b.png"></p>',
+      ].join(""),
+    })
+    const { container } = render(<ArticleCard article={a} />)
+    expect(
+      container.querySelectorAll("img[src='https://img.example.com/a.png']"),
+    ).toHaveLength(1)
+    expect(
+      container.querySelectorAll("img[src='https://img.example.com/b.png']"),
+    ).toHaveLength(1)
+    expect(
+      container.querySelector("a[href='https://example.com/dup']"),
+    ).toBeNull()
+  })
 })

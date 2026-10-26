@@ -1,7 +1,8 @@
-import { act, render } from "@testing-library/react"
+import { act, render, renderHook } from "@testing-library/react"
 import type { JSX } from "react"
 import { useRef, useState } from "react"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import type { Mock } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Article, Selection } from "../api/client"
 import { useArticleListController } from "./useArticleListController"
 
@@ -226,5 +227,78 @@ describe("useArticleListController — caught-up sentinel visibility", (): void 
 
     mountSentinel(handle, 300, 340)
     expect(handle?.getVisible()).toBe(false)
+  })
+})
+
+describe("useArticleListController — handleCardClick", (): void => {
+  type Updater = (prev: number) => number
+
+  // Virtualization plays no part here, so the hook is called directly and the
+  // focus updater it hands to setFocusIndex is applied by hand.
+  function clickCard(
+    filtered: Article[],
+    prev: number,
+    index: number,
+  ): { next: number; scheduleRead: Mock } {
+    const setFocusIndex: Mock = vi.fn()
+    const scheduleRead: Mock = vi.fn()
+    const { result } = renderHook(() =>
+      useArticleListController({
+        filtered,
+        focusIndex: -1,
+        setFocusIndex,
+        mainRef: { current: null },
+        stickyHeaderRef: { current: null },
+        headerHeight: 0,
+        selection: { type: "all" },
+        showUnreadOnly: false,
+        timeRangeId: "all",
+        scheduleRead,
+        hasSessionRead: (): boolean => false,
+        nextUnreadFeed: null,
+      }),
+    )
+    setFocusIndex.mockClear()
+    result.current.handleCardClick(index)
+    expect(setFocusIndex).toHaveBeenCalledTimes(1)
+    const updater: Updater = setFocusIndex.mock.calls[0][0] as Updater
+    return { next: updater(prev), scheduleRead }
+  }
+
+  const unread: Article[] = [
+    makeArticle({ url: "a" }),
+    makeArticle({ url: "b" }),
+    makeArticle({ url: "c" }),
+  ]
+
+  it("moves focus and marks the card being left as read", (): void => {
+    const { next, scheduleRead } = clickCard(unread, 0, 2)
+    expect(next).toBe(2)
+    // The card left behind, not the one clicked.
+    expect(scheduleRead).toHaveBeenCalledExactlyOnceWith("a")
+  })
+
+  it.each([
+    { label: "the same card", filtered: unread, prev: 2 },
+    { label: "no focus yet", filtered: unread, prev: -1 },
+    {
+      label: "an already-read card being left",
+      filtered: [
+        makeArticle({ url: "a", read_at: "2026-10-26T00:00:00Z" }),
+        makeArticle({ url: "b" }),
+        makeArticle({ url: "c" }),
+      ],
+      prev: 0,
+    },
+  ])("moves focus without marking anything read for $label", ({
+    filtered,
+    prev,
+  }: {
+    filtered: Article[]
+    prev: number
+  }): void => {
+    const { next, scheduleRead } = clickCard(filtered, prev, 2)
+    expect(next).toBe(2)
+    expect(scheduleRead).not.toHaveBeenCalled()
   })
 })
