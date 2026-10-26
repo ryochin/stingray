@@ -177,6 +177,49 @@ class TestDeleteAllData:
 
     asyncio.run(scenario())
 
+  @pytest.mark.parametrize("raises_on_cancel", [False, True], ids=["cancelled", "raises"])
+  def test_cancels_an_in_flight_refresh(
+    self, monkeypatch: pytest.MonkeyPatch, raises_on_cancel: bool
+  ) -> None:
+    """A refresh left running would keep upserting the pre-delete feed list.
+
+    A task that raises on cancellation must not abort the delete either.
+    """
+    deleted: list[bool] = []
+    monkeypatch.setattr(app.repo, "delete_all_data", lambda: deleted.append(True))
+    monkeypatch.setattr(app.cache, "purge_feed_cache", lambda: 0)
+
+    async def scenario() -> None:
+      monkeypatch.setattr(app, "_refresh_lock", asyncio.Lock())
+      started = asyncio.Event()
+      cancelled: list[bool] = []
+
+      async def endless_refresh() -> None:
+        started.set()
+        try:
+          await asyncio.Event().wait()
+        except asyncio.CancelledError:
+          cancelled.append(True)
+          if raises_on_cancel:
+            raise RuntimeError("cleanup failed") from None
+          raise
+
+      refresh = asyncio.create_task(endless_refresh())
+      monkeypatch.setattr(app, "_refresh_task", refresh)
+      await asyncio.wait_for(started.wait(), _TIMEOUT)
+
+      # Bounded: without the cancel, awaiting the refresh would hang forever.
+      await asyncio.wait_for(app.delete_all_data(), _TIMEOUT)
+
+      # Checked here, not after asyncio.run(): the runner cancels leftover
+      # tasks itself, which would hide a delete that never cancelled it.
+      assert cancelled == [True]
+      assert refresh.done()
+      assert app._refresh_task is None
+      assert deleted == [True]
+
+    asyncio.run(scenario())
+
 
 class TestOpmlImportExclusion:
   """Two imports must not interleave.

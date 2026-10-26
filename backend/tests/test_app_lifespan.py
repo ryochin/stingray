@@ -116,3 +116,39 @@ class TestShutdown:
         await asyncio.gather(*tasks)
 
     asyncio.run(run())
+
+
+class _StopLoop(Exception):
+  """Raised by the fake sleep to break out of the summarizer's endless loop."""
+
+
+def test_background_summarizer_keeps_running_after_an_error(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  results: list[Exception | int] = [RuntimeError("ollama down"), 0]
+  summarize_calls: list[AppConfig] = []
+  sleeps: list[float] = []
+
+  async def fake_summarize_pending(config: AppConfig) -> int:
+    summarize_calls.append(config)
+    result = results.pop(0)
+    if isinstance(result, Exception):
+      raise result
+    return result
+
+  async def fake_sleep(delay: float) -> None:
+    sleeps.append(delay)
+    # Initial delay, then one sleep after each of the two passes.
+    if len(sleeps) == 3:
+      raise _StopLoop
+
+  monkeypatch.setattr(app_module, "summarize_pending", fake_summarize_pending)
+  monkeypatch.setattr(app_module, "_summarize_lock", asyncio.Lock())
+  monkeypatch.setattr(app_module.asyncio, "sleep", fake_sleep)
+  config = AppConfig()
+
+  with pytest.raises(_StopLoop):
+    asyncio.run(app_module._background_summarizer(config))
+
+  assert summarize_calls == [config, config]
+  assert sleeps == [10, 60, 60]

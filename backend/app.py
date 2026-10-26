@@ -1066,20 +1066,23 @@ def health() -> dict[str, str]:
 # Mount built frontend if it exists, otherwise skip.
 
 _frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+_frontend_root = _frontend_dist.resolve()
+
+
+def _resolve_spa_file(path: str) -> Path | None:
+  """Resolve a request path to a file inside the dist dir, or None.
+
+  is_relative_to() rather than a string prefix check: "dist-old" starts with
+  "dist" as text but is a different directory.
+  """
+  file = (_frontend_dist / path).resolve()
+  if not file.is_relative_to(_frontend_root):
+    return None
+  return file if file.is_file() else None
+
+
 if _frontend_dist.is_dir():
   app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="static")
-  _frontend_root = _frontend_dist.resolve()
-
-  def _resolve_spa_file(path: str) -> Path | None:
-    """Resolve a request path to a file inside the dist dir, or None.
-
-    is_relative_to() rather than a string prefix check: "dist-old" starts with
-    "dist" as text but is a different directory.
-    """
-    file = (_frontend_dist / path).resolve()
-    if not file.is_relative_to(_frontend_root):
-      return None
-    return file if file.is_file() else None
 
   @app.get("/{path:path}")
   async def spa_fallback(path: str) -> FileResponse:

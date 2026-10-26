@@ -72,16 +72,23 @@ class TestCheckRecentJob:
       healthcheck._check_recent_job(max_age_minutes=45)
 
 
-def _run_main(monkeypatch, *, enabled: bool, argv: list[str]) -> tuple[int, dict[str, int]]:
-  """Run healthcheck.main() with all checks stubbed, counting each check call."""
+def _run_main(
+  monkeypatch, *, enabled: bool, argv: list[str], fail: str | None = None
+) -> tuple[int, dict[str, int]]:
+  """Run healthcheck.main() with all checks stubbed, counting each check call.
+
+  `fail` names the check ("db", "llm" or "job") whose stub raises after counting.
+  """
   calls = {"db": 0, "job": 0, "llm": 0}
-  monkeypatch.setattr(healthcheck, "_check_db", lambda: calls.update(db=calls["db"] + 1))
-  monkeypatch.setattr(
-    healthcheck, "_check_recent_job", lambda max_age_minutes: calls.update(job=calls["job"] + 1)
-  )
-  monkeypatch.setattr(
-    healthcheck, "_check_llm", lambda base_url, timeout: calls.update(llm=calls["llm"] + 1)
-  )
+
+  def _record(name: str) -> None:
+    calls[name] += 1
+    if name == fail:
+      raise RuntimeError(f"{name} down")
+
+  monkeypatch.setattr(healthcheck, "_check_db", lambda: _record("db"))
+  monkeypatch.setattr(healthcheck, "_check_recent_job", lambda max_age_minutes: _record("job"))
+  monkeypatch.setattr(healthcheck, "_check_llm", lambda base_url, timeout: _record("llm"))
   monkeypatch.setattr(
     healthcheck, "_load_config", lambda: AppConfig(ollama=OllamaConfig(enabled=enabled))
   )
@@ -137,3 +144,30 @@ class TestLlmGating:
     err = capsys.readouterr().err
     assert "healthcheck: config:" in err
     assert "bad config" in err
+
+
+class TestMainFailures:
+  @pytest.mark.parametrize(
+    ("fail", "prefix", "expected_calls"),
+    [
+      # A db failure stops before the llm/job checks run.
+      ("db", "healthcheck: db: ", {"db": 1, "llm": 0, "job": 0}),
+      ("llm", "healthcheck: llm (http://ollama.test:11434): ", {"db": 1, "llm": 1, "job": 0}),
+      ("job", "healthcheck: job: ", {"db": 1, "llm": 1, "job": 1}),
+    ],
+  )
+  def test_failed_check_returns_1_with_prefix(
+    self, monkeypatch, capsys, fail: str, prefix: str, expected_calls: dict[str, int]
+  ):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.test:11434")
+    code, calls = _run_main(monkeypatch, enabled=True, argv=[], fail=fail)
+    assert code == 1
+    assert calls == expected_calls
+    err = capsys.readouterr().err
+    assert err.startswith(prefix)
+    assert f"{fail} down" in err
+
+  def test_skip_job_check_does_not_run_job_check(self, monkeypatch):
+    code, calls = _run_main(monkeypatch, enabled=True, argv=["--skip-job-check"], fail="job")
+    assert code == 0
+    assert calls == {"db": 1, "llm": 1, "job": 0}

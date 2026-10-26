@@ -25,6 +25,7 @@ import app as app_module
 import cache
 import db
 import repo
+from schemas import AppConfig, FeedRow
 
 pytestmark = pytest.mark.usefixtures("clean_db")
 
@@ -33,12 +34,12 @@ def _client() -> TestClient:
   return TestClient(app_module.app)
 
 
-def _make_feed(name: str, folder_id: int | None = None) -> int:
+def _make_feed(name: str, folder_id: int | None = None, *, summarize: bool = True) -> int:
   with db.connection() as conn:
     row = conn.execute(
       """INSERT INTO feeds (name, url, translate, summarize, enabled, folder_id)
-         VALUES (%s, %s, FALSE, TRUE, TRUE, %s) RETURNING id""",
-      (name, f"https://{name}.example.com/rss", folder_id),
+         VALUES (%s, %s, FALSE, %s, TRUE, %s) RETURNING id""",
+      (name, f"https://{name}.example.com/rss", summarize, folder_id),
     ).fetchone()
     assert row is not None
     return int(row["id"])
@@ -123,6 +124,44 @@ class TestDeleteFolder:
     assert feed.folder_id is None
 
 
+class TestRenameFolder:
+  def test_renames_and_returns_the_folder(self):
+    folder = repo.create_folder("Before")
+
+    res = _client().patch(f"/api/folders/{folder.id}", json={"name": "After"})
+
+    assert res.status_code == 200
+    assert res.json()["id"] == folder.id
+    assert res.json()["name"] == "After"
+    assert _folder_names() == ["After"]
+
+  def test_unknown_folder_is_404(self):
+    assert _client().patch("/api/folders/9999", json={"name": "X"}).status_code == 404
+
+
+class TestFetchFeed:
+  def test_unknown_feed_is_404(self):
+    assert _client().post("/api/feeds/9999/fetch").status_code == 404
+
+  def test_starts_a_fetch_of_that_feed(self, monkeypatch: pytest.MonkeyPatch):
+    _make_feed("other")
+    feed_id = _make_feed("A")
+    fetched: list[int] = []
+
+    # Record from the coroutine body, so the test also fails when the fetch is
+    # created but never scheduled.
+    async def record_fetch(feed: FeedRow, _config: AppConfig) -> None:
+      fetched.append(feed.id)
+
+    monkeypatch.setattr(app_module, "_fetch_single_feed", record_fetch)
+    monkeypatch.setattr(app_module.app.state, "config", AppConfig(), raising=False)
+
+    res = _client().post(f"/api/feeds/{feed_id}/fetch")
+
+    assert res.status_code == 202
+    assert fetched == [feed_id]
+
+
 class TestDeleteAllData:
   def _seed(self, cache_dir: Path) -> None:
     folder = repo.create_folder("Tech")
@@ -204,6 +243,22 @@ class TestFeedUpdates:
 
   def test_toggle_unknown_feed_is_404(self):
     assert _client().post("/api/feeds/9999/toggle").status_code == 404
+
+  def test_toggle_summarize_flips_each_time(self):
+    # Two requests: a handler that always writes the same value passes one.
+    feed_id = _make_feed("A", summarize=False)
+
+    first = _client().post(f"/api/feeds/{feed_id}/summarize")
+    second = _client().post(f"/api/feeds/{feed_id}/summarize")
+
+    assert (first.status_code, first.json()["summarize"]) == (200, True)
+    assert (second.status_code, second.json()["summarize"]) == (200, False)
+    feed = repo.get_feed_by_id(feed_id)
+    assert feed is not None
+    assert feed.summarize is False
+
+  def test_toggle_summarize_unknown_feed_is_404(self):
+    assert _client().post("/api/feeds/9999/summarize").status_code == 404
 
   # Both directions: one alone would pass a handler that ignores the body
   # and always writes the same value.

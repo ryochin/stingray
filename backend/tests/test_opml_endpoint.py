@@ -236,3 +236,24 @@ class TestImportTriggersRefresh:
     assert result["feeds_created"] == 0
     assert refreshes == []
     assert repo.get_latest_refresh_job() is None
+
+
+class _UnfinishedTask:
+  """Stands in for an in-flight refresh task; the handler only asks done()."""
+
+  def done(self) -> bool:
+    return False
+
+
+class TestRefreshEndpoint:
+  def test_refresh_in_progress_is_409_and_creates_no_job(
+    self, client: TestClient, refreshes: list[str], monkeypatch: pytest.MonkeyPatch
+  ):
+    monkeypatch.setattr(app_module, "_refresh_task", _UnfinishedTask())
+
+    resp = client.post("/api/refresh")
+
+    assert resp.status_code == 409
+    assert resp.json() == {"message": "Refresh already in progress"}
+    assert refreshes == []
+    assert repo.get_latest_refresh_job() is None
