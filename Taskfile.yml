@@ -26,9 +26,8 @@ tasks:
       - task: test:frontend
 
   test:backend:
-    desc: "Run backend tests inside the web container"
+    desc: "Run backend tests inside the running web container"
     cmds:
-      - docker compose up -d
       - docker compose exec web uv run pytest backend
 
   test:frontend:
@@ -44,9 +43,8 @@ tasks:
       - task: coverage:frontend
 
   coverage:backend:
-    desc: "Report backend test coverage inside the web container"
+    desc: "Report backend test coverage inside the running web container"
     cmds:
-      - docker compose up -d
       - docker compose exec web uv run pytest backend --cov
 
   coverage:frontend:
@@ -90,6 +88,34 @@ tasks:
     dir: frontend
     cmds:
       - npm run lint:fix
+
+  typecheck:
+    desc: "Type-check the backend and frontend"
+    cmds:
+      - task: typecheck:backend
+      - task: typecheck:frontend
+
+  typecheck:backend:
+    desc: "Type-check the backend with pyright (on the host; it fails in the container)"
+    cmds:
+      - uv run pyright
+
+  typecheck:frontend:
+    desc: "Type-check the frontend with tsc"
+    dir: frontend
+    cmds:
+      - npx tsc -b
+
+  backup:
+    desc: "Dump the database to a timestamped bzip2 file"
+    set: [errexit, pipefail]
+    cmds:
+      # Written to .partial first so a failed dump never looks like a finished one.
+      - |
+        out="backup-{{now | date "2006-01-02_150405"}}.sql.bz2"
+        docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | bzip2 > "$out.partial"
+        mv "$out.partial" "$out"
+        echo "Wrote $out"
 
   clean:
     desc: "Remove all cached feed data"

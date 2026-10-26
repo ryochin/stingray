@@ -12,9 +12,11 @@ _YELLOW = "\033[33m"
 _CYAN = "\033[36m"
 
 
-def _c(code: str, msg: str) -> str:
+def _c(code: str, msg: str, *, label: str = "") -> str:
+  # Without color (e.g. `docker compose logs`, which is not a tty) the label is
+  # what tells a warning or an error apart from an ordinary line.
   if _NO_COLOR:
-    return msg
+    return f"{label}{msg}"
   return f"{code}{msg}{_RESET}"
 
 
@@ -31,11 +33,11 @@ def info(msg: str) -> None:
 
 
 def warn(msg: str) -> None:
-  print(_c(_YELLOW, msg))
+  print(_c(_YELLOW, msg, label="WARNING: "))
 
 
 def error(msg: str) -> None:
-  print(_c(_RED, msg))
+  print(_c(_RED, msg, label="ERROR: "))
 
 
 def dim(msg: str) -> None:

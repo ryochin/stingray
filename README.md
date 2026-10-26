@@ -224,6 +224,8 @@ Take a dump while the containers are running and compress it with bzip2 (`bzip2`
 docker compose exec -T postgres pg_dump -U stingray stingray | bzip2 > backup.sql.bz2
 ```
 
+With [Task](https://taskfile.dev/) installed, `task backup` does the same but writes a timestamped file such as `backup-2026-10-26_221356.sql.bz2`; use that name in place of `backup.sql.bz2` when restoring.
+
 Restore into an **empty database**. The web and fetcher services create the schema on startup and would collide with the dump, so run this with **only PostgreSQL up**.
 
 ```bash

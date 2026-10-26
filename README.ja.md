@@ -224,6 +224,8 @@ fetch:
 docker compose exec -T postgres pg_dump -U stingray stingray | bzip2 > backup.sql.bz2
 ```
 
+[Task](https://taskfile.dev/) を入れている場合は、`task backup` でも同じ退避ができます。こちらは `backup-2026-10-26_221356.sql.bz2` のように日時入りのファイル名で書き出すので、リストアの際は `backup.sql.bz2` をそのファイル名に置き換えてください。
+
 リストアは**空の DB** へ流し込みます。Web / Fetcher が起動するとスキーマが自動作成されダンプと衝突するため、**PostgreSQL だけを起動した状態**で実行してください。
 
 ```bash
