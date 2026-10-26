@@ -138,6 +138,39 @@ class TestRenameFolder:
   def test_unknown_folder_is_404(self):
     assert _client().patch("/api/folders/9999", json={"name": "X"}).status_code == 404
 
+  @pytest.mark.parametrize("name", ["", "   "])
+  def test_blank_name_is_422_and_keeps_the_old_name(self, name: str):
+    folder = repo.create_folder("Before")
+
+    res = _client().patch(f"/api/folders/{folder.id}", json={"name": name})
+
+    assert res.status_code == 422
+    assert _folder_names() == ["Before"]
+
+  def test_name_is_trimmed(self):
+    folder = repo.create_folder("Before")
+
+    res = _client().patch(f"/api/folders/{folder.id}", json={"name": "  After  "})
+
+    assert res.json()["name"] == "After"
+    assert _folder_names() == ["After"]
+
+
+class TestCreateFolder:
+  def test_creates_with_a_trimmed_name(self):
+    res = _client().post("/api/folders", json={"name": "  Tech  "})
+
+    assert res.status_code == 201
+    assert res.json()["name"] == "Tech"
+    assert _folder_names() == ["Tech"]
+
+  @pytest.mark.parametrize("name", ["", "   "])
+  def test_blank_name_is_422(self, name: str):
+    res = _client().post("/api/folders", json={"name": name})
+
+    assert res.status_code == 422
+    assert _folder_names() == []
+
 
 class TestFetchFeed:
   def test_unknown_feed_is_404(self):

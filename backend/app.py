@@ -14,13 +14,13 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Literal, cast, get_args
+from typing import Annotated, Literal, cast, get_args
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 import cache
 import db
@@ -282,12 +282,16 @@ def mark_all_articles_unread(
 # -- Folders --
 
 
+# Trimmed before validation, so a blank or whitespace-only name is a 422.
+FolderName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 class FolderCreate(BaseModel):
-  name: str
+  name: FolderName
 
 
 class FolderRename(BaseModel):
-  name: str
+  name: FolderName
 
 
 class FolderReorder(BaseModel):
