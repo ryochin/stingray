@@ -128,6 +128,24 @@ class TestParseOpmlStructure:
     assert [f.name for f in folders[0].feeds] == ["F1", "F2"]
     assert uncat == []
 
+  @pytest.mark.parametrize(
+    ("attrs", "expected"),
+    [
+      ('text="  Tech  "', "Tech"),
+      ('text="   " title="Tech"', "Tech"),
+      ('text="   " title="   "', "Unnamed"),
+    ],
+  )
+  def test_folder_name_is_trimmed_and_falls_through_when_blank(self, attrs: str, expected: str):
+    xml = f"""<?xml version="1.0"?>
+    <opml version="2.0"><body>
+      <outline {attrs}>
+        <outline type="rss" text="F1" xmlUrl="https://a.example.com/"/>
+      </outline>
+    </body></opml>"""
+    folders, _ = opml.parse_opml(xml, native_lang="en")
+    assert [f.name for f in folders] == [expected]
+
   def test_empty_folder_dropped(self):
     xml = """<?xml version="1.0"?>
     <opml version="2.0"><body>

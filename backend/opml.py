@@ -10,7 +10,7 @@ import defusedxml.ElementTree as SafeET
 
 import lang
 import log
-from schemas import FeedRow, FolderRow
+from schemas import FeedRow, FolderRow, normalize_folder_name
 from scraper import validate_extraction_rules
 
 
@@ -116,7 +116,7 @@ def parse_opml(
       if feed:
         uncategorized.append(feed)
     else:
-      folder = ImportFolder(name=outline.get("text") or outline.get("title") or "Unnamed")
+      folder = ImportFolder(name=normalize_folder_name(outline.get("text"), outline.get("title")))
       for child in outline:
         feed = _parse_feed_outline(child, native_lang)
         if feed:

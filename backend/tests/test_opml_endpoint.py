@@ -105,6 +105,10 @@ def _import(client: TestClient, xml: str | bytes) -> dict[str, int]:
   return resp.json()
 
 
+def _folder_id_of(feed_name: str) -> int | None:
+  return next(f.folder_id for f in repo.list_feeds() if f.name == feed_name)
+
+
 class TestExport:
   def test_exports_folders_and_feeds(self, client: TestClient):
     folder = repo.create_folder("Tech")
@@ -173,6 +177,38 @@ class TestImport:
     assert result["folders_created"] == 1
     assert len(repo.list_folders()) == 2
 
+  def test_a_padded_folder_name_reuses_the_existing_folder(
+    self, client: TestClient, refreshes: list[str]
+  ):
+    tech = repo.create_folder("Tech")
+
+    result = _import(client, OPML_TWO_FOLDERS.replace('text="Tech"', 'text="  Tech  "'))
+
+    assert result["folders_created"] == 1
+    assert _folder_id_of("F1") == tech.id
+
+  def test_reuses_an_existing_folder_saved_with_padding(
+    self, client: TestClient, refreshes: list[str]
+  ):
+    # Folders created before the API trimmed names can still carry padding.
+    tech = repo.create_folder("  Tech  ")
+
+    result = _import(client, OPML_TWO_FOLDERS)
+
+    assert result["folders_created"] == 1
+    assert _folder_id_of("F1") == tech.id
+
+  def test_an_exact_folder_name_wins_over_a_normalized_match(
+    self, client: TestClient, refreshes: list[str]
+  ):
+    # The blank folder comes later, so a plain normalized lookup would pick it.
+    unnamed = repo.create_folder("Unnamed")
+    repo.create_folder("   ")
+
+    _import(client, OPML_TWO_FOLDERS.replace('text="Tech"', 'text="Unnamed"'))
+
+    assert _folder_id_of("F1") == unnamed.id
+
   def test_folderless_feeds_land_uncategorized(self, client: TestClient, refreshes: list[str]):
     _import(client, OPML_TWO_FOLDERS)
     loose = next(f for f in repo.list_feeds() if f.name == "Loose")
@@ -185,6 +221,21 @@ class TestImport:
 
     assert result == {"folders_created": 0, "feeds_created": 0, "feeds_skipped": 4}
     assert len(repo.list_feeds()) == 4
+
+  def test_reimporting_an_export_with_a_blank_folder_name_is_a_no_op(
+    self, client: TestClient, refreshes: list[str]
+  ):
+    # The folder API rejects blank names now, but older folders can carry one;
+    # the repo call bypasses that check. Its outline parses back as "Unnamed".
+    _import(client, OPML_TWO_FOLDERS)
+    tech_id = _folder_id_of("F1")
+    assert tech_id is not None
+    repo.rename_folder(tech_id, "   ")
+
+    result = _import(client, client.get("/api/opml/export").text)
+
+    assert result["folders_created"] == 0
+    assert len(repo.list_folders()) == 2
 
   def test_invalid_extraction_rules_import_as_unconfigured_web_feed(
     self, client: TestClient, refreshes: list[str]

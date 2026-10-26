@@ -24,6 +24,7 @@ from schemas import (
   FilterRow,
   FolderRow,
   RefreshJob,
+  normalize_folder_name,
 )
 
 # -- Adaptive fetch scheduling --
@@ -550,10 +551,12 @@ def import_opml(
   feeds_created = 0
   feed_params: list[tuple[object, ...]] = []
   with db.connection() as conn, conn.transaction():
-    folder_ids: dict[str, int] = {
-      r["name"]: r["id"]
-      for r in conn.execute("SELECT id, name FROM folders ORDER BY position, id").fetchall()
-    }
+    # Keyed the way parse_opml names folders, so older folders saved with
+    # padding or a blank name still match their own exported outline. An
+    # exact name match wins over one that only matches once normalized.
+    existing = conn.execute("SELECT id, name FROM folders ORDER BY position, id").fetchall()
+    folder_ids: dict[str, int] = {normalize_folder_name(r["name"]): r["id"] for r in existing}
+    folder_ids.update({r["name"]: r["id"] for r in existing})
     for name, feeds in folders:
       if name not in folder_ids:
         row = conn.execute(_INSERT_FOLDER_SQL + " RETURNING id", (name,)).fetchone()

@@ -36,6 +36,20 @@ class FolderRow(BaseModel):
   created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
 
+def normalize_folder_name(*candidates: str | None) -> str:
+  """The first candidate that is non-blank once trimmed, else "Unnamed".
+
+  Shared by the OPML parser and the import's folder matching, so a folder
+  saved with padding — or with a blank name, before the folder API trimmed
+  names — maps to the same name its exported outline parses back to.
+  """
+  for candidate in candidates:
+    name = (candidate or "").strip()
+    if name:
+      return name
+  return "Unnamed"
+
+
 class FeedRow(BaseModel):
   id: int = 0
   name: str
