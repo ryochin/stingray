@@ -223,9 +223,6 @@ export default function Feeds(): JSX.Element {
           folders={sortedFolders}
           candidates={feedCandidates}
           candidatesFor={candidatesFor}
-          onPickCandidate={(href: string): Promise<unknown> =>
-            addFeedAndExpand({ url: href, name: "" })
-          }
           onDismissCandidates={dismissCandidates}
         />
 

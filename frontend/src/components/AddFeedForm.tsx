@@ -10,9 +10,6 @@ interface Props {
   folders: Folder[]
   candidates: FeedCandidate[] | null
   candidatesFor: string | null
-  // Resolves on a successful add of the picked candidate; same contract as
-  // `onAdd` so the form clears its inputs once the candidate is added.
-  onPickCandidate: (href: string) => Promise<unknown>
   onDismissCandidates: () => void
 }
 
@@ -22,7 +19,6 @@ function AddFeedForm({
   folders,
   candidates,
   candidatesFor,
-  onPickCandidate,
   onDismissCandidates,
 }: Props): JSX.Element {
   const [name, setName] = useState<string>("")
@@ -41,11 +37,16 @@ function AddFeedForm({
     setUrl((cur: string): string => (cur === submittedUrl ? "" : cur))
   }
 
+  // Both the main submit and a picked candidate add into the selected folder.
+  const buildBody = (feedName: string, feedUrl: string): FeedCreate => {
+    const body: FeedCreate = { name: feedName, url: feedUrl }
+    if (folderId != null) body.folder_id = folderId
+    return body
+  }
+
   const submit = (event: React.FormEvent): void => {
     event.preventDefault()
-    const body: FeedCreate = { name, url }
-    if (folderId != null) body.folder_id = folderId
-    onAdd(body)
+    onAdd(buildBody(name, url))
       .then((): void => clearInputsIfUnchanged(name, url))
       .catch((): void => {
         // Keep the inputs on failure or when the URL resolved to feed
@@ -65,7 +66,7 @@ function AddFeedForm({
     setUrl(href)
     // The candidate is added with an auto-detected name (name: ""), so clear
     // against that on success — same untouched-only guard as the main submit.
-    onPickCandidate(href)
+    onAdd(buildBody("", href))
       .then((): void => clearInputsIfUnchanged("", href))
       .catch((): void => {})
   }

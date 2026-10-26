@@ -274,6 +274,36 @@ describe("AddFeedForm candidates", (): void => {
     expect(screen.queryByRole("button", { name: "Use" })).toBeNull()
   })
 
+  it("adds the picked candidate into the chosen folder", async (): Promise<void> => {
+    getFolders.mockResolvedValue([TECH])
+    createFeed.mockRejectedValueOnce(CANDIDATE_ERROR)
+    createFeed.mockResolvedValueOnce({
+      id: 1,
+      name: "Site RSS",
+      url: "https://site.test/rss",
+    })
+    renderFeeds()
+    const folderSelect: HTMLSelectElement = within(getFeedForm()).getByRole(
+      "combobox",
+    ) as HTMLSelectElement
+    await within(folderSelect).findByRole("option", { name: "Tech" })
+    fireEvent.change(folderSelect, { target: { value: "5" } })
+    fireEvent.change(getUrlInput(), { target: { value: "https://site.test" } })
+    fireEvent.submit(getFeedForm())
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use" }))
+
+    await waitFor((): void => expect(createFeed).toHaveBeenCalledTimes(2))
+    expect(createFeed.mock.calls[1][0]).toEqual({
+      url: "https://site.test/rss",
+      name: "",
+      folder_id: 5,
+    })
+    // The folder stays selected for the next add, as after a main submit.
+    await waitFor((): void => expect(getUrlInput().value).toBe(""))
+    expect(folderSelect.value).toBe("5")
+  })
+
   it("keeps values typed while the picked candidate is being added", async (): Promise<void> => {
     let resolve: (value: unknown) => void = (): void => {}
     createFeed.mockRejectedValueOnce(CANDIDATE_ERROR)
