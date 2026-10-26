@@ -1,6 +1,7 @@
-"""Behavioral tests for POST /api/feeds/{id}/rules/infer.
+"""Behavioral tests for PATCH /api/feeds/{id}/rules and POST /api/feeds/{id}/rules/infer.
 
-The endpoint must: reject non-web feeds (400), refuse when the LLM is disabled
+PATCH must validate before writing: a rejected body leaves the stored rules
+untouched. The infer endpoint must: reject non-web feeds (400), refuse when the LLM is disabled
 (503), and — most importantly — NEVER persist the inferred rules (it only
 returns a preview). External I/O (LLM probe, page fetch, LLM call) is mocked so
 the test runs without a live network or Ollama.
@@ -8,6 +9,7 @@ the test runs without a live network or Ollama.
 
 from __future__ import annotations
 
+import json
 from functools import partial
 from typing import Any
 
@@ -75,6 +77,44 @@ def _mock_inference(monkeypatch: pytest.MonkeyPatch, rules: dict[str, Any]) -> N
     return rules
 
   monkeypatch.setattr(selector_inference, "call_ollama", fake_ollama)
+
+
+def test_update_rules_unknown_feed_is_404() -> None:
+  resp = _client().patch("/api/feeds/999999/rules", json=GOOD_RULES)
+  assert resp.status_code == 404
+
+
+def test_update_rules_non_web_feed_rejected() -> None:
+  feed_id = _insert_feed(web=False)
+  resp = _client().patch(f"/api/feeds/{feed_id}/rules", json=GOOD_RULES)
+  assert resp.status_code == 400
+  assert _stored_rules(feed_id) is None
+
+
+@pytest.mark.parametrize(
+  "rules",
+  [{**GOOD_RULES, "bogus": "x"}, {**GOOD_RULES, "item": "li["}],
+  ids=["unknown-key", "bad-css"],
+)
+def test_update_rules_invalid_body_is_422_and_not_stored(rules: dict[str, str]) -> None:
+  feed_id = _insert_feed(web=True)
+  client = _client()
+  assert client.patch(f"/api/feeds/{feed_id}/rules", json=GOOD_RULES).status_code == 200
+  before = _stored_rules(feed_id)
+  resp = client.patch(f"/api/feeds/{feed_id}/rules", json=rules)
+  assert resp.status_code == 422
+  assert _stored_rules(feed_id) == before
+
+
+def test_update_rules_stores_the_normalized_rules() -> None:
+  feed_id = _insert_feed(web=True)
+  body = {**GOOD_RULES, "item": "  li.entry  ", "date": None, "thumbnail": ""}
+  resp = _client().patch(f"/api/feeds/{feed_id}/rules", json=body)
+  assert resp.status_code == 200
+  stored = _stored_rules(feed_id)
+  assert stored is not None
+  assert json.loads(stored) == GOOD_RULES
+  assert resp.json()["extraction_rules"] == stored
 
 
 def test_non_web_feed_rejected() -> None:

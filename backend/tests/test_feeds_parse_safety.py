@@ -48,6 +48,18 @@ def test_entity_declarations_yield_no_images():
   assert feeds._extract_item_images(body) == {}
 
 
+@pytest.mark.parametrize("href", ["javascript:alert(1)", "mailto:a@example.com"])
+def test_scraped_items_linking_to_non_http_schemes_are_dropped(href: str) -> None:
+  # Article URLs are rendered as links, so only http(s) may reach the reader.
+  html = (
+    f'<div class="item"><a class="t" href="{href}">Bad</a></div>'
+    '<div class="item"><a class="t" href="/ok">Good</a></div>'
+  )
+  rules = {"item": ".item", "title": ".t", "link": ".t"}
+  feed_cfg = {"name": "Web", "url": "https://example.com/", "max_items": 10}
+  assert [a.url for a in parse_web_page(html, rules, feed_cfg)] == ["https://example.com/ok"]
+
+
 def test_scraped_thumbnail_url_is_escaped():
   html = (
     '<div class="item"><a class="t" href="https://example.com/1">One</a>'

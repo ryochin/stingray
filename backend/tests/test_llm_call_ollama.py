@@ -1,4 +1,4 @@
-"""Tests for call_ollama's retry loop.
+"""Tests for call_ollama's retry loop, request payload, and reply parsing.
 
 Callers' tests monkeypatch call_ollama away entirely, so the loop itself —
 retrying on non-JSON output and giving up after the last attempt — is covered
@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from llm import call_ollama
+from llm import _extract_json, call_ollama
 
 
 def _client(contents: list[str], calls: list[Any]) -> httpx.AsyncClient:
@@ -27,10 +27,16 @@ def _client(contents: list[str], calls: list[Any]) -> httpx.AsyncClient:
   return httpx.AsyncClient(base_url="http://ollama", transport=httpx.MockTransport(handler))
 
 
-def _call(contents: list[str], calls: list[Any], *, retries: int = 2) -> dict[str, Any]:
+def _call(
+  contents: list[str],
+  calls: list[Any],
+  *,
+  retries: int = 2,
+  options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
   async def run() -> dict[str, Any]:
     async with _client(contents, calls) as client:
-      return await call_ollama(client, "m", "sys", "user", retries=retries)
+      return await call_ollama(client, "m", "sys", "user", retries=retries, options=options)
 
   return asyncio.run(run())
 
@@ -61,3 +67,40 @@ class TestCallOllamaRetries:
       _call([], calls, retries=-1)
 
     assert calls == []
+
+
+def test_options_are_sent_in_the_payload() -> None:
+  calls: list[Any] = []
+
+  _call(['{"a": 1}'], calls, options={"num_ctx": 8192})
+
+  assert calls[0]["options"] == {"num_ctx": 8192}
+
+
+@pytest.mark.parametrize(
+  ("content", "expected"),
+  [
+    # Nested dicts: without the fence / list handling, the fallback regex would
+    # still find a dict, but only the innermost one.
+    ('```json\n{"a": {"b": {"c": 1}}}\n```', {"a": {"b": {"c": 1}}}),
+    ('```json\n{"a": {"b": {"c": 1}}}', {"a": {"b": {"c": 1}}}),
+    ('[1, {"a": {"b": {"c": 1}}}, {"d": 2}]', {"a": {"b": {"c": 1}}}),
+    ('Sure, here it is: {"a": {"b": 1}} Hope it helps.', {"a": {"b": 1}}),
+    ("[1, 2]", None),
+    ('Sure: {"a": } oops', None),
+  ],
+  ids=[
+    "fenced",
+    "unclosed-fence",
+    "list-with-dict",
+    "embedded",
+    "list-without-dict",
+    "bad-embedded",
+  ],
+)
+def test_extract_json(content: str, expected: dict[str, Any] | None) -> None:
+  if expected is None:
+    with pytest.raises(ValueError, match="invalid JSON"):
+      _extract_json(content)
+  else:
+    assert _extract_json(content) == expected

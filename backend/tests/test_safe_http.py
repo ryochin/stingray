@@ -229,6 +229,19 @@ def test_dns_failure_is_a_connect_error():
     _fetch("https://no-such-host.example/")
 
 
+def test_empty_dns_answer_is_a_connect_error() -> None:
+  # With no address to check, the guard would otherwise let the request through.
+  served: list[str] = []
+
+  def handler(request: httpx.Request) -> httpx.Response:
+    served.append(str(request.url))
+    return httpx.Response(200, text="ok")
+
+  with pytest.raises(httpx.ConnectError, match="no address"):
+    _fetch("https://example.com/", handler=handler, dns={"example.com": []})
+  assert served == []
+
+
 def test_dns_timeout_is_a_connect_timeout(monkeypatch: pytest.MonkeyPatch):
   monkeypatch.setattr(safe_http, "DNS_TIMEOUT_SECONDS", 0.01)
 

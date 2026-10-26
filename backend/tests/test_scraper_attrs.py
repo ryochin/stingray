@@ -40,6 +40,11 @@ def test_item_without_any_link_is_skipped() -> None:
   assert _parse('<span class="t">T</span>') == []
 
 
+@pytest.mark.parametrize("item_html", ['<a href="/a">T</a>', '<a class="t" href="/a">  </a>'])
+def test_item_without_a_title_is_skipped(item_html: str) -> None:
+  assert _parse(item_html, link="a") == []
+
+
 def test_self_link_uses_item_element() -> None:
   html = '<html><body><a class="item" href="/self"><span class="t">T</span></a></body></html>'
   [article] = parse_web_page(html, {"item": ".item", "title": ".t", "link": "_self"}, FEED_CFG)

@@ -11,7 +11,7 @@ tasks or DB probe run; the DB is provided by the `clean_db` fixture.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,6 +53,18 @@ def _seed_two_feeds_one_foldered() -> tuple[int, dict[str, int]]:
       {source: ids[source]},
     )
   return folder.id, ids
+
+
+def _seed_aged(feed_id: int, url: str, *, published_h: int | None, fetched_h: int) -> None:
+  """Insert an unread article dated the given number of hours ago."""
+  now = datetime.now(tz=UTC)
+  published = None if published_h is None else now - timedelta(hours=published_h)
+  with db.connection() as conn:
+    conn.execute(
+      """INSERT INTO articles (url, feed_id, title, source, published, fetched_at)
+         VALUES (%s, %s, %s, 'A', %s, %s)""",
+      (url, feed_id, url, published, now - timedelta(hours=fetched_h)),
+    )
 
 
 def _read_state() -> dict[str, bool]:
@@ -103,3 +115,24 @@ def test_unknown_folder_marks_nothing() -> None:
   assert resp.status_code == 200
   assert resp.json() == {"marked": 0}
   assert _read_state() == {"u-A": False, "u-B": False}
+
+
+def test_read_all_older_than_marks_only_old_articles() -> None:
+  # Age is COALESCE(published, fetched_at): a published date wins over fetched_at.
+  feed_id = _make_feed("A")
+  _seed_aged(feed_id, "old-pub", published_h=48, fetched_h=0)
+  _seed_aged(feed_id, "new-pub", published_h=1, fetched_h=0)
+  _seed_aged(feed_id, "no-pub-old-fetch", published_h=None, fetched_h=48)
+  _seed_aged(feed_id, "no-pub-new-fetch", published_h=None, fetched_h=1)
+  _seed_aged(feed_id, "new-pub-old-fetch", published_h=1, fetched_h=48)
+  client = TestClient(app_module.app)
+  resp = client.post("/api/articles/read-all?older_than_hours=24")
+  assert resp.status_code == 200
+  assert resp.json() == {"marked": 2}
+  assert _read_state() == {
+    "old-pub": True,
+    "new-pub": False,
+    "no-pub-old-fetch": True,
+    "no-pub-new-fetch": False,
+    "new-pub-old-fetch": False,
+  }

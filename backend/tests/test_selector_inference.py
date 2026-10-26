@@ -207,6 +207,55 @@ class TestInferAndValidate:
     assert all("/tag/" in a.url for a in result.sample_articles)
 
 
+class _ScriptedOllama:
+  """call_ollama stand-in that records user prompts and raises queued exceptions."""
+
+  def __init__(self, steps: list[dict[str, Any] | Exception]) -> None:
+    self.steps = steps
+    self.prompts: list[str] = []
+
+  async def __call__(
+    self, _client: Any, _model: str, _system: str, user: str, *, options: Any = None
+  ) -> dict[str, Any]:
+    step = self.steps[min(len(self.prompts), len(self.steps) - 1)]
+    self.prompts.append(user)
+    if isinstance(step, Exception):
+      raise step
+    return step
+
+
+class TestInferAndValidateFailures:
+  def test_llm_error_resets_the_prompt_for_the_next_attempt(
+    self, monkeypatch: pytest.MonkeyPatch
+  ) -> None:
+    fake = _ScriptedOllama([ZERO_RULES, TimeoutError("slow"), GOOD_RULES])
+    monkeypatch.setattr(selector_inference, "call_ollama", fake)
+    result = _run_infer(max_attempts=3)
+    assert result.status == "ok"
+    assert result.attempts == 3
+    first, second, third = fake.prompts
+    assert second.startswith(first) and "Re-examine" in second
+    # The failed call says nothing about the selectors, so the stale fix-up hint is dropped.
+    assert third == first
+
+  def test_llm_error_on_every_attempt_is_an_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _ScriptedOllama([TimeoutError("slow")])
+    monkeypatch.setattr(selector_inference, "call_ollama", fake)
+    result = _run_infer(max_attempts=3)
+    assert (result.status, result.rules, result.attempts) == ("error", {}, 3)
+    assert result.sample_articles == []
+
+  def test_rules_that_fail_to_apply_are_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Valid by validate_extraction_rules, but `class` is multi-valued on <a class="t">,
+    # so parse_web_page raises TypeError when applying it.
+    fake = _ScriptedOllama([{**GOOD_RULES, "link_attr": "class"}, GOOD_RULES])
+    monkeypatch.setattr(selector_inference, "call_ollama", fake)
+    result = _run_infer()
+    assert result.status == "ok"
+    assert result.rules == GOOD_RULES
+    assert "failed to apply" in fake.prompts[1]
+
+
 class TestConfigDefaults:
   def test_production_default_min_articles_is_three(self):
     # Guard the deployment default (B): the function signature keeps 2 for the
