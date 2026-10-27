@@ -8,6 +8,7 @@
   --color-border: #333;
   --color-text: #d4d4d4;
   --color-text-heading: #e0e0e0;
+  --color-text-soft: #bcbcbc;
   --color-text-muted: #888;
   --color-text-dim: #555;
   --color-accent: #5a9cf5;
@@ -15,6 +16,15 @@
   --color-accent-text: #9cc0f0;
   --color-warn-bg: #8a5a3a;
   --color-warn-text: #f0c09c;
+  /* Status colors. Aliases of Tailwind's palette, so components name the
+     meaning rather than the hue. */
+  --color-danger: var(--color-red-400);
+  --color-danger-bg: var(--color-red-900);
+  --color-danger-text: var(--color-red-200);
+  --color-caution: var(--color-yellow-400);
+  --color-success: var(--color-green-400);
+  --color-success-bg: var(--color-green-900);
+  --color-success-text: var(--color-green-300);
   --color-link: #8899aa;
   --color-link-hover: #aabbcc;
   /* Latin-only: has no CJK glyphs, so keep it off article titles and bodies.

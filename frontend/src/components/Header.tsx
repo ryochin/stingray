@@ -68,7 +68,7 @@ export default function Header(): JSX.Element {
             once instead of in each route's banner. The cached status stays
             shown beside it until the next successful poll. */}
         {statusError && (
-          <span role="alert" className="text-red-400">
+          <span role="alert" className="text-danger">
             ⚠ Status unavailable
           </span>
         )}
@@ -86,14 +86,14 @@ export default function Header(): JSX.Element {
               title="LLM online"
             >
               <span
-                className="inline-block w-2 h-2 rounded-full bg-green-500"
+                className="inline-block w-2 h-2 rounded-full bg-success"
                 aria-hidden
               />
               LLM
             </span>
           ) : (
             <span
-              className="text-amber-400"
+              className="text-caution"
               title={
                 status.llm_error
                   ? `LLM unavailable: ${status.llm_error}`

@@ -158,7 +158,7 @@ function FeedItem({
                     className={`text-xs px-1 rounded shrink-0 ${
                       hasRules
                         ? "text-accent-text bg-accent-bg"
-                        : "text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 border-solid"
+                        : "text-caution bg-caution/10 border border-caution/30 border-solid"
                     }`}
                     title={
                       hasRules
@@ -171,7 +171,7 @@ function FeedItem({
                 )}
                 {isUnhealthy && (
                   <span
-                    className="text-yellow-400 text-sm shrink-0"
+                    className="text-caution text-sm shrink-0"
                     title={`${feed.consecutive_failures} consecutive failures${feed.last_error ? `: ${feed.last_error}` : ""}`}
                   >
                     !!!
@@ -269,7 +269,7 @@ function FeedItem({
             onClick={(): void => actions.onToggleEnabled(feed.id)}
             className={`px-2 py-1 rounded text-xs transition-colors ${
               feed.enabled
-                ? "bg-green-900 text-green-300"
+                ? "bg-success-bg text-success-text"
                 : "bg-bg-card text-text-dim"
             }`}
           >

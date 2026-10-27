@@ -208,7 +208,7 @@ export default function Feeds(): JSX.Element {
                 }
               }}
               disabled={!feeds || feeds.length === 0}
-              className="px-3 py-1.5 rounded text-sm bg-bg-card text-red-400 border border-border hover:bg-red-900 hover:text-red-200 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              className="px-3 py-1.5 rounded text-sm bg-bg-card text-danger border border-border hover:bg-danger-bg hover:text-danger-text transition-colors disabled:opacity-40 disabled:pointer-events-none"
             >
               Delete All
             </button>
@@ -272,7 +272,7 @@ export default function Feeds(): JSX.Element {
         )}
 
         {error && (
-          <div role="alert" className="text-red-400 text-sm mb-4">
+          <div role="alert" className="text-danger text-sm mb-4">
             {error}
           </div>
         )}

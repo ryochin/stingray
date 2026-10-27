@@ -137,7 +137,7 @@ export default function Sidebar({
 
   const btnClass = (active: boolean): string =>
     `flex justify-between items-center w-full px-4 py-1.5 text-xs text-left transition-colors cursor-pointer focus:outline-none ${
-      active ? "text-accent-text" : "text-[#bcbcbc] hover:text-text"
+      active ? "text-accent-text" : "text-text-soft hover:text-text"
     }`
 
   const badgeClass = (active: boolean): string =>
@@ -171,7 +171,7 @@ export default function Sidebar({
           <span className="truncate">{feed.name}</span>
           {feed.consecutive_failures >= 3 && (
             <span
-              className="text-yellow-400 text-xs shrink-0"
+              className="text-caution text-xs shrink-0"
               title="Feed has consecutive fetch failures"
             >
               !!!

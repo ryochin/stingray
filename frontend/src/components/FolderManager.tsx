@@ -215,7 +215,7 @@ function FolderManager({
                       )
                         deleteFolder.mutate(folder.id)
                     }}
-                    className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors"
+                    className="px-2 py-1 rounded text-xs bg-bg-card text-danger hover:bg-danger-bg hover:text-danger-text transition-colors"
                   >
                     Delete
                   </button>

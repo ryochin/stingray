@@ -94,7 +94,7 @@ function FeedDetails({
           <span>Last fetched: {formatRelativeShort(feed.last_fetched_at)}</span>
         )}
         {feed.consecutive_failures > 0 && (
-          <span className="text-yellow-400">
+          <span className="text-caution">
             Failures: {feed.consecutive_failures}
           </span>
         )}
@@ -114,7 +114,7 @@ function FeedDetails({
         <button
           type="button"
           onClick={onDelete}
-          className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors shrink-0"
+          className="px-2 py-1 rounded text-xs bg-bg-card text-danger hover:bg-danger-bg hover:text-danger-text transition-colors shrink-0"
         >
           Delete
         </button>
@@ -128,7 +128,7 @@ function FeedDetails({
       {feed.health !== "ok" && feed.last_error && (
         <div
           className={`text-xs mt-1 truncate ${
-            feed.health === "degraded" ? "text-yellow-400" : "text-red-400"
+            feed.health === "degraded" ? "text-caution" : "text-danger"
           }`}
           title={feed.last_error}
         >
@@ -143,7 +143,7 @@ function FeedDetails({
         // Collapsing the card unmounts the boundary, so re-expanding retries.
         <ErrorBoundary
           fallback={
-            <div role="alert" className="mt-2 p-2 text-xs text-red-400">
+            <div role="alert" className="mt-2 p-2 text-xs text-danger">
               The rules editor is unavailable.
             </div>
           }

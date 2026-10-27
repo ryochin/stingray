@@ -121,7 +121,7 @@ export default function Filters(): JSX.Element {
         </div>
 
         {error && (
-          <div role="alert" className="text-red-400 text-sm mb-4">
+          <div role="alert" className="text-danger text-sm mb-4">
             {error}
           </div>
         )}
@@ -163,7 +163,7 @@ export default function Filters(): JSX.Element {
           </button>
         </form>
         {isDuplicate && (
-          <div className="text-orange-400 text-sm mb-3" aria-live="polite">
+          <div className="text-caution text-sm mb-3" aria-live="polite">
             <span aria-hidden="true">⚠</span> This filter already exists
           </div>
         )}
@@ -175,7 +175,7 @@ export default function Filters(): JSX.Element {
                 className="flex items-center gap-2 p-2 bg-bg-secondary rounded border border-border"
               >
                 <span
-                  className={`flex-1 text-sm ${isRegexPattern(filter.pattern) ? "font-mono text-amber-400" : "text-text"}`}
+                  className={`flex-1 text-sm ${isRegexPattern(filter.pattern) ? "font-mono text-accent-text" : "text-text"}`}
                 >
                   {filter.pattern}
                 </span>
@@ -185,7 +185,7 @@ export default function Filters(): JSX.Element {
                 <button
                   type="button"
                   onClick={(): void => deleteFilter.mutate(filter.id)}
-                  className="px-2 py-1 rounded text-xs bg-bg-card text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors"
+                  className="px-2 py-1 rounded text-xs bg-bg-card text-danger hover:bg-danger-bg hover:text-danger-text transition-colors"
                 >
                   Delete
                 </button>

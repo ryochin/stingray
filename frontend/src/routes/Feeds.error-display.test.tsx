@@ -120,8 +120,8 @@ describe("degraded vs failing last_error display", (): void => {
     const line: HTMLElement = await screen.findByText(
       "Stale: served cached copy",
     )
-    expect(line.className).toContain("text-yellow-400")
-    expect(line.className).not.toContain("text-red-400")
+    expect(line.className).toContain("text-caution")
+    expect(line.className).not.toContain("text-danger")
     expect(screen.queryByText(/^Error:/)).toBeNull()
   })
 
@@ -138,8 +138,8 @@ describe("degraded vs failing last_error display", (): void => {
     await expandFeed("Failing Feed")
 
     const line: HTMLElement = await screen.findByText("Error: net timeout")
-    expect(line.className).toContain("text-red-400")
-    expect(line.className).not.toContain("text-yellow-400")
+    expect(line.className).toContain("text-danger")
+    expect(line.className).not.toContain("text-caution")
     expect(screen.queryByText(/^Stale:/)).toBeNull()
   })
 
@@ -161,8 +161,8 @@ describe("degraded vs failing last_error display", (): void => {
     const line: HTMLElement = await screen.findByText(
       "Error: connection refused",
     )
-    expect(line.className).toContain("text-red-400")
-    expect(line.className).not.toContain("text-yellow-400")
+    expect(line.className).toContain("text-danger")
+    expect(line.className).not.toContain("text-caution")
     expect(screen.queryByText(/^Stale:/)).toBeNull()
   })
 

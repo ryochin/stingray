@@ -468,7 +468,7 @@ export default function Articles(): JSX.Element {
             </div>
 
             {isError ? (
-              <div role="alert" className="text-red-400">
+              <div role="alert" className="text-danger">
                 Failed to load articles.
               </div>
             ) : isLoading ? (

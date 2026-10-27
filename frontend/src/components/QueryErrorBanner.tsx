@@ -16,7 +16,7 @@ export default function QueryErrorBanner({
 }: QueryErrorBannerProps): JSX.Element | null {
   if (failed.length === 0) return null
   return (
-    <div role="alert" className={`text-red-400 ${className}`}>
+    <div role="alert" className={`text-danger ${className}`}>
       Failed to load {failed.join(", ")}.
     </div>
   )
