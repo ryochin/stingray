@@ -92,7 +92,10 @@ describe("ExtractionRulesEditor inference", () => {
     )
 
     await waitFor((): void => {
-      expect(screen.getByText("LLM unavailable")).toBeInTheDocument()
+      expect(screen.getByText("LLM unavailable")).toHaveAttribute(
+        "role",
+        "alert",
+      )
     })
   })
 
@@ -160,7 +163,7 @@ describe("ExtractionRulesEditor save", () => {
       clickSave()
     })
 
-    expect(screen.getByText(message)).toBeInTheDocument()
+    expect(screen.getByText(message)).toHaveAttribute("role", "alert")
     expect(save).not.toHaveBeenCalled()
     expect(onSaved).not.toHaveBeenCalled()
   })
@@ -187,7 +190,7 @@ describe("ExtractionRulesEditor save", () => {
     typeRules(JSON.stringify(VALID_RULES))
     clickSave()
 
-    await screen.findByText("boom")
+    expect(await screen.findByText("boom")).toHaveAttribute("role", "alert")
     expect(onSaved).not.toHaveBeenCalled()
     expect(screen.queryByText("✓ Saved")).toBeNull()
     // `finally` puts the button back from "Saving...".

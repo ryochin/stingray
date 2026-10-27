@@ -35,3 +35,12 @@ export function totalUnread(unreadCounts: ReadonlyMap<number, number>): number {
   for (const v of unreadCounts.values()) sum += v
   return sum
 }
+
+// Coerce arbitrary input (parsed sessionStorage) into folder ids, dropping
+// anything that is not an integer.
+export function parseFolderIds(input: unknown): number[] {
+  if (!Array.isArray(input)) return []
+  return input.filter((value: unknown): value is number =>
+    Number.isInteger(value),
+  )
+}

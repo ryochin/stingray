@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import type { JSX, MouseEvent } from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { Feed, Folder, Selection } from "../api/client"
 import { api, faviconUrl } from "../api/client"
 import {
   folderUnreadCount,
   groupFeedsByFolder,
+  parseFolderIds,
   totalUnread,
 } from "../utils/sidebarView"
 
@@ -34,7 +35,7 @@ export default function Sidebar({
   const [collapsed, setCollapsed] = useState<Set<number>>((): Set<number> => {
     try {
       const saved: string | null = sessionStorage.getItem("collapsed-folders")
-      if (saved) return new Set(JSON.parse(saved) as number[])
+      if (saved) return new Set(parseFolderIds(JSON.parse(saved)))
     } catch {}
     return new Set()
   })
@@ -45,8 +46,12 @@ export default function Sidebar({
     new Set<number>(),
   )
 
-  const enabledFeeds: Feed[] =
-    feeds?.filter((feedItem: Feed): boolean => feedItem.enabled) ?? []
+  // Memoized: a fresh array every render would re-run the effect below.
+  const enabledFeeds: Feed[] = useMemo(
+    (): Feed[] =>
+      feeds?.filter((feedItem: Feed): boolean => feedItem.enabled) ?? [],
+    [feeds],
+  )
   const totalUnreadCount: number = totalUnread(unreadCounts)
   const feedsByFolder: Map<number | null, Feed[]> = groupFeedsByFolder(feeds)
 

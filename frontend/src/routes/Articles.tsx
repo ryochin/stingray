@@ -22,6 +22,7 @@ import { useStickyHeader } from "../hooks/useStickyHeader"
 import {
   DEFAULT_TIME_RANGE_ID,
   nextUnreadFeedId,
+  parseSelection,
   parseTimeRangeId,
   TIME_RANGE_OPTIONS,
   type TimeRangeId,
@@ -34,7 +35,7 @@ export default function Articles(): JSX.Element {
   const [selection, setSelection] = useState<Selection>((): Selection => {
     try {
       const saved: string | null = sessionStorage.getItem("feed-selection")
-      if (saved) return JSON.parse(saved) as Selection
+      if (saved) return parseSelection(JSON.parse(saved))
     } catch {}
     return { type: "all" }
   })
@@ -467,7 +468,9 @@ export default function Articles(): JSX.Element {
             </div>
 
             {isError ? (
-              <div className="text-red-400">Failed to load articles.</div>
+              <div role="alert" className="text-red-400">
+                Failed to load articles.
+              </div>
             ) : isLoading ? (
               <div className="text-text-muted">Loading...</div>
             ) : filtered.length === 0 ? (

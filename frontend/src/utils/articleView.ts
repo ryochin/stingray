@@ -95,6 +95,17 @@ export function parseTimeRangeId(input: unknown): TimeRangeId {
     : DEFAULT_TIME_RANGE_ID
 }
 
+// Coerce arbitrary input (parsed sessionStorage) into a Selection, falling
+// back to "all" when its shape is not one we wrote.
+export function parseSelection(input: unknown): Selection {
+  if (typeof input !== "object" || input === null) return { type: "all" }
+  const { type, id } = input as { type?: unknown; id?: unknown }
+  if ((type === "feed" || type === "folder") && Number.isInteger(id)) {
+    return { type, id: id as number }
+  }
+  return { type: "all" }
+}
+
 export function timeRangeDays(id: TimeRangeId): number | null {
   return (
     TIME_RANGE_OPTIONS.find((o: TimeRangeOption): boolean => o.id === id)

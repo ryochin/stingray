@@ -50,9 +50,9 @@ function renderList(
   items: VirtualItem[] = articles.map(
     (_: Article, i: number): VirtualItem => virtualItem(i, 200 + i * 100),
   ),
-): FakeVirtualizer & { container: HTMLElement } {
+): FakeVirtualizer & { container: HTMLElement; unmount: () => void } {
   const fake: FakeVirtualizer = fakeVirtualizer(items)
-  const { container } = render(
+  const { container, unmount } = render(
     <ArticleList
       articles={articles}
       focusIndex={-1}
@@ -66,7 +66,7 @@ function renderList(
       {...overrides}
     />,
   )
-  return { ...fake, container }
+  return { ...fake, container, unmount }
 }
 
 function row(container: HTMLElement, index: number): HTMLElement {
@@ -242,5 +242,18 @@ describe("ArticleList cards", (): void => {
 
     expect(setRef).toHaveBeenCalledWith(0, card(container, 0))
     expect(setRef).toHaveBeenCalledWith(1, card(container, 1))
+  })
+
+  it("clears the card refs on unmount", (): void => {
+    const { unmount } = renderList([
+      makeArticle("https://a.test/0"),
+      makeArticle("https://a.test/1"),
+    ])
+    setRef.mockClear()
+
+    unmount()
+
+    expect(setRef).toHaveBeenCalledWith(0, null)
+    expect(setRef).toHaveBeenCalledWith(1, null)
   })
 })

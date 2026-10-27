@@ -135,7 +135,8 @@ export interface FeedCandidate {
   type: string
 }
 
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+/** Sends the request and throws an `ApiError` unless the response is 2xx. */
+async function request(path: string, init?: RequestInit): Promise<Response> {
   const res: Response = await fetch(`${BASE}${path}`, init)
   if (!res.ok) {
     let parsed: unknown = null
@@ -150,8 +151,17 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
           `API error: ${res.status} ${res.statusText}`)
     throw new ApiError(message, res.status, parsed)
   }
-  if (res.status === 204) return undefined as T
+  return res
+}
+
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res: Response = await request(path, init)
   return res.json() as Promise<T>
+}
+
+/** For endpoints that answer 204 No Content. */
+async function fetchNoContent(path: string, init?: RequestInit): Promise<void> {
+  await request(path, init)
 }
 
 export const api = {
@@ -190,10 +200,10 @@ export const api = {
     }),
 
   deleteFolder: (id: number) =>
-    fetchJson<void>(`/folders/${id}`, { method: "DELETE" }),
+    fetchNoContent(`/folders/${id}`, { method: "DELETE" }),
 
   reorderFolders: (folderIds: number[]) =>
-    fetchJson<void>("/folders/reorder", {
+    fetchNoContent("/folders/reorder", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ folder_ids: folderIds }),
@@ -202,7 +212,7 @@ export const api = {
   getFeeds: () => fetchJson<Feed[]>("/feeds"),
 
   reorderFeeds: (feedIds: number[]) =>
-    fetchJson<void>("/feeds/reorder", {
+    fetchNoContent("/feeds/reorder", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ feed_ids: feedIds }),
@@ -228,9 +238,9 @@ export const api = {
     fetchJson<{ message: string }>(`/feeds/${id}/fetch`, { method: "POST" }),
 
   deleteFeed: (id: number) =>
-    fetchJson<void>(`/feeds/${id}`, { method: "DELETE" }),
+    fetchNoContent(`/feeds/${id}`, { method: "DELETE" }),
 
-  deleteAllFeeds: () => fetchJson<void>("/feeds", { method: "DELETE" }),
+  deleteAllFeeds: () => fetchNoContent("/feeds", { method: "DELETE" }),
 
   toggleFeed: (id: number) =>
     fetchJson<Feed>(`/feeds/${id}/toggle`, { method: "POST" }),
@@ -264,14 +274,14 @@ export const api = {
   getStatus: () => fetchJson<RefreshStatus>("/status"),
 
   markRead: (urls: string[]) =>
-    fetchJson<void>("/articles/read", {
+    fetchNoContent("/articles/read", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ urls }),
     }),
 
   markUnread: (urls: string[]) =>
-    fetchJson<void>("/articles/unread", {
+    fetchNoContent("/articles/unread", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ urls }),
@@ -306,7 +316,7 @@ export const api = {
     }),
 
   deleteFilter: (id: number) =>
-    fetchJson<void>(`/filters/${id}`, { method: "DELETE" }),
+    fetchNoContent(`/filters/${id}`, { method: "DELETE" }),
 
   updateFeedRules: (feedId: number, rules: Record<string, string | null>) =>
     fetchJson<Feed>(`/feeds/${feedId}/rules`, {

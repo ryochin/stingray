@@ -135,7 +135,11 @@ export default function ExtractionRulesEditor({
           spellCheck={false}
         />
       </div>
-      {error && <div className="text-xs text-red-400 mt-1">{error}</div>}
+      {error && (
+        <div role="alert" className="text-xs text-red-400 mt-1">
+          {error}
+        </div>
+      )}
       {inferHint && (
         <div className="text-xs text-yellow-400 mt-1" aria-live="polite">
           <span aria-hidden="true">⚠</span> {inferHint}

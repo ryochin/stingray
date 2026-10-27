@@ -37,7 +37,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children
     if (this.props.fallback !== undefined) return this.props.fallback
     return (
-      <div className="p-6 text-sm text-red-400">
+      <div role="alert" className="p-6 text-sm text-red-400">
         <p className="mb-2">Something went wrong while rendering this page.</p>
         <button
           type="button"

@@ -50,4 +50,18 @@ describe("ErrorBoundary", (): void => {
     expect(screen.getByText("recovered")).toBeTruthy()
     expect(screen.queryByText("fallback")).toBeNull()
   })
+
+  it("announces the default fallback as an alert", (): void => {
+    vi.spyOn(console, "error").mockImplementation((): void => {})
+
+    render(
+      <ErrorBoundary>
+        <Boom />
+      </ErrorBoundary>,
+    )
+
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Something went wrong while rendering this page.",
+    )
+  })
 })

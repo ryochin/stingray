@@ -6,6 +6,7 @@ import {
   DEFAULT_TIME_RANGE_ID,
   deriveUnreadCounts,
   nextUnreadFeedId,
+  parseSelection,
   parseTimeRangeId,
   selectArticles,
   tallySessionReadByFeed,
@@ -204,6 +205,44 @@ describe("parseTimeRangeId", () => {
   it("defaults to a bounded range rather than the whole history", () => {
     expect(DEFAULT_TIME_RANGE_ID).toBe("3d")
     expect(timeRangeDays(DEFAULT_TIME_RANGE_ID)).toBe(3)
+  })
+})
+
+describe("parseSelection", () => {
+  it.each<[unknown, Selection]>([
+    [{ type: "all" }, { type: "all" }],
+    [
+      { type: "feed", id: 3 },
+      { type: "feed", id: 3 },
+    ],
+    [
+      { type: "folder", id: 7 },
+      { type: "folder", id: 7 },
+    ],
+  ])("keeps a well-formed selection %j", (input: unknown, expected: Selection) => {
+    expect(parseSelection(input)).toEqual(expected)
+  })
+
+  it.each([
+    null,
+    undefined,
+    "feed",
+    3,
+    [],
+    {},
+    { type: "feed" },
+    { type: "feed", id: "3" },
+    { type: "folder", id: 1.5 },
+    { type: "tag", id: 3 },
+  ])("falls back to all for %j", (input: unknown) => {
+    expect(parseSelection(input)).toEqual({ type: "all" })
+  })
+
+  it("drops unknown extra fields", () => {
+    expect(parseSelection({ type: "feed", id: 3, extra: true })).toEqual({
+      type: "feed",
+      id: 3,
+    })
   })
 })
 

@@ -120,7 +120,11 @@ export default function Filters(): JSX.Element {
           </div>
         </div>
 
-        {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
+        {error && (
+          <div role="alert" className="text-red-400 text-sm mb-4">
+            {error}
+          </div>
+        )}
         <QueryErrorBanner failed={failedLoads({ filters: filtersError })} />
 
         <h3 className="text-sm font-semibold text-text-heading mb-3">

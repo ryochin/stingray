@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import type { JSX } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { api } from "../api/client"
 import Articles from "./Articles"
 
 // Header reports `status` itself (see Header.status-error.test.tsx), and the
@@ -82,5 +83,14 @@ describe("Articles load failure banner", (): void => {
     // The virtualizer offsets the list by the sticky header's height; a
     // banner outside it would shift the list without moving that offset.
     expect(banner.closest(".sticky")).not.toBeNull()
+  })
+
+  it("announces a failed article load as an alert", async (): Promise<void> => {
+    vi.mocked(api.getArticles).mockRejectedValueOnce(new Error("offline"))
+    renderArticles()
+    expect(await screen.findByText("Failed to load articles.")).toHaveAttribute(
+      "role",
+      "alert",
+    )
   })
 })

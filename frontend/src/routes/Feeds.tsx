@@ -271,7 +271,11 @@ export default function Feeds(): JSX.Element {
           </div>
         )}
 
-        {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
+        {error && (
+          <div role="alert" className="text-red-400 text-sm mb-4">
+            {error}
+          </div>
+        )}
 
         <QueryErrorBanner
           failed={failedLoads({

@@ -59,7 +59,7 @@ function renderSidebar({
       />
     </QueryClientProvider>,
   )
-  return { ...utils, onSelect }
+  return { ...utils, client, onSelect }
 }
 
 beforeEach((): void => {
@@ -242,5 +242,47 @@ describe("Sidebar", () => {
     // Because the selected feed lives in folder 10, the auto-expand effect should
     // remove it from `collapsed`, so ChildFeed is visible.
     expect(screen.getByText("ChildFeed")).toBeInTheDocument()
+  })
+
+  it("restores collapsed folders from sessionStorage, ignoring malformed ids", () => {
+    sessionStorage.setItem("collapsed-folders", JSON.stringify(["10", 20]))
+    renderSidebar({
+      feeds: [
+        feed(1, { name: "FeedA", folder_id: 10 }),
+        feed(2, { name: "FeedB", folder_id: 20 }),
+      ],
+      folders: [folder(10, "Tech"), folder(20, "News")],
+    })
+    expect(screen.getByText("FeedA")).toBeInTheDocument()
+    expect(screen.queryByText("FeedB")).toBeNull()
+  })
+
+  it("re-collapses an auto-expanded folder once the selection moves away", () => {
+    sessionStorage.setItem("collapsed-folders", JSON.stringify([10]))
+    const feeds: Feed[] = [
+      feed(1, { name: "ChildFeed", folder_id: 10 }),
+      feed(2, { name: "LooseFeed" }),
+    ]
+    const { rerender, client } = renderSidebar({
+      feeds,
+      folders: [folder(10, "Tech")],
+      selection: { type: "feed", id: 1 },
+    })
+    expect(screen.getByText("ChildFeed")).toBeInTheDocument()
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <Sidebar
+          selection={{ type: "feed", id: 2 }}
+          onSelect={vi.fn()}
+          unreadCounts={new Map()}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByText("ChildFeed")).toBeNull()
+    expect(
+      JSON.parse(sessionStorage.getItem("collapsed-folders") ?? "[]"),
+    ).toEqual([10])
   })
 })

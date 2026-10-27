@@ -3,6 +3,7 @@ import type { Feed } from "../api/client"
 import {
   folderUnreadCount,
   groupFeedsByFolder,
+  parseFolderIds,
   totalUnread,
 } from "./sidebarView"
 
@@ -104,5 +105,25 @@ describe("totalUnread", () => {
 
   it("returns 0 for an empty map", () => {
     expect(totalUnread(new Map())).toBe(0)
+  })
+})
+
+describe("parseFolderIds", () => {
+  it("keeps integer ids", () => {
+    expect(parseFolderIds([1, 2, 30])).toEqual([1, 2, 30])
+  })
+
+  it("drops entries that are not integers", () => {
+    expect(parseFolderIds([1, "2", null, 3.5, {}, 4])).toEqual([1, 4])
+  })
+
+  it.each([
+    null,
+    undefined,
+    "1,2",
+    3,
+    { 0: 1 },
+  ])("returns no ids for %j", (input: unknown) => {
+    expect(parseFolderIds(input)).toEqual([])
   })
 })

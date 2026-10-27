@@ -181,6 +181,56 @@ describe("api fetchJson behavior", () => {
     expect(await api.deleteFolder(1)).toBeUndefined()
   })
 
+  it.each([
+    ["deleteFolder", (): Promise<void> => api.deleteFolder(1)],
+    ["reorderFolders", (): Promise<void> => api.reorderFolders([1])],
+    ["reorderFeeds", (): Promise<void> => api.reorderFeeds([1])],
+    ["deleteFeed", (): Promise<void> => api.deleteFeed(1)],
+    ["deleteAllFeeds", (): Promise<void> => api.deleteAllFeeds()],
+    ["markRead", (): Promise<void> => api.markRead(["u"])],
+    ["markUnread", (): Promise<void> => api.markUnread(["u"])],
+    ["deleteFilter", (): Promise<void> => api.deleteFilter(1)],
+  ])("%s accepts 204 No Content", async (_name: string, call: () => Promise<void>) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (): Promise<Response> =>
+          Promise.resolve(new Response(null, { status: 204 })),
+      ),
+    )
+    expect(await call()).toBeUndefined()
+  })
+
+  it("a no-content call still throws ApiError on failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (): Promise<Response> =>
+          Promise.resolve(
+            new Response(JSON.stringify({ detail: "Folder not found" }), {
+              status: 404,
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+      ),
+    )
+    const err: unknown = await api.deleteFolder(1).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).status).toBe(404)
+    expect((err as ApiError).message).toBe("Folder not found")
+  })
+
+  it("a JSON call rejects a 204 instead of resolving to undefined", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (): Promise<Response> =>
+          Promise.resolve(new Response(null, { status: 204 })),
+      ),
+    )
+    await expect(api.getFeeds()).rejects.toThrow()
+  })
+
   it("inferRules POSTs to the infer endpoint and returns the preview", async () => {
     const payload = {
       rules: { item: "li.entry", title: "a", link: "a" },

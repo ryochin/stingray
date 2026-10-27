@@ -78,7 +78,9 @@ describe("Filters duplicate detection", (): void => {
     fireEvent.change(getPatternInput(), { target: { value: "spam" } })
     fireEvent.submit(getPatternInput().closest("form") as HTMLFormElement)
 
-    await screen.findByText('Filter "spam" already exists')
+    expect(
+      await screen.findByText('Filter "spam" already exists'),
+    ).toHaveAttribute("role", "alert")
     expect(getPatternInput().value).toBe("spam")
   })
 

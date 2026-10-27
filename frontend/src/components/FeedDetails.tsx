@@ -143,7 +143,7 @@ function FeedDetails({
         // Collapsing the card unmounts the boundary, so re-expanding retries.
         <ErrorBoundary
           fallback={
-            <div className="mt-2 p-2 text-xs text-red-400">
+            <div role="alert" className="mt-2 p-2 text-xs text-red-400">
               The rules editor is unavailable.
             </div>
           }

@@ -244,7 +244,10 @@ describe("Feeds row — action wiring", (): void => {
 
     fireEvent.click(within(rowOf("Alpha")).getByRole("button", { name: "ON" }))
 
-    await screen.findByText("toggle failed")
+    expect(await screen.findByText("toggle failed")).toHaveAttribute(
+      "role",
+      "alert",
+    )
   })
 })
 

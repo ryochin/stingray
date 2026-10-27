@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { Feed, FeedCandidate, FeedCreate } from "../api/client"
 import { ApiError, api } from "../api/client"
 import { useOptimisticReorder } from "./useOptimisticReorder"
@@ -45,6 +45,20 @@ export function useFeedMutations({ onError }: Options) {
   )
   const [candidatesFor, setCandidatesFor] = useState<string | null>(null)
   const [fetchingFeeds, setFetchingFeeds] = useState<Set<number>>(new Set())
+  // fetchFeed's delayed clear outlives the component unless cancelled, and its
+  // onSettled still runs when the request finishes after unmount. Skipping the
+  // invalidation then is fine: every view that reads these queries polls them.
+  const mountedRef = useRef<boolean>(false)
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+  useEffect((): (() => void) => {
+    mountedRef.current = true
+    const timers: Set<ReturnType<typeof setTimeout>> = timersRef.current
+    return (): void => {
+      mountedRef.current = false
+      for (const timer of timers) clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
 
   const invalidate = (): void => {
     queryClient.invalidateQueries({ queryKey: ["feeds"] })
@@ -105,7 +119,9 @@ export function useFeedMutations({ onError }: Options) {
       )
     },
     onSettled: (_data, _error, feedId: number): void => {
-      setTimeout((): void => {
+      if (!mountedRef.current) return
+      const timer: ReturnType<typeof setTimeout> = setTimeout((): void => {
+        timersRef.current.delete(timer)
         setFetchingFeeds((prev: Set<number>): Set<number> => {
           const next: Set<number> = new Set(prev)
           next.delete(feedId)
@@ -113,6 +129,7 @@ export function useFeedMutations({ onError }: Options) {
         })
         invalidate()
       }, 5000)
+      timersRef.current.add(timer)
     },
     onError: reportError,
   })

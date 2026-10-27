@@ -108,4 +108,48 @@ describe("useFeedMutations — fetch indicator", (): void => {
     })
     expect(view.result.current.fetchingFeeds.has(1)).toBe(false)
   })
+
+  it("drops the pending clear when unmounted after the request settles", async (): Promise<void> => {
+    vi.spyOn(api, "fetchFeed").mockResolvedValue({ message: "queued" })
+    const view = setup()
+    await act(async (): Promise<void> => {
+      view.result.current.fetchFeed.mutate(1)
+    })
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+
+    view.unmount()
+    await act(async (): Promise<void> => {
+      vi.advanceTimersByTime(5000)
+    })
+
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["succeeds", true],
+    ["fails", false],
+  ])("schedules no clear when the request %s after unmount", async (_label: string, ok: boolean): Promise<void> => {
+    let settle: (() => void) | undefined
+    vi.spyOn(api, "fetchFeed").mockReturnValue(
+      new Promise<{ message: string }>((resolve, reject): void => {
+        settle = (): void =>
+          ok ? resolve({ message: "queued" }) : reject(new Error("nope"))
+      }),
+    )
+    const view = setup()
+    await act(async (): Promise<void> => {
+      view.result.current.fetchFeed.mutate(1)
+    })
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+
+    view.unmount()
+    await act(async (): Promise<void> => {
+      settle?.()
+    })
+    await act(async (): Promise<void> => {
+      vi.advanceTimersByTime(5000)
+    })
+
+    expect(invalidate).not.toHaveBeenCalled()
+  })
 })
