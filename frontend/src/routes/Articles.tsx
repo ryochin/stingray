@@ -82,6 +82,8 @@ export default function Articles(): JSX.Element {
     sessionReadUrls,
     hasSessionRead,
     localReadCount,
+    trackUnread,
+    waitForUnreads,
   } = usePendingReads()
   const mainRef = useRef<HTMLElement>(null)
   const stickyHeaderRef = useRef<HTMLDivElement>(null)
@@ -107,7 +109,7 @@ export default function Articles(): JSX.Element {
     folders,
     feedStats,
     failedSupportLoads,
-  } = useArticleQueries({ showUnreadOnly, timeRangeId })
+  } = useArticleQueries({ showUnreadOnly, timeRangeId, waitForUnreads })
 
   // Both transitions (idle→running, running→idle) are owned by `useRefreshSync`
   // mounted from `Header`, which the route renders. The shared QueryClient
@@ -244,7 +246,9 @@ export default function Articles(): JSX.Element {
   }, [queryClient])
 
   // Show `urls` as unread right away and drop them from the session reads,
-  // before the server answers. Clearing `read_at` in the cache first keeps
+  // before the server answers. Callers run this inside `trackUnread` along
+  // with the request, so no fetch can start between the two and slip past
+  // `waitForUnreads`. Clearing `read_at` in the cache first keeps
   // the cards in the unread filter; dropping them from the session set keeps
   // them from being subtracted as not-yet-synced reads once the refetch lands,
   // and lets a later read of the same article through. On failure the
@@ -270,32 +274,44 @@ export default function Articles(): JSX.Element {
   // Mark all as read mutation — scoped to the current sidebar selection so a
   // folder/feed view never marks articles outside it.
   const markAllRead = useMutation({
-    mutationFn: (olderThanHours: number | null) =>
-      api.markAllRead(selection, olderThanHours ?? undefined),
+    mutationFn: async (
+      olderThanHours: number | null,
+    ): Promise<{ marked: number }> => {
+      await waitForUnreads()
+      return api.markAllRead(selection, olderThanHours ?? undefined)
+    },
     onSuccess: invalidateReadState,
   })
   const markAllUnread = useMutation({
-    mutationFn: () => api.markAllUnread(selection),
     // Session reads (and the queued batch, a subset) only cover the current
     // selection, so all of them are in scope. Other read articles in the
     // cache just show as read until the refetch.
-    onMutate: (): Promise<void> =>
-      markUnreadLocally(Array.from(sessionReadUrls.current)),
+    mutationFn: (): Promise<{ unmarked: number }> =>
+      trackUnread(async (): Promise<{ unmarked: number }> => {
+        await markUnreadLocally(Array.from(sessionReadUrls.current))
+        return api.markAllUnread(selection)
+      }),
     onSettled: invalidateReadState,
   })
 
   // Toggle read/unread for a single article
   const toggleReadMutation = useMutation({
-    mutationFn: ({ url, isRead }: { url: string; isRead: boolean }) =>
-      isRead ? api.markUnread([url]) : api.markRead([url]),
-    onMutate: async ({
+    mutationFn: async ({
       url,
       isRead,
     }: {
       url: string
       isRead: boolean
     }): Promise<void> => {
-      if (isRead) await markUnreadLocally([url])
+      if (isRead) {
+        await trackUnread(async (): Promise<void> => {
+          await markUnreadLocally([url])
+          await api.markUnread([url])
+        })
+        return
+      }
+      await waitForUnreads()
+      await api.markRead([url])
     },
     onError: (err: Error): void => {
       console.error("Failed to toggle read status:", err)

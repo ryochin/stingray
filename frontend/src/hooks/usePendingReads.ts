@@ -33,6 +33,16 @@ interface PendingReadsApi {
    *  Mutations to `sessionReadUrls` are opaque to React, so consumers key
    *  memos off this counter to re-run when the set changes. */
   localReadCount: number
+  /** Runs `run` (an unread write, optimistic update included) and registers
+   *  it as in flight until it settles, so `waitForUnreads` callers hold off
+   *  until the server has the article back as unread. */
+  trackUnread: <T>(run: () => Promise<T>) => Promise<T>
+  /** Resolves once no unread write is in flight, settled either way. Read
+   *  writes wait here so they can't land before an earlier unread (the read
+   *  update only touches `read_at IS NULL` rows, so the unread would win),
+   *  and reads of read state wait so they can't clobber the optimistic
+   *  update with the server's pre-unread rows. */
+  waitForUnreads: () => Promise<void>
 }
 
 const FLUSH_DELAY_MS: number = 500
@@ -52,6 +62,27 @@ export function usePendingReads(): PendingReadsApi {
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const retryAttempt = useRef<number>(0)
   const isUnmounted = useRef<boolean>(false)
+  const inflightUnreads = useRef<Set<Promise<unknown>>>(new Set())
+  const isWaitingForUnreads = useRef<boolean>(false)
+
+  const waitForUnreads = useCallback(async (): Promise<void> => {
+    // Loop: an unread started while waiting must be waited for too.
+    while (inflightUnreads.current.size > 0) {
+      await Promise.allSettled(inflightUnreads.current)
+    }
+  }, [])
+
+  const trackUnread = useCallback(<T>(run: () => Promise<T>): Promise<T> => {
+    const inflight: Promise<T> = run()
+    inflightUnreads.current.add(inflight)
+    // Registered before any caller's handlers, so the set is already
+    // cleared by the time a waiter or the mutation's onSettled resumes.
+    const untrack = (): void => {
+      inflightUnreads.current.delete(inflight)
+    }
+    inflight.then(untrack, untrack)
+    return inflight
+  }, [])
 
   const flushReads = useCallback((): void => {
     if (pendingReadUrls.current.size === 0) return
@@ -65,6 +96,18 @@ export function usePendingReads(): PendingReadsApi {
     if (retryTimer.current) {
       clearTimeout(retryTimer.current)
       retryTimer.current = null
+    }
+    // Send after any in-flight unread instead. URLs queued meanwhile stay in
+    // the queue and go out in the same batch; flushes triggered while
+    // waiting are absorbed by the one already scheduled.
+    if (inflightUnreads.current.size > 0) {
+      if (isWaitingForUnreads.current) return
+      isWaitingForUnreads.current = true
+      void waitForUnreads().then((): void => {
+        isWaitingForUnreads.current = false
+        flushReads()
+      })
+      return
     }
     const inflight: string[] = Array.from(pendingReadUrls.current)
     pendingReadUrls.current.clear()
@@ -118,7 +161,7 @@ export function usePendingReads(): PendingReadsApi {
         retryAttempt.current = attempt + 1
         retryTimer.current = setTimeout(flushReads, RETRY_DELAYS_MS[attempt])
       })
-  }, [queryClient])
+  }, [queryClient, waitForUnreads])
 
   const scheduleRead = useCallback(
     (url: string): void => {
@@ -179,5 +222,7 @@ export function usePendingReads(): PendingReadsApi {
     sessionReadUrls,
     hasSessionRead,
     localReadCount,
+    trackUnread,
+    waitForUnreads,
   }
 }

@@ -199,6 +199,28 @@ async function renderAndReadFirstArticle(): Promise<QueryClient> {
   return client
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve: () => void): void => {
+    setTimeout(resolve, ms)
+  })
+}
+
+// Leaves the next markUnread pending on the server until the returned
+// release is called.
+function holdMarkUnread(): () => void {
+  let release: () => void = (): void => {}
+  vi.mocked(api.markUnread).mockImplementationOnce(
+    (urls: string[]): Promise<void> =>
+      new Promise<void>((resolve: () => void): void => {
+        release = (): void => {
+          for (const url of urls) server.readUrls.delete(url)
+          resolve()
+        }
+      }),
+  )
+  return (): void => release()
+}
+
 function openMarkAllUnread(): void {
   fireEvent.click(screen.getByRole("button", { name: "Mark all as read ▾" }))
   fireEvent.click(screen.getByRole("button", { name: "Mark all as unread" }))
@@ -249,6 +271,46 @@ describe("Articles unread count after marking unread", (): void => {
     expect(api.markRead).toHaveBeenLastCalledWith([ARTICLE_URLS[0]])
     expect(server.readUrls.has(ARTICLE_URLS[0])).toBe(true)
     await expectTitle("Stingray (1)")
+  })
+
+  it("holds a read of the same article until mark-unread has landed", async (): Promise<void> => {
+    await renderAndReadFirstArticle()
+    const release: () => void = holdMarkUnread()
+
+    act((): void => press("m"))
+    await waitFor((): void => expect(api.markUnread).toHaveBeenCalled())
+    act((): void => press("v"))
+    // Outlast the 500ms debounce: sent now, the read would reach the server
+    // first and be undone by the unread that follows it.
+    await sleep(800)
+    expect(api.markRead).toHaveBeenCalledTimes(1)
+
+    act((): void => release())
+    await waitFor((): void => expect(api.markRead).toHaveBeenCalledTimes(2), {
+      timeout: 2000,
+    })
+    expect(server.readUrls.has(ARTICLE_URLS[0])).toBe(true)
+  })
+
+  it("keeps an article shown as unread when the list refetches while mark-unread is in flight", async (): Promise<void> => {
+    const client: QueryClient = await renderAndReadFirstArticle()
+    const release: () => void = holdMarkUnread()
+
+    act((): void => press("m"))
+    await waitFor((): void => expect(api.markUnread).toHaveBeenCalled())
+    // A poll or another read's refetch. Served now, it would carry the
+    // pre-unread read_at and drop the card from the unread list. (The count
+    // itself only catches up once feed-stats refetches after the unread.)
+    act((): void => {
+      void client.invalidateQueries({ queryKey: ["articles"] })
+      void client.invalidateQueries({ queryKey: ["feed-stats"] })
+    })
+    await sleep(100)
+    expect(cachedReadAt(client, ARTICLE_URLS[0])).toBeNull()
+
+    act((): void => release())
+    await expectTitle("Stingray (2)")
+    expect(cachedReadAt(client, ARTICLE_URLS[0])).toBeNull()
   })
 
   it("drops a queued read when mark-all-unread starts before it is sent", async (): Promise<void> => {

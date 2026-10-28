@@ -568,3 +568,98 @@ describe("usePendingReads — cache after a successful flush", (): void => {
     expect(readAt(queryClient, RANGE_KEY, "b")).toBeNull()
   })
 })
+
+describe("usePendingReads — read writes wait for in-flight unreads", (): void => {
+  // A manually settled stand-in for an unread request still in flight.
+  function deferred(): {
+    promise: Promise<void>
+    resolve: () => void
+    reject: (err: Error) => void
+  } {
+    let resolve: () => void = (): void => undefined
+    let reject: (err: Error) => void = (): void => undefined
+    const promise: Promise<void> = new Promise<void>(
+      (res: () => void, rej: (err: Error) => void): void => {
+        resolve = res
+        reject = rej
+      },
+    )
+    return { promise, resolve, reject }
+  }
+
+  it("holds a flush until the unread settles, then sends every URL queued meanwhile in one batch", async (): Promise<void> => {
+    const { result } = renderHook(
+      (): ReturnType<typeof usePendingReads> => usePendingReads(),
+      { wrapper },
+    )
+    const unread: ReturnType<typeof deferred> = deferred()
+    act((): void => {
+      void result.current.trackUnread((): Promise<void> => unread.promise)
+      result.current.scheduleRead("a")
+    })
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    act((): void => {
+      result.current.scheduleRead("b")
+    })
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(markReadSpy).not.toHaveBeenCalled()
+
+    await act(async (): Promise<void> => {
+      unread.resolve()
+    })
+    expect(markReadSpy).toHaveBeenCalledTimes(1)
+    expect(markReadSpy.mock.calls[0][0].sort()).toEqual(["a", "b"])
+  })
+
+  it("still sends the reads when the unread fails", async (): Promise<void> => {
+    const { result } = renderHook(
+      (): ReturnType<typeof usePendingReads> => usePendingReads(),
+      { wrapper },
+    )
+    const unread: ReturnType<typeof deferred> = deferred()
+    act((): void => {
+      result.current
+        .trackUnread((): Promise<void> => unread.promise)
+        .catch((): void => undefined)
+      result.current.scheduleRead("a")
+      result.current.flushReads()
+    })
+    expect(markReadSpy).not.toHaveBeenCalled()
+
+    await act(async (): Promise<void> => {
+      unread.reject(new Error("network"))
+    })
+    expect(markReadSpy).toHaveBeenCalledTimes(1)
+    expect(markReadSpy.mock.calls[0][0]).toEqual(["a"])
+  })
+
+  it("waitForUnreads also waits for an unread that starts while waiting", async (): Promise<void> => {
+    const { result } = renderHook(
+      (): ReturnType<typeof usePendingReads> => usePendingReads(),
+      { wrapper },
+    )
+    const first: ReturnType<typeof deferred> = deferred()
+    const second: ReturnType<typeof deferred> = deferred()
+    let waited: boolean = false
+    act((): void => {
+      void result.current.trackUnread((): Promise<void> => first.promise)
+      void result.current.waitForUnreads().then((): void => {
+        waited = true
+      })
+      void result.current.trackUnread((): Promise<void> => second.promise)
+    })
+    await act(async (): Promise<void> => {
+      first.resolve()
+    })
+    expect(waited).toBe(false)
+
+    await act(async (): Promise<void> => {
+      second.resolve()
+    })
+    expect(waited).toBe(true)
+  })
+})

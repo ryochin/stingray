@@ -13,6 +13,8 @@ import { failedLoads } from "../utils/queryErrors"
 interface UseArticleQueriesInput {
   showUnreadOnly: boolean
   timeRangeId: TimeRangeId
+  /** Gate run before each read-state fetch (articles, feed-stats). */
+  waitForUnreads: () => Promise<void>
 }
 
 interface UseArticleQueriesResult {
@@ -43,6 +45,7 @@ type ArticleQueryOpts = NonNullable<Parameters<typeof api.getArticles>[0]>
 export function useArticleQueries({
   showUnreadOnly,
   timeRangeId,
+  waitForUnreads,
 }: UseArticleQueriesInput): UseArticleQueriesResult {
   // Subscribe to status so refetchInterval reacts immediately when a refresh
   // starts/ends, instead of waiting for the next scheduled tick. Header also
@@ -85,8 +88,12 @@ export function useArticleQueries({
     // `unread` is part of the key: unread mode and the All range share
     // `sinceDays: null` but get different responses.
     queryKey: ["articles", { sinceDays, unread: showUnreadOnly }],
-    queryFn: (): ReturnType<typeof api.getArticles> =>
-      api.getArticles(articleOpts),
+    // Fetches wait out in-flight unreads so the rows can't predate them and
+    // overwrite the optimistic `read_at: null` (see usePendingReads).
+    queryFn: async (): ReturnType<typeof api.getArticles> => {
+      await waitForUnreads()
+      return api.getArticles(articleOpts)
+    },
     // Time-range modes are for looking back, and their responses run to
     // tens of MB, so they skip polling. New articles still arrive when a
     // refresh finishes (useRefreshSync) or the window regains focus.
@@ -109,7 +116,10 @@ export function useArticleQueries({
   // consistent regardless of the active time range.
   const { data: feedStats, isError: feedStatsError } = useQuery({
     queryKey: ["feed-stats"],
-    queryFn: api.getFeedStats,
+    queryFn: async (): ReturnType<typeof api.getFeedStats> => {
+      await waitForUnreads()
+      return api.getFeedStats()
+    },
     refetchInterval: activeInterval,
   })
 

@@ -25,6 +25,10 @@ import {
   useArticleQueries,
 } from "./useArticleQueries"
 
+// No unread is ever in flight here; the gate itself is covered by
+// usePendingReads.test.tsx.
+const waitForUnreads = async (): Promise<void> => undefined
+
 type GetArticlesOpts = NonNullable<Parameters<typeof api.getArticles>[0]>
 
 /** What unread mode must request: unread rows plus the reader's recent reads. */
@@ -61,7 +65,7 @@ async function fetchedSinceDays(
 ): Promise<number | null | undefined> {
   renderHook(
     (): ReturnType<typeof useArticleQueries> =>
-      useArticleQueries({ showUnreadOnly, timeRangeId }),
+      useArticleQueries({ showUnreadOnly, timeRangeId, waitForUnreads }),
     { wrapper: makeWrapper() },
   )
   await waitFor((): void => {
@@ -129,7 +133,7 @@ describe("useArticleQueries — refetching on range change", (): void => {
         showUnreadOnly: boolean
         timeRangeId: TimeRangeId
       }): ReturnType<typeof useArticleQueries> =>
-        useArticleQueries({ showUnreadOnly, timeRangeId }),
+        useArticleQueries({ showUnreadOnly, timeRangeId, waitForUnreads }),
       {
         wrapper: makeWrapper(),
         initialProps: {
@@ -165,7 +169,7 @@ describe("useArticleQueries — unread mode request", (): void => {
   ): Promise<GetArticlesOpts | undefined> {
     renderHook(
       (): ReturnType<typeof useArticleQueries> =>
-        useArticleQueries({ showUnreadOnly, timeRangeId }),
+        useArticleQueries({ showUnreadOnly, timeRangeId, waitForUnreads }),
       { wrapper: makeWrapper() },
     )
     await waitFor((): void => {
@@ -193,7 +197,11 @@ describe("useArticleQueries — unread mode request", (): void => {
       }: {
         showUnreadOnly: boolean
       }): ReturnType<typeof useArticleQueries> =>
-        useArticleQueries({ showUnreadOnly, timeRangeId: "all" }),
+        useArticleQueries({
+          showUnreadOnly,
+          timeRangeId: "all",
+          waitForUnreads,
+        }),
       { wrapper: makeWrapper(), initialProps: { showUnreadOnly: true } },
     )
     await waitFor((): void => {
@@ -214,6 +222,7 @@ describe("useArticleQueries — sidebar data failures", (): void => {
         useArticleQueries({
           showUnreadOnly: false,
           timeRangeId: DEFAULT_TIME_RANGE_ID,
+          waitForUnreads,
         }),
       { wrapper: makeWrapper() },
     )
@@ -235,7 +244,7 @@ describe("useArticleQueries — articles polling", (): void => {
     })
     renderHook(
       (): ReturnType<typeof useArticleQueries> =>
-        useArticleQueries({ showUnreadOnly, timeRangeId }),
+        useArticleQueries({ showUnreadOnly, timeRangeId, waitForUnreads }),
       {
         wrapper: ({ children }: { children: ReactNode }): JSX.Element => (
           <QueryClientProvider client={queryClient}>
