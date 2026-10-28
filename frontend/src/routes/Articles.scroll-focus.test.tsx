@@ -17,8 +17,18 @@ import Articles from "./Articles"
 vi.mock("../components/Header", () => ({
   default: (): JSX.Element | null => null,
 }))
+// Stands in for a click on the already-selected sidebar item: with an empty
+// sessionStorage the route starts on "all", so this re-selects it.
 vi.mock("../components/Sidebar", () => ({
-  default: (): JSX.Element | null => null,
+  default: ({
+    onSelect,
+  }: {
+    onSelect: (selection: { type: "all" }) => void
+  }): JSX.Element => (
+    <button type="button" onClick={(): void => onSelect({ type: "all" })}>
+      Sidebar All
+    </button>
+  ),
 }))
 
 vi.mock("../api/client", async (importOriginal) => {
@@ -94,6 +104,23 @@ describe("Articles scroll-container focus", (): void => {
     // effect (deps include showUnreadOnly) must pull it back to <main> so
     // native Space scrolling keeps working without re-clicking the list.
     fireEvent.click(screen.getByRole("button", { name: "All" }))
+    await waitFor((): void => {
+      expect(document.activeElement).toBe(main)
+    })
+  })
+
+  it("returns focus to the scroll container after re-selecting the active sidebar item", async (): Promise<void> => {
+    renderArticles()
+    await screen.findByText("No more unread feeds")
+    const main: HTMLElement = screen.getByRole("main")
+    // Re-selecting is a no-op for the selection state, so the reset effect
+    // does not run. Focus left on the sidebar <button> makes
+    // useArticleKeyboard skip Space, and the feed jump never fires.
+    const sidebarItem: HTMLElement = screen.getByRole("button", {
+      name: "Sidebar All",
+    })
+    sidebarItem.focus()
+    fireEvent.click(sidebarItem)
     await waitFor((): void => {
       expect(document.activeElement).toBe(main)
     })

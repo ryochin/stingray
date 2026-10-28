@@ -86,6 +86,18 @@ export default function Articles(): JSX.Element {
   const mainRef = useRef<HTMLElement>(null)
   const stickyHeaderRef = useRef<HTMLDivElement>(null)
   const stickySentinelRef = useRef<HTMLDivElement>(null)
+  // A sidebar click leaves DOM focus on the clicked <button>. Switching to a
+  // different selection pulls it back through the reset effect below, but
+  // re-clicking the active item is a no-op in updateSelection, so focus would
+  // stay on the button, where useArticleKeyboard leaves Space alone and the
+  // feed jump never fires.
+  const selectFromSidebar = useCallback(
+    (sel: Selection): void => {
+      updateSelection(sel)
+      mainRef.current?.focus({ preventScroll: true })
+    },
+    [updateSelection],
+  )
 
   const {
     allArticles,
@@ -337,7 +349,7 @@ export default function Articles(): JSX.Element {
       <div className="flex flex-1 min-h-0">
         <Sidebar
           selection={selection}
-          onSelect={updateSelection}
+          onSelect={selectFromSidebar}
           unreadCounts={unreadCounts}
         />
         <main
