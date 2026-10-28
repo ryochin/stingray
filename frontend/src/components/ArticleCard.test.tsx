@@ -46,6 +46,22 @@ describe("ArticleCard", () => {
     expect(screen.getAllByText("Original Title")).toHaveLength(1)
   })
 
+  it("keeps the body DOM across re-renders so a broken image does not reload", () => {
+    // React 19 rewrites innerHTML whenever the dangerouslySetInnerHTML object
+    // changes identity. Rebuilding the body on every re-render made a broken
+    // image reload, resize the card, and re-render it again in a loop.
+    const a: Article = article({
+      content_html: '<p>Body</p><img src="https://img.example.com/broken.svg">',
+    })
+    const { container, rerender } = render(
+      <ArticleCard article={a} focused={false} />,
+    )
+    const before: Element | null = container.querySelector(".article-html img")
+    expect(before).not.toBeNull()
+    rerender(<ArticleCard article={{ ...a }} focused />)
+    expect(container.querySelector(".article-html img")).toBe(before)
+  })
+
   it("renders summary text extracted from <image> markers", () => {
     const a = article({
       summary: "Summary body<image>https://img.example.com/x.png</image>",

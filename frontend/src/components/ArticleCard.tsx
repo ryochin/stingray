@@ -159,6 +159,15 @@ export default function ArticleCard({
     }
     return doc.body.innerHTML
   }, [article.content_html])
+  // React 19 rewrites innerHTML whenever this object's identity changes,
+  // without comparing `__html`. A fresh object per render would rebuild the
+  // body on every re-render; a broken image then reloads, changes the card
+  // height, makes the virtualizer re-render the card, and loops.
+  const bodyHtml = useMemo<{ __html: string } | null>(
+    (): { __html: string } | null =>
+      sanitizedHtml ? { __html: sanitizedHtml } : null,
+    [sanitizedHtml],
+  )
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: cannot use <button> because the card contains nested <a> links (interactive content cannot nest per HTML spec)
@@ -301,7 +310,7 @@ export default function ArticleCard({
           </p>
         )}
 
-      {sanitizedHtml && (
+      {bodyHtml && (
         // biome-ignore lint/a11y/noStaticElementInteractions: the handlers only stop propagation for nested links; they add no interaction of their own
         <div
           className="mt-2 text-base text-text article-html max-w-none"
@@ -312,7 +321,7 @@ export default function ArticleCard({
           onClick={stopClickOnLink}
           onKeyDown={stopEnterOnLink}
           // biome-ignore lint/security/noDangerouslySetInnerHtml: content is sanitized via DOMPurify before rendering (see useMemo above)
-          dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+          dangerouslySetInnerHTML={bodyHtml}
         />
       )}
     </div>
