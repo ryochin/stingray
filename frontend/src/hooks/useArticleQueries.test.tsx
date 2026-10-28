@@ -223,3 +223,46 @@ describe("useArticleQueries — sidebar data failures", (): void => {
     )
   })
 })
+
+describe("useArticleQueries — articles polling", (): void => {
+  /** Render the hook and read back the articles query's polling interval. */
+  async function articlesRefetchInterval(
+    showUnreadOnly: boolean,
+    timeRangeId: TimeRangeId,
+  ): Promise<unknown> {
+    const queryClient: QueryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    renderHook(
+      (): ReturnType<typeof useArticleQueries> =>
+        useArticleQueries({ showUnreadOnly, timeRangeId }),
+      {
+        wrapper: ({ children }: { children: ReactNode }): JSX.Element => (
+          <QueryClientProvider client={queryClient}>
+            {children}
+          </QueryClientProvider>
+        ),
+      },
+    )
+    await waitFor((): void => {
+      expect(getArticlesSpy).toHaveBeenCalled()
+    })
+    // find() matches keys exactly by default; findAll() matches the prefix.
+    const [query] = queryClient
+      .getQueryCache()
+      .findAll({ queryKey: ["articles"] })
+    return query?.observers[0]?.options.refetchInterval
+  }
+
+  it("polls in unread mode so new articles show up on their own", async (): Promise<void> => {
+    expect(await articlesRefetchInterval(true, DEFAULT_TIME_RANGE_ID)).toBe(
+      15_000,
+    )
+  })
+
+  it.each(
+    RANGE_CASES,
+  )("does not poll the %s range, whose response can run to tens of MB", async (id: TimeRangeId): Promise<void> => {
+    expect(await articlesRefetchInterval(false, id)).toBe(false)
+  })
+})

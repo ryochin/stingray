@@ -1,8 +1,13 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from "@tanstack/react-query"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import type { JSX, ReactNode } from "react"
 import type { Mock } from "vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { Article } from "../api/client"
 import { api } from "../api/client"
 import { usePendingReads } from "./usePendingReads"
 
@@ -483,5 +488,83 @@ describe("usePendingReads — flushReads failure recovery", (): void => {
       await vi.advanceTimersByTimeAsync(5000)
     })
     expect(markReadSpy).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("usePendingReads — cache after a successful flush", (): void => {
+  const UNREAD_KEY = ["articles", { sinceDays: null, unread: true }] as const
+  const RANGE_KEY = ["articles", { sinceDays: null, unread: false }] as const
+
+  function article(url: string): Article {
+    return { url, read_at: null } as Article
+  }
+
+  /** Renders the hook next to an active feed-stats observer whose refetch
+   *  stays pending until the returned `finishStats` is called. */
+  function renderWithCache(): {
+    queryClient: QueryClient
+    result: { current: ReturnType<typeof usePendingReads> }
+    finishStats: () => void
+  } {
+    const queryClient: QueryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    queryClient.setQueryData(UNREAD_KEY, [article("a")])
+    queryClient.setQueryData(RANGE_KEY, [article("a"), article("b")])
+    let finishStats: () => void = (): void => undefined
+    let statsCalls: number = 0
+    const getFeedStats = (): Promise<Record<string, never>> => {
+      statsCalls++
+      // The mount fetch resolves at once; the refetch after the flush hangs.
+      if (statsCalls === 1) return Promise.resolve({})
+      return new Promise((resolve): void => {
+        finishStats = (): void => resolve({})
+      })
+    }
+    const { result } = renderHook(
+      (): ReturnType<typeof usePendingReads> => {
+        useQuery({ queryKey: ["feed-stats"], queryFn: getFeedStats })
+        return usePendingReads()
+      },
+      {
+        wrapper: ({ children }: { children: ReactNode }): JSX.Element => (
+          <QueryClientProvider client={queryClient}>
+            {children}
+          </QueryClientProvider>
+        ),
+      },
+    )
+    return { queryClient, result, finishStats: (): void => finishStats() }
+  }
+
+  function readAt(
+    queryClient: QueryClient,
+    key: readonly unknown[],
+    url: string,
+  ): string | null | undefined {
+    return queryClient
+      .getQueryData<Article[]>(key)
+      ?.find((a: Article): boolean => a.url === url)?.read_at
+  }
+
+  it("refetches unread mode but stamps read_at into time-range caches", async (): Promise<void> => {
+    const { queryClient, result, finishStats } = renderWithCache()
+    act((): void => {
+      result.current.scheduleRead("a")
+    })
+    await act(async (): Promise<void> => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(queryClient.getQueryState(UNREAD_KEY)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(RANGE_KEY)?.isInvalidated).toBe(false)
+    // The sidebar subtracts session reads whose cached read_at is still
+    // null, so stamping before the new counts land would bump the badges.
+    expect(readAt(queryClient, RANGE_KEY, "a")).toBeNull()
+
+    await act(async (): Promise<void> => {
+      finishStats()
+    })
+    expect(readAt(queryClient, RANGE_KEY, "a")).toEqual(expect.any(String))
+    expect(readAt(queryClient, RANGE_KEY, "b")).toBeNull()
   })
 })

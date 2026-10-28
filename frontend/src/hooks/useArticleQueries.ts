@@ -87,7 +87,10 @@ export function useArticleQueries({
     queryKey: ["articles", { sinceDays, unread: showUnreadOnly }],
     queryFn: (): ReturnType<typeof api.getArticles> =>
       api.getArticles(articleOpts),
-    refetchInterval: activeInterval,
+    // Time-range modes are for looking back, and their responses run to
+    // tens of MB, so they skip polling. New articles still arrive when a
+    // refresh finishes (useRefreshSync) or the window regains focus.
+    refetchInterval: showUnreadOnly ? activeInterval : false,
   })
 
   const { data: feeds, isError: feedsError } = useQuery({

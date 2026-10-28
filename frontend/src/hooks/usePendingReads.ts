@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import type { MutableRefObject } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import type { Article } from "../api/client"
 import { api } from "../api/client"
 
 interface PendingReadsApi {
@@ -69,10 +70,30 @@ export function usePendingReads(): PendingReadsApi {
     pendingReadUrls.current.clear()
     api
       .markRead(inflight)
-      .then((): void => {
+      .then(async (): Promise<void> => {
         retryAttempt.current = 0
-        queryClient.invalidateQueries({ queryKey: ["articles"] })
-        queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
+        // Unread mode is small, so refetch it. Time-range modes can return
+        // tens of MB ("All" caps at 10,000 articles), so stamp `read_at` in
+        // the cache instead. Stamp only after feed-stats has refetched: the
+        // sidebar subtracts session reads whose cached `read_at` is still
+        // null, so stamping earlier would bump the badges back up until
+        // the new counts arrive.
+        queryClient.invalidateQueries({
+          queryKey: ["articles", { unread: true }],
+        })
+        await queryClient.invalidateQueries({ queryKey: ["feed-stats"] })
+        const targets: Set<string> = new Set(inflight)
+        const readAt: string = new Date().toISOString()
+        queryClient.setQueriesData<Article[]>(
+          { queryKey: ["articles", { unread: false }] },
+          (prev: Article[] | undefined): Article[] | undefined =>
+            prev?.map(
+              (a: Article): Article =>
+                targets.has(a.url) && a.read_at == null
+                  ? { ...a, read_at: readAt }
+                  : a,
+            ),
+        )
       })
       .catch((err: unknown): void => {
         // Merge back so the next flush retries the batch. sessionReadUrls
