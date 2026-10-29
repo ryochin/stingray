@@ -12,6 +12,7 @@ from urllib.parse import urljoin
 
 import soupsieve
 from bs4 import BeautifulSoup, Tag
+from bs4.builder import HTMLTreeBuilder
 
 from models import Article
 from safe_http import SafeClient
@@ -33,14 +34,22 @@ ALLOWED_RULE_KEYS = frozenset(
 )
 REQUIRED_RULE_KEYS = ("item", "title", "link")
 SELECTOR_RULE_KEYS = ("item", "title", "link", "date", "thumbnail")
+ATTR_RULE_KEYS = ("link_attr", "date_attr", "thumbnail_attr")
 MAX_RULE_VALUE_LEN = 200
+# Attributes bs4 parses into lists (on any tag or on specific ones). attr_str
+# rejects those values, and a rule cannot know which tag its selector will hit,
+# so the union is rejected for every tag.
+MULTI_VALUED_ATTRS = frozenset(
+  attr for attrs in HTMLTreeBuilder.DEFAULT_CDATA_LIST_ATTRIBUTES.values() for attr in attrs
+)
 
 
 def validate_extraction_rules(raw: object) -> dict[str, str]:
   """Validate and normalize extraction rules. Raises ValueError on bad input.
 
   Shared by the PATCH /rules endpoint and LLM selector inference so the same
-  contract (allowed keys, required fields, CSS syntax) is enforced in one place.
+  contract (allowed keys, required fields, CSS syntax, single-valued attributes,
+  the link-only "_self" sentinel) is enforced in one place.
   """
   if not isinstance(raw, dict):
     raise ValueError("Extraction rules must be a JSON object")
@@ -63,10 +72,20 @@ def validate_extraction_rules(raw: object) -> dict[str, str]:
   for key in REQUIRED_RULE_KEYS:
     if not rules.get(key):
       raise ValueError(f"Missing or empty required field: {key}")
+  for key in ATTR_RULE_KEYS:
+    attr = rules.get(key)
+    if attr in MULTI_VALUED_ATTRS:
+      raise ValueError(f"Value for '{key}' is a multi-valued attribute: {attr!r}")
   for key in SELECTOR_RULE_KEYS:
     selector = rules.get(key)
-    if not selector or (key == "link" and selector == "_self"):
+    if not selector:
       continue
+    if selector == "_self":
+      if key == "link":
+        continue
+      # Only parse_web_page's link lookup understands the sentinel; elsewhere it
+      # is a type selector for <_self> and never matches.
+      raise ValueError(f"'_self' is only valid for 'link', not '{key}'")
     try:
       soupsieve.compile(selector)
     except Exception as e:

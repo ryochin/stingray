@@ -246,10 +246,19 @@ class TestInferAndValidateFailures:
     assert result.sample_articles == []
 
   def test_rules_that_fail_to_apply_are_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Valid by validate_extraction_rules, but `class` is multi-valued on <a class="t">,
-    # so parse_web_page raises TypeError when applying it.
-    fake = _ScriptedOllama([{**GOOD_RULES, "link_attr": "class"}, GOOD_RULES])
+    # Valid rules can still raise while being applied; the first application fails.
+    real_parse = selector_inference.parse_web_page
+    calls: list[int] = []
+
+    def flaky_parse(*args: Any, **kwargs: Any) -> list[Any]:
+      calls.append(1)
+      if len(calls) == 1:
+        raise TypeError("boom")
+      return real_parse(*args, **kwargs)
+
+    fake = _ScriptedOllama([{**GOOD_RULES, "title": "a"}, GOOD_RULES])
     monkeypatch.setattr(selector_inference, "call_ollama", fake)
+    monkeypatch.setattr(selector_inference, "parse_web_page", flaky_parse)
     result = _run_infer()
     assert result.status == "ok"
     assert result.rules == GOOD_RULES

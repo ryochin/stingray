@@ -2,12 +2,14 @@
 
 Shared validation for the PATCH /rules endpoint and LLM selector inference:
 allowed keys only, required item/title/link, string values, length cap, and
-CSS syntax checking (with the "_self" link sentinel exempted).
+CSS syntax checking, single-valued attributes, and the "_self" sentinel
+(link only).
 """
 
 from __future__ import annotations
 
 import pytest
+from bs4.builder import HTMLTreeBuilder
 
 from scraper import MAX_RULE_VALUE_LEN, validate_extraction_rules
 
@@ -75,3 +77,33 @@ class TestValidateExtractionRules:
   def test_invalid_css_selector_rejected(self):
     with pytest.raises(ValueError, match="Invalid CSS selector"):
       validate_extraction_rules({"item": "li[", "title": "a", "link": "a"})
+
+  @pytest.mark.parametrize("key", ["link_attr", "date_attr", "thumbnail_attr"])
+  @pytest.mark.parametrize("attr", ["class", " rel "])
+  def test_multi_valued_attribute_rejected(self, key: str, attr: str):
+    # bs4 parses these into lists, which attr_str refuses at fetch time.
+    with pytest.raises(ValueError, match="multi-valued"):
+      validate_extraction_rules({"item": "li", "title": "a", "link": "a", key: attr})
+
+  def test_every_bs4_multi_valued_attribute_rejected(self):
+    # Guards the union: tag-specific ones like `headers` (<td>) count for every tag.
+    for attrs in HTMLTreeBuilder.DEFAULT_CDATA_LIST_ATTRIBUTES.values():
+      for attr in attrs:
+        with pytest.raises(ValueError, match="multi-valued"):
+          validate_extraction_rules({"item": "li", "title": "a", "link": "a", "link_attr": attr})
+
+  def test_single_valued_data_attribute_passes(self):
+    raw = {
+      "item": "li",
+      "title": "a",
+      "link": "a",
+      "thumbnail": "img",
+      "thumbnail_attr": "data-src",
+    }
+    assert validate_extraction_rules(raw) == raw
+
+  @pytest.mark.parametrize("key", ["item", "title", "date", "thumbnail"])
+  def test_self_sentinel_outside_link_rejected(self, key: str):
+    raw = {"item": "li", "title": "a", "link": "a", key: " _self "}
+    with pytest.raises(ValueError, match="only valid for 'link'"):
+      validate_extraction_rules(raw)
