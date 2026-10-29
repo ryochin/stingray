@@ -151,6 +151,7 @@ def parse_web_page(
   """Extract articles from HTML using CSS selector rules."""
   soup = BeautifulSoup(html, "html.parser")
   source: str = feed_cfg["name"]
+  feed_id: int | None = feed_cfg.get("id")
   page_url: str = feed_cfg["url"]
   max_items: int = feed_cfg.get("max_items", 200)
 
@@ -220,6 +221,7 @@ def parse_web_page(
         published=published,
         content_snippet=snippet,
         content_html=thumbnail_html,
+        feed_id=feed_id,
       )
     )
 

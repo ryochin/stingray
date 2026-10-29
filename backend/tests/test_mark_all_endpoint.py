@@ -48,9 +48,9 @@ def _seed_two_feeds_one_foldered() -> tuple[int, dict[str, int]]:
           source=source,
           published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC),
           content_snippet="body",
+          feed_id=ids[source],
         )
       ],
-      {source: ids[source]},
     )
   return folder.id, ids
 

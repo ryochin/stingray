@@ -56,3 +56,9 @@ def test_disabled_passes_through_scraped_url():
     "https://example.com/post?utm_source=site&id=1",
     "https://example.com/post2?fbclid=ABC&id=2",
   ]
+
+
+def test_scraped_articles_carry_the_feed_id():
+  # Same parity as the RSS path: the stored row links to the feed by ID.
+  articles = parse_web_page(HTML_WITH_TRACKER, RULES, {**_feed_cfg(), "id": 7})
+  assert [a.feed_id for a in articles] == [7, 7]

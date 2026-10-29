@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -116,6 +117,15 @@ async def process_article(
   return "", summary, ""
 
 
+@dataclass
+class SummarizeOutcome:
+  failures: int = 0
+  # URLs that failed on Ollama's side: unreachable, or an HTTP error such as a
+  # misconfigured model (404) or a failed model load (500). That says nothing
+  # about the article, so callers keep them out of its failure count.
+  ollama_errors: set[str] = field(default_factory=lambda: set[str]())
+
+
 async def summarize_all(
   articles: list[Article],
   model: str = "gemma4:e4b",
@@ -127,16 +137,16 @@ async def summarize_all(
   summarize_set: set[str] | None = None,
   short_set: set[str] | None = None,
   native_lang: str,
-) -> int:
-  """Process articles with LLM. Returns the number of failures.
+) -> SummarizeOutcome:
+  """Process articles with LLM, filling their output fields in place.
 
-  translate_set: set of source names that need translation.
-  summarize_set: set of source names whose feed has summarize enabled.
+  translate_set: URLs of articles whose feed has translate enabled.
+  summarize_set: URLs of articles whose feed has summarize enabled.
   short_set: set of article URLs that are short (full translation, no summary).
   """
   sem = asyncio.Semaphore(concurrency)
   total = len(articles)
-  failures = 0
+  outcome = SummarizeOutcome()
   _translate_set = translate_set or set()
   _summarize_set = summarize_set or set()
   _short_set = short_set or set()
@@ -147,7 +157,6 @@ async def summarize_all(
   ) as client:
 
     async def _process(idx: int, article: Article) -> bool:
-      nonlocal failures
       async with sem:
         log.dim(f"  [{idx + 1}/{total}] {article.title[:60]}...")
         try:
@@ -155,8 +164,8 @@ async def summarize_all(
             client,
             article,
             model,
-            translate=article.source in _translate_set,
-            summarize=article.source in _summarize_set,
+            translate=article.url in _translate_set,
+            summarize=article.url in _summarize_set,
             native_lang=native_lang,
             short=article.url in _short_set,
           )
@@ -166,8 +175,11 @@ async def summarize_all(
           return True
         except Exception as exc:
           log.error(f"    Error: {exc}")
-          failures += 1
+          outcome.failures += 1
+          # A connect timeout is a TimeoutException, not a ConnectError.
+          if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.HTTPStatusError)):
+            outcome.ollama_errors.add(article.url)
           return False
 
     await asyncio.gather(*[_process(idx, article) for idx, article in enumerate(articles)])
-  return failures
+  return outcome

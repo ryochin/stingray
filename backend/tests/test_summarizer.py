@@ -132,24 +132,25 @@ def test_bad_llm_fields_fall_back(
 # --- summarize_all ---
 
 
-def _summarize_all(articles: list[Article], **kwargs: Any) -> int:
+def _summarize_all(articles: list[Article], **kwargs: Any) -> summarizer.SummarizeOutcome:
   return asyncio.run(summarizer.summarize_all(articles, native_lang="ja", **kwargs))
 
 
-def test_summarize_all_routes_by_source_and_url(fake: FakeOllama) -> None:
-  short = _article(url="https://x/short", source="foreign", title="Short")
-  long_ = _article(url="https://x/long", source="foreign", title="Long")
-  title_only = _article(url="https://x/t", source="foreign-nosum", title="TitleOnly")
-  native = _article(url="https://x/n", source="native", title="Native")
+def test_summarize_all_routes_by_url(fake: FakeOllama) -> None:
+  # One shared source name: the sets are keyed by URL, so it plays no part.
+  short = _article(url="https://x/short", title="Short")
+  long_ = _article(url="https://x/long", title="Long")
+  title_only = _article(url="https://x/t", title="TitleOnly")
+  native = _article(url="https://x/n", title="Native")
 
-  failures = _summarize_all(
+  outcome = _summarize_all(
     [short, long_, title_only, native],
-    translate_set={"foreign", "foreign-nosum"},
-    summarize_set={"foreign", "native"},
+    translate_set={short.url, long_.url, title_only.url},
+    summarize_set={short.url, long_.url, native.url},
     short_set={"https://x/short"},
   )
 
-  assert failures == 0
+  assert outcome.failures == 0
   by_title = dict(zip([p.split("\n")[0] for p in fake.user_prompts], fake.prompts, strict=True))
   assert FULL in by_title["Title: Short"]
   assert TRANSLATE_SUMMARY in by_title["Title: Long"]
@@ -163,14 +164,14 @@ def test_summarize_all_routes_by_source_and_url(fake: FakeOllama) -> None:
 @pytest.mark.parametrize("empty", [None, set[str]()])
 def test_summarize_all_none_and_empty_sets_match(fake: FakeOllama, empty: set[str] | None) -> None:
   article = _article()
-  failures = _summarize_all([article], translate_set=empty, summarize_set=empty, short_set=empty)
-  assert failures == 0
+  outcome = _summarize_all([article], translate_set=empty, summarize_set=empty, short_set=empty)
+  assert outcome.failures == 0
   assert SUMMARY_ONLY in fake.prompts[0]
   assert (article.title_translated, article.summary, article.content_translated) == ("", "S", "")
 
 
 def test_summarize_all_empty_list(fake: FakeOllama) -> None:
-  assert _summarize_all([]) == 0
+  assert _summarize_all([]) == summarizer.SummarizeOutcome()
   assert fake.prompts == []
 
 
@@ -184,12 +185,49 @@ def test_summarize_all_counts_failures_and_leaves_failed_articles_untouched(
   bad.content_translated = "old content"
   fake.fail_titles = {"Bad"}
 
-  failures = _summarize_all([ok, bad], translate_set={"src"}, summarize_set={"src"})
+  urls = {ok.url, bad.url}
+  outcome = _summarize_all([ok, bad], translate_set=urls, summarize_set=urls)
 
-  assert failures == 1
+  assert outcome.failures == 1
+  assert outcome.ollama_errors == set()
   assert (ok.title_translated, ok.summary) == ("T", "S")
   assert (bad.title_translated, bad.summary, bad.content_translated) == (
     "old title",
     "old summary",
     "old content",
   )
+
+
+_CHAT_REQUEST = httpx.Request("POST", "http://ollama/api/chat")
+
+
+@pytest.mark.parametrize(
+  ("error", "on_ollama_side"),
+  [
+    (httpx.ConnectError("refused"), True),
+    (httpx.ConnectTimeout("timed out"), True),
+    (
+      httpx.HTTPStatusError(
+        "model not found",
+        request=_CHAT_REQUEST,
+        response=httpx.Response(404, request=_CHAT_REQUEST),
+      ),
+      True,
+    ),
+    (httpx.ReadTimeout("timed out"), False),
+    (ValueError("not JSON"), False),
+  ],
+  ids=["connect-error", "connect-timeout", "http-error", "read-timeout", "bad-reply"],
+)
+def test_summarize_all_separates_ollama_side_errors(
+  fake: FakeOllama,
+  error: Exception,
+  on_ollama_side: bool,
+) -> None:
+  article = _article()
+  fake.error = error
+
+  outcome = _summarize_all([article])
+
+  assert outcome.failures == 1
+  assert outcome.ollama_errors == ({article.url} if on_ollama_side else set())

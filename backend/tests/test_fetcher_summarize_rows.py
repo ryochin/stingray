@@ -11,6 +11,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 import pytest
 
 import db
@@ -34,9 +35,14 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakeOllama:
   return fake_ollama
 
 
-def _feed(*, translate: bool = False, summarize: bool = False) -> FeedRow:
+def _feed(
+  *,
+  translate: bool = False,
+  summarize: bool = False,
+  url: str = "https://f.example.com/",
+) -> FeedRow:
   return repo.add_feed(
-    FeedRow(name="F", url="https://f.example.com/", translate=translate, summarize=summarize),
+    FeedRow(name="F", url=url, translate=translate, summarize=summarize),
   )
 
 
@@ -48,8 +54,9 @@ def _store(feed: FeedRow, url: str, snippet: str, *, age_min: int = 0) -> None:
     # Distinct ages keep list_pending_summaries' oldest-first order stable.
     published=datetime.now(tz=UTC) - timedelta(minutes=age_min),
     content_snippet=snippet,
+    feed_id=feed.id,
   )
-  repo.upsert_articles([article], {feed.name: feed.id})
+  repo.upsert_articles([article])
 
 
 def _fields(url: str) -> _Fields:
@@ -63,8 +70,17 @@ def _fields(url: str) -> _Fields:
   return row["title_translated"], row["summary"], row["content_translated"]
 
 
+def _llm_failures(url: str) -> int:
+  with db.connection() as conn:
+    row = conn.execute("SELECT llm_failures FROM articles WHERE url = %s", (url,)).fetchone()
+  assert row is not None
+  return row["llm_failures"]
+
+
 def _summarize_rows(rows: list[ArticleRow]) -> int:
-  return asyncio.run(fetcher._summarize_rows(rows, AppConfig(), log_prefix="test"))
+  """Runs the pass and returns its LLM failure count."""
+  outcome = asyncio.run(fetcher._summarize_rows(rows, AppConfig(), log_prefix="test"))
+  return outcome.failures
 
 
 @pytest.mark.usefixtures("clean_db")
@@ -90,12 +106,13 @@ class TestSummarizePending:
     assert _fields("mid")[1] == "S"
     assert _fields("new")[1] is None
 
-  def test_counts_rows_taken_even_when_the_llm_fails(self, fake: FakeOllama):
-    # Pins current behavior: the return value is the batch size, not successes.
-    _store(_feed(summarize=True), "u1", LONG)
-    fake.fail_titles.add("title of u1")
+  def test_counts_only_the_articles_it_completed(self, fake: FakeOllama):
+    feed = _feed(summarize=True)
+    _store(feed, "ok", LONG)
+    _store(feed, "bad", LONG)
+    fake.fail_titles.add("title of bad")
     assert asyncio.run(fetcher.summarize_pending(AppConfig())) == 1
-    assert _fields("u1") == (None, None, None)
+    assert _fields("bad") == (None, None, None)
 
 
 @pytest.mark.usefixtures("clean_db")
@@ -160,6 +177,55 @@ class TestSummarizeRows:
     rows = [row.model_copy(update={"feed_id": None}) for row in repo.list_pending_summaries()]
     assert _summarize_rows(rows) == 0
     assert fake.user_prompts == []
+    assert _llm_failures("u1") == 0
+
+  def test_same_named_feeds_keep_their_own_modes(self, fake: FakeOllama):
+    _store(_feed(translate=True, summarize=True, url="https://a.example.com/"), "a", LONG)
+    _store(_feed(summarize=True, url="https://b.example.com/"), "b", LONG)
+    assert _summarize_rows(repo.list_pending_summaries()) == 0
+    assert _fields("a") == ("T", "S", None)
+    assert _fields("b") == (None, "S", None)
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestFailureCap:
+  def test_a_failed_attempt_is_counted(self, fake: FakeOllama):
+    feed = _feed(summarize=True)
+    _store(feed, "ok", LONG)
+    _store(feed, "bad", LONG)
+    fake.fail_titles.add("title of bad")
+    _summarize_rows(repo.list_pending_summaries())
+    assert (_llm_failures("ok"), _llm_failures("bad")) == (0, 1)
+
+  def test_a_partial_answer_is_counted(self, fake: FakeOllama):
+    # Short foreign article: the title comes back but the body translation
+    # doesn't, so the article stays pending.
+    _store(_feed(translate=True), "u1", SHORT)
+    fake.reply = {"title_translated": "T", "content_translated": ""}
+    _summarize_rows(repo.list_pending_summaries())
+    assert _fields("u1") == ("T", None, None)
+    assert _llm_failures("u1") == 1
+
+  def test_an_ollama_side_error_is_not_counted(self, fake: FakeOllama):
+    _store(_feed(summarize=True), "u1", LONG)
+    fake.error = httpx.ConnectError("connection refused")
+    assert _summarize_rows(repo.list_pending_summaries()) == 1
+    assert _llm_failures("u1") == 0
+
+  def test_gives_up_after_the_last_allowed_attempt(
+    self,
+    fake: FakeOllama,
+    capsys: pytest.CaptureFixture[str],
+  ):
+    _store(_feed(summarize=True), "u1", LONG)
+    fake.fail_titles.add("title of u1")
+    for _ in range(repo.LLM_MAX_FAILURES - 1):
+      _summarize_rows(repo.list_pending_summaries())
+    assert [row.url for row in repo.list_pending_summaries()] == ["u1"]
+
+    _summarize_rows(repo.list_pending_summaries())
+    assert repo.list_pending_summaries() == []
+    assert "Giving up LLM processing for 1 articles" in capsys.readouterr().out
 
 
 class TestRunSummarize:
@@ -167,9 +233,12 @@ class TestRunSummarize:
   def calls(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     recorded: list[dict[str, Any]] = []
 
-    async def fake_summarize_all(articles: list[Article], **kwargs: Any) -> int:
+    async def fake_summarize_all(
+      articles: list[Article],
+      **kwargs: Any,
+    ) -> summarizer.SummarizeOutcome:
       recorded.append({"articles": articles, **kwargs})
-      return 2
+      return summarizer.SummarizeOutcome(failures=2)
 
     monkeypatch.setattr(fetcher, "summarize_all", fake_summarize_all)
     return recorded
@@ -178,7 +247,7 @@ class TestRunSummarize:
   def _run(articles: list[Article], config: AppConfig | None = None) -> int:
     return asyncio.run(
       fetcher._run_summarize(articles, {"src"}, {"src"}, config or AppConfig()),
-    )
+    ).failures
 
   def test_short_set_holds_non_empty_bodies_under_300_chars(self, calls: list[dict[str, Any]]):
     articles = [

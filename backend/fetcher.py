@@ -17,7 +17,7 @@ from models import Article
 from safe_http import FetchSettings, SafeClient
 from schemas import AppConfig, ArticleRow, FeedRow
 from seed import enrich_from_legacy_cache
-from summarizer import summarize_all
+from summarizer import SummarizeOutcome, summarize_all
 from url_cleaner import clean_url
 
 SHORT_SNIPPET_CHARS = 300
@@ -29,10 +29,6 @@ class RefreshResult:
   total_articles: int = 0
   new_count: int = 0
   summarize_failures: int = 0
-
-
-def _build_feed_id_map(feeds: list[FeedRow]) -> dict[str, int]:
-  return {f.name: f.id for f in feeds}
 
 
 def _needs_llm(article: Article, *, translate: bool, summarize: bool) -> bool:
@@ -108,7 +104,6 @@ def classify_outcome(
 
 async def _fetch_and_persist_feeds(
   feeds_cfg: list[dict[str, Any]],
-  feed_id_map: dict[str, int],
   config: AppConfig,
   *,
   update_schedule: bool = True,
@@ -138,7 +133,6 @@ async def _fetch_and_persist_feeds(
         inserted_count = await asyncio.to_thread(
           repo.upsert_articles,
           feed_articles,
-          feed_id_map,
         )
       except Exception as e:
         persist_exc = e
@@ -188,11 +182,10 @@ async def _run_summarize(
   config: AppConfig,
   *,
   log_prefix: str = "Processing",
-) -> int:
+) -> SummarizeOutcome:
   """Invoke the LLM to fill summary/translation fields on `need_llm` in place.
 
-  Returns the number of articles the LLM failed on. Shared by the bulk refresh
-  path and the background `summarize_pending` path.
+  Shared by the bulk refresh path and the background `summarize_pending` path.
   """
   short_set = {
     a.url for a in need_llm if a.content_snippet and len(a.content_snippet) < SHORT_SNIPPET_CHARS
@@ -201,7 +194,7 @@ async def _run_summarize(
   base_url = os.environ.get("OLLAMA_BASE_URL") or config.ollama.base_url
   timeout = config.ollama.timeout
   log.step(f"{log_prefix} {len(need_llm)} articles with {model}...")
-  failures: int = await summarize_all(
+  outcome: SummarizeOutcome = await summarize_all(
     need_llm,
     model=model,
     base_url=base_url,
@@ -211,11 +204,11 @@ async def _run_summarize(
     short_set=short_set,
     native_lang=config.native_lang,
   )
-  if failures:
-    log.warn(f"  Done ({failures}/{len(need_llm)} failed).")
+  if outcome.failures:
+    log.warn(f"  Done ({outcome.failures}/{len(need_llm)} failed).")
   else:
     log.success("  Done.")
-  return failures
+  return outcome
 
 
 @asynccontextmanager
@@ -250,8 +243,8 @@ async def _run_llm_pass(
   while we waited and picks up the latest stored body (another feed carrying
   the same URL may have rewritten it after this copy was taken).
   """
-  summarize_map = {f.name: f.summarize for f in feeds}
-  translate_map = {f.name: f.translate for f in feeds}
+  summarize_map = {f.id: f.summarize for f in feeds}
+  translate_map = {f.id: f.translate for f in feeds}
   # _needs_llm internalizes the feed-level gate: a feed with neither translate
   # nor summarize yields False for every article, so no separate gate is needed.
   candidate_urls = [
@@ -259,8 +252,8 @@ async def _run_llm_pass(
     for a in articles
     if _needs_llm(
       a,
-      translate=translate_map.get(a.source, False),
-      summarize=summarize_map.get(a.source, False),
+      translate=a.feed_id is not None and translate_map.get(a.feed_id, False),
+      summarize=a.feed_id is not None and summarize_map.get(a.feed_id, False),
     )
   ]
   if candidate_urls:
@@ -271,7 +264,8 @@ async def _run_llm_pass(
         urls=candidate_urls,
       )
       if pending:
-        return await _summarize_rows(pending, config, log_prefix="Processing")
+        rows_outcome = await _summarize_rows(pending, config, log_prefix="Processing")
+        return rows_outcome.failures
   log.success("  All articles already processed.")
   return 0
 
@@ -361,12 +355,10 @@ async def refresh_all(
         return result
 
       feeds_cfg = [f.to_feed_cfg() for f in feeds]
-      feed_id_map = _build_feed_id_map(feeds)
 
       log.step(f"Fetching feeds... ({len(feeds)} due, force={force})")
       articles, new_count = await _fetch_and_persist_feeds(
         feeds_cfg,
-        feed_id_map,
         config,
       )
       log.info(f"  {len(articles)} articles total, {new_count} new saved.")
@@ -385,7 +377,7 @@ async def refresh_all(
       )
       if restored:
         # The LLM pass re-reads rows from the DB, so store these first.
-        await asyncio.to_thread(repo.upsert_articles, restored, feed_id_map)
+        await asyncio.to_thread(repo.upsert_articles, restored)
 
       if no_summary or not config.ollama.enabled:
         if not no_summary:
@@ -411,7 +403,7 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
   """Process a batch of pending articles (feed.summarize/translate on, LLM
   output missing). Skips the round while another process holds the LLM lock.
 
-  Returns the number of articles processed.
+  Returns the number of articles completed.
   """
   if not config.ollama.enabled:
     return 0
@@ -422,8 +414,14 @@ async def summarize_pending(config: AppConfig, batch_size: int = 5) -> int:
     pending = await asyncio.to_thread(repo.list_pending_summaries, limit=batch_size)
     if not pending:
       return 0
-    await _summarize_rows(pending, config, log_prefix="Background processing")
-    return len(pending)
+    outcome = await _summarize_rows(pending, config, log_prefix="Background processing")
+    return outcome.completed
+
+
+@dataclass
+class _RowsOutcome:
+  completed: int
+  failures: int
 
 
 async def _summarize_rows(
@@ -431,9 +429,13 @@ async def _summarize_rows(
   config: AppConfig,
   *,
   log_prefix: str,
-) -> int:
+) -> _RowsOutcome:
   """Run the LLM over pending DB rows and store its output. Callers must hold
-  the LLM lock through the store. Returns the number of LLM failures.
+  the LLM lock through the store.
+
+  Every row the LLM leaves pending counts one failed attempt toward
+  repo.LLM_MAX_FAILURES, so an article it can't finish stops being retried.
+  Rows that failed on Ollama's side (unreachable, HTTP error) are spared.
   """
   feeds = await asyncio.to_thread(repo.list_feeds, enabled=True)
   feed_translate = {f.id: f.translate for f in feeds}
@@ -450,30 +452,32 @@ async def _summarize_rows(
       summary=row.summary or "",
       content_html=row.content_html or "",
       content_translated=row.content_translated or "",
+      feed_id=row.feed_id,
     )
     for row in rows
   ]
+  # Keyed by URL, not feed name: names aren't unique, and old rows keep the
+  # name the feed had when they were fetched.
   translate_set: set[str] = {
-    row.source for row in rows if row.feed_id and feed_translate.get(row.feed_id, False)
+    row.url for row in rows if row.feed_id and feed_translate.get(row.feed_id, False)
   }
   summarize_set: set[str] = {
-    row.source for row in rows if row.feed_id and feed_summarize.get(row.feed_id, False)
+    row.url for row in rows if row.feed_id and feed_summarize.get(row.feed_id, False)
   }
-  need_llm = [
-    a
-    for a in articles
-    if _needs_llm(a, translate=a.source in translate_set, summarize=a.source in summarize_set)
-  ]
-  if not need_llm:
-    return 0
 
-  failures = await _run_summarize(
-    need_llm,
-    translate_set,
-    summarize_set,
-    config,
-    log_prefix=log_prefix,
-  )
+  def needs_llm(a: Article) -> bool:
+    return _needs_llm(a, translate=a.url in translate_set, summarize=a.url in summarize_set)
+
+  need_llm = [a for a in articles if needs_llm(a)]
+  outcome = SummarizeOutcome()
+  if need_llm:
+    outcome = await _run_summarize(
+      need_llm,
+      translate_set,
+      summarize_set,
+      config,
+      log_prefix=log_prefix,
+    )
   for article in need_llm:
     if article.title_translated or article.summary or article.content_translated:
       await asyncio.to_thread(
@@ -483,4 +487,17 @@ async def _summarize_rows(
         article.summary or None,
         article.content_translated or None,
       )
-  return failures
+
+  completed: list[str] = [a.url for a in need_llm if not needs_llm(a)]
+  # Still pending after the LLM ran: an error or a partial answer.
+  failed: list[str] = [
+    a.url for a in need_llm if a.url not in outcome.ollama_errors and needs_llm(a)
+  ]
+  if failed:
+    given_up = await asyncio.to_thread(repo.record_llm_failures, failed)
+    if given_up:
+      log.warn(
+        f"  Giving up LLM processing for {len(given_up)} articles "
+        f"after {repo.LLM_MAX_FAILURES} failed attempts."
+      )
+  return _RowsOutcome(completed=len(completed), failures=outcome.failures)

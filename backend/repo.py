@@ -39,6 +39,10 @@ REFRESH_LOCK_KEY = 0xFEEDCAFE  # bigint key for pg_try_advisory_lock
 # web's background summarizer would otherwise pick up the same pending rows.
 SUMMARIZE_LOCK_KEY = 0xFEEDC0DE
 
+# Failed LLM attempts after which an article leaves the pending queue.
+# Failures on Ollama's side don't count (see summarizer.SummarizeOutcome).
+LLM_MAX_FAILURES = 5
+
 Outcome = Literal["fresh", "miss", "degraded", "failure"]
 
 
@@ -795,9 +799,9 @@ def _merge_articles(prev: Article, curr: Article) -> Article:
   - The columns that `ON CONFLICT DO UPDATE` actually rewrites
     (content_html/content_snippet/title_translated/summary/content_translated)
     are merged with `later non-empty wins`.
-  - The columns that are only set on INSERT (title/source/published, and
-    therefore the derived feed_id) keep the first row's values — under the
-    old loop, the second row's UPSERT would not touch these.
+  - The columns that are only set on INSERT (title/source/published/feed_id)
+    keep the first row's values — under the old loop, the second row's
+    UPSERT would not touch these.
   """
   return Article(
     url=prev.url,
@@ -805,6 +809,7 @@ def _merge_articles(prev: Article, curr: Article) -> Article:
     title=prev.title,
     source=prev.source,
     published=prev.published,
+    feed_id=prev.feed_id,
     # COALESCE-managed columns: later non-empty wins.
     content_snippet=curr.content_snippet or prev.content_snippet,
     title_translated=curr.title_translated or prev.title_translated,
@@ -814,7 +819,7 @@ def _merge_articles(prev: Article, curr: Article) -> Article:
   )
 
 
-def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None = None) -> int:
+def upsert_articles(articles: list[Article]) -> int:
   """Insert new articles; update content_* on existing ones if newly available.
 
   Returns count of newly inserted rows (not updates).
@@ -833,7 +838,6 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
   """
   if not articles:
     return 0
-  feed_id_map = feed_id_map or {}
   merged: dict[str, Article] = {}
   for a in articles:
     prev = merged.get(a.url)
@@ -864,7 +868,7 @@ def upsert_articles(articles: list[Article], feed_id_map: dict[str, int] | None 
         params.extend(
           (
             a.url,
-            feed_id_map.get(a.source),
+            a.feed_id,
             a.title,
             a.title_translated or None,
             a.source,
@@ -977,6 +981,7 @@ def list_pending_summaries(
   """Find articles of enabled feeds needing LLM processing, oldest first.
 
   `limit=None` returns all of them; `urls` narrows the search to those rows.
+  Articles that used up LLM_MAX_FAILURES attempts are left out for good.
 
   Condition must match `fetcher._needs_llm`. The feed-level gate is
   `translate OR summarize`; the article-level done-condition depends on
@@ -991,6 +996,7 @@ def list_pending_summaries(
       """SELECT a.* FROM articles a
          JOIN feeds f ON a.feed_id = f.id
          WHERE f.enabled
+           AND a.llm_failures < %(max_failures)s
            AND (%(urls)s::text[] IS NULL OR a.url = ANY(%(urls)s))
            AND (
              (f.translate AND (
@@ -1007,9 +1013,24 @@ def list_pending_summaries(
            )
          ORDER BY a.published ASC
          LIMIT %(limit)s""",
-      {"urls": urls, "limit": limit},
+      {"urls": urls, "limit": limit, "max_failures": LLM_MAX_FAILURES},
     ).fetchall()
     return [ArticleRow.model_validate(r) for r in rows]
+
+
+def record_llm_failures(urls: list[str]) -> list[str]:
+  """Count one failed LLM attempt for each of `urls`. Returns the ones that
+  just reached LLM_MAX_FAILURES and drop out of the pending queue."""
+  if not urls:
+    return []
+  with db.connection() as conn:
+    rows = conn.execute(
+      """UPDATE articles SET llm_failures = llm_failures + 1
+         WHERE url = ANY(%s)
+         RETURNING url, llm_failures""",
+      (urls,),
+    ).fetchall()
+    return [r["url"] for r in rows if r["llm_failures"] == LLM_MAX_FAILURES]
 
 
 def update_article_summary(

@@ -13,3 +13,6 @@ class Article:
   summary: str = ""
   content_html: str = ""
   content_translated: str = ""
+  # The feed row this article was fetched for. None for ad-hoc fetches (e.g.
+  # extraction previews) that aren't tied to a stored feed.
+  feed_id: int | None = None

@@ -27,6 +27,8 @@ class FakeOllama:
     self.prompts: list[str] = []
     self.user_prompts: list[str] = []
     self.fail_titles: set[str] = set()
+    # Raised from every call, e.g. to act as if Ollama were down.
+    self.error: Exception | None = None
 
   async def __call__(
     self,
@@ -37,6 +39,8 @@ class FakeOllama:
   ) -> dict[str, Any]:
     self.prompts.append(system_prompt)
     self.user_prompts.append(user_prompt)
+    if self.error is not None:
+      raise self.error
     for title in self.fail_titles:
       if user_prompt.startswith(f"Title: {title}\n"):
         raise RuntimeError("boom")

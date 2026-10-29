@@ -62,7 +62,6 @@ def _persist(feeds: list[FeedRow]) -> tuple[list[Article], int]:
   return asyncio.run(
     fetcher._fetch_and_persist_feeds(
       [f.to_feed_cfg() for f in feeds],
-      fetcher._build_feed_id_map(feeds),
       AppConfig(),
     )
   )
@@ -127,10 +126,10 @@ class TestFetchAndPersist:
     )
     real_upsert = repo.upsert_articles
 
-    def flaky_upsert(articles: list[Article], feed_id_map: dict[str, int]) -> int:
-      if articles[0].source == "bad":
+    def flaky_upsert(articles: list[Article]) -> int:
+      if articles[0].feed_id == bad.id:
         raise RuntimeError("disk full")
-      return real_upsert(articles, feed_id_map)
+      return real_upsert(articles)
 
     monkeypatch.setattr(repo, "upsert_articles", flaky_upsert)
 
@@ -142,6 +141,28 @@ class TestFetchAndPersist:
     state = _feed_state(bad.id)
     assert state["health"] == "failing"
     assert state["last_error"] == "RuntimeError: disk full"
+
+  def test_same_named_feeds_store_articles_under_their_own_ids(
+    self,
+    monkeypatch: pytest.MonkeyPatch,
+  ) -> None:
+    feeds = [
+      repo.add_feed(FeedRow(name="Same", url=f"https://{host}.example.com/feed"))
+      for host in ("a", "b")
+    ]
+    stub_network(
+      monkeypatch,
+      lambda req: httpx.Response(200, text=rss((f"https://{req.url.host}/1", NOW))),
+    )
+
+    _persist(feeds)
+
+    with db.connection() as conn:
+      rows = conn.execute("SELECT url, feed_id FROM articles ORDER BY url").fetchall()
+    assert [(r["url"], r["feed_id"]) for r in rows] == [
+      ("https://a.example.com/1", feeds[0].id),
+      ("https://b.example.com/1", feeds[1].id),
+    ]
 
   def test_new_count_sums_every_feed(self, monkeypatch: pytest.MonkeyPatch) -> None:
     feeds = [_add_feed(f"f{i}") for i in range(3)]

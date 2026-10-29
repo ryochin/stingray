@@ -27,11 +27,13 @@ pytestmark = pytest.mark.usefixtures("clean_db")
 
 def _seed_two_articles() -> None:
   with db.connection() as conn:
-    conn.execute(
+    row = conn.execute(
       """INSERT INTO feeds (name, url, translate, summarize, enabled)
          VALUES ('F', 'https://f.example.com/rss', FALSE, TRUE, TRUE)
          RETURNING id"""
     ).fetchone()
+    assert row is not None
+  feed_id = int(row["id"])
   repo.upsert_articles(
     [
       Article(
@@ -40,6 +42,7 @@ def _seed_two_articles() -> None:
         source="F",
         published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC),
         content_snippet="body",
+        feed_id=feed_id,
       ),
       Article(
         title="new",
@@ -47,9 +50,9 @@ def _seed_two_articles() -> None:
         source="F",
         published=datetime(2026, 5, 21, 8, 0, 0, tzinfo=UTC),
         content_snippet="body",
+        feed_id=feed_id,
       ),
     ],
-    {"F": 1},
   )
 
 

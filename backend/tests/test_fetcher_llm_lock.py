@@ -22,6 +22,7 @@ import fetcher
 import repo
 from models import Article
 from schemas import AppConfig, FeedRow
+from summarizer import SummarizeOutcome
 
 pytestmark = pytest.mark.usefixtures("clean_db")
 
@@ -38,11 +39,11 @@ def llm_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     need_llm: list[Article],
     *_args: Any,
     **_kwargs: Any,
-  ) -> int:
+  ) -> SummarizeOutcome:
     for article in need_llm:
       calls.append((article.url, article.content_snippet))
       article.summary = f"summary of {article.url}"
-    return 0
+    return SummarizeOutcome()
 
   monkeypatch.setattr(fetcher, "_run_summarize", fake_run_summarize)
   monkeypatch.setattr(fetcher, "SUMMARIZE_LOCK_POLL_SECONDS", 0.01)
@@ -60,8 +61,9 @@ def _store(feed: FeedRow, url: str, snippet: str) -> Article:
     source=feed.name,
     published=datetime.now(tz=UTC),
     content_snippet=snippet,
+    feed_id=feed.id,
   )
-  repo.upsert_articles([article], {feed.name: feed.id})
+  repo.upsert_articles([article])
   return article
 
 

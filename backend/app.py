@@ -465,7 +465,7 @@ async def _fetch_single_feed(feed: FeedRow, config: AppConfig) -> None:
       )
     new_count = 0
     if articles:
-      new_count = await asyncio.to_thread(repo.upsert_articles, articles, {feed.name: feed.id})
+      new_count = await asyncio.to_thread(repo.upsert_articles, articles)
       log.info(f"  Saved: {new_count} new / {len(articles)} total (existing skipped).")
     # Unlike fetcher._backfill_site_urls, web feeds are probed too: once their
     # page is fetched, _probe_feed fills site_url with the page URL in one go.

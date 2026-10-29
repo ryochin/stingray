@@ -221,3 +221,22 @@ class TestScope:
       conn.execute("UPDATE feeds SET enabled = FALSE WHERE id = %s", (fid,))
     _make_article(feed_id=fid, url="u1")
     assert repo.list_pending_summaries() == []
+
+
+class TestFailureCap:
+  def test_record_llm_failures_reports_the_articles_it_gives_up_on(self):
+    fid = _make_feed(translate=True, summarize=True)
+    _make_article(feed_id=fid, url="near")
+    _make_article(feed_id=fid, url="fresh")
+    for _ in range(repo.LLM_MAX_FAILURES - 1):
+      repo.record_llm_failures(["near"])
+    assert repo.record_llm_failures(["near", "fresh", "missing"]) == ["near"]
+    assert repo.record_llm_failures([]) == []
+
+  def test_given_up_article_is_never_pending(self):
+    fid = _make_feed(translate=True, summarize=True)
+    _make_article(feed_id=fid, url="u1")
+    _make_article(feed_id=fid, url="u2")
+    for _ in range(repo.LLM_MAX_FAILURES):
+      repo.record_llm_failures(["u1"])
+    assert _urls(repo.list_pending_summaries()) == {"u2"}

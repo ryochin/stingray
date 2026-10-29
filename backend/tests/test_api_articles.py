@@ -37,11 +37,15 @@ def _seed() -> None:
   repo.upsert_articles(
     [
       Article(
-        title="T", url=url, source="F", published=now - timedelta(hours=h), content_snippet="body"
+        title="T",
+        url=url,
+        source="F",
+        published=now - timedelta(hours=h),
+        content_snippet="body",
+        feed_id=int(row["id"]),
       )
       for url, h in (("unread", 5), ("read", 1))
     ],
-    {"F": int(row["id"])},
   )
   repo.mark_read(["read"])
 

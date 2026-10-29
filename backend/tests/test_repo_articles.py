@@ -33,6 +33,7 @@ def _art(
   content_translated: str = "",
   content_snippet: str = "body",
   published: datetime | None = None,
+  feed_id: int | None = None,
 ) -> Article:
   return Article(
     title=title,
@@ -44,6 +45,7 @@ def _art(
     summary=summary,
     content_html=content_html,
     content_translated=content_translated,
+    feed_id=feed_id,
   )
 
 
@@ -53,7 +55,7 @@ pytestmark = pytest.mark.usefixtures("clean_db")
 class TestUpsertArticles:
   def test_inserts_new_articles_and_reports_count(self):
     fid = _make_feed(name="F")
-    n = repo.upsert_articles([_art(url="u1"), _art(url="u2")], {"F": fid})
+    n = repo.upsert_articles([_art(url="u1", feed_id=fid), _art(url="u2", feed_id=fid)])
     assert n == 2
     assert len(repo.list_articles()) == 2
 
@@ -62,17 +64,17 @@ class TestUpsertArticles:
 
   def test_duplicate_url_does_not_count_as_new(self):
     fid = _make_feed(name="F")
-    repo.upsert_articles([_art(url="u1", content_snippet="first")], {"F": fid})
-    n = repo.upsert_articles([_art(url="u1", content_snippet="second")], {"F": fid})
+    repo.upsert_articles([_art(url="u1", content_snippet="first", feed_id=fid)])
+    n = repo.upsert_articles([_art(url="u1", content_snippet="second", feed_id=fid)])
     assert n == 0
 
   def test_mixed_batch_counts_only_new(self):
     # Batched multi-row INSERT must distinguish inserts from updates within
     # the same statement (xmax = 0 per row) and return the new-row count.
     fid = _make_feed(name="F")
-    repo.upsert_articles([_art(url="u1"), _art(url="u2")], {"F": fid})
-    batch = [_art(url=u) for u in ("u1", "u2", "u3", "u4", "u5")]
-    n = repo.upsert_articles(batch, {"F": fid})
+    repo.upsert_articles([_art(url="u1", feed_id=fid), _art(url="u2", feed_id=fid)])
+    batch = [_art(url=u, feed_id=fid) for u in ("u1", "u2", "u3", "u4", "u5")]
+    n = repo.upsert_articles(batch)
     assert n == 3
     assert len(repo.list_articles()) == 5
 
@@ -82,8 +84,7 @@ class TestUpsertArticles:
     # duplicates before the multi-row INSERT.
     fid = _make_feed(name="F")
     n = repo.upsert_articles(
-      [_art(url="u1", summary="first"), _art(url="u1", summary="second")],
-      {"F": fid},
+      [_art(url="u1", summary="first", feed_id=fid), _art(url="u1", summary="second", feed_id=fid)]
     )
     assert n == 1
     rows = repo.list_articles()
@@ -102,10 +103,9 @@ class TestUpsertArticles:
     late = datetime(2026, 6, 1, tzinfo=UTC)
     n = repo.upsert_articles(
       [
-        _art(url="u1", title="first-title", source="A", summary="", published=early),
+        _art(url="u1", title="first-title", source="A", summary="", published=early, feed_id=f1),
         _art(url="u1", title="second-title", source="B", summary="late", published=late),
-      ],
-      {"A": f1},
+      ]
     )
     assert n == 1
     rows = repo.list_articles()
@@ -123,10 +123,9 @@ class TestUpsertArticles:
     fid = _make_feed(name="F")
     n = repo.upsert_articles(
       [
-        _art(url="u1", summary="rich", content_html="<p>full</p>"),
-        _art(url="u1", summary="", content_html=""),
-      ],
-      {"F": fid},
+        _art(url="u1", summary="rich", content_html="<p>full</p>", feed_id=fid),
+        _art(url="u1", summary="", content_html="", feed_id=fid),
+      ]
     )
     assert n == 1
     rows = repo.list_articles()
@@ -138,10 +137,9 @@ class TestUpsertArticles:
     fid = _make_feed(name="F")
     repo.upsert_articles(
       [
-        _art(url="u1", summary="early"),
-        _art(url="u1", summary="late"),
-      ],
-      {"F": fid},
+        _art(url="u1", summary="early", feed_id=fid),
+        _art(url="u1", summary="late", feed_id=fid),
+      ]
     )
     rows = repo.list_articles()
     assert rows[0].summary == "late"
@@ -157,14 +155,13 @@ class TestUpsertArticles:
           title_translated="Translated title 1",
           summary="Summary text 1",
           content_snippet="a",
+          feed_id=fid,
         )
-      ],
-      {"F": fid},
+      ]
     )
     # Second pass: empty summary/translation must be preserved; content_html gets filled.
     repo.upsert_articles(
-      [_art(url="u1", content_html="<p>hi</p>", content_snippet="")],
-      {"F": fid},
+      [_art(url="u1", content_html="<p>hi</p>", content_snippet="", feed_id=fid)]
     )
     rows = repo.list_articles()
     assert len(rows) == 1
@@ -173,14 +170,32 @@ class TestUpsertArticles:
     assert a.summary == "Summary text 1"
     assert a.content_html == "<p>hi</p>"
 
-  def test_feed_id_mapping_links_article_to_feed(self):
+  def test_feed_id_links_article_to_feed(self):
     fid = _make_feed(name="F")
-    repo.upsert_articles([_art(url="u1", source="F")], {"F": fid})
+    repo.upsert_articles([_art(url="u1", feed_id=fid)])
     rows = repo.list_articles(feed_id=fid)
     assert [r.url for r in rows] == ["u1"]
 
-  def test_unknown_source_has_null_feed_id(self):
-    repo.upsert_articles([_art(url="u1", source="unknown")], {})
+  def test_same_named_feeds_keep_their_own_articles(self):
+    with db.connection() as conn:
+      ids = [
+        conn.execute(
+          "INSERT INTO feeds (name, url) VALUES ('Same', %s) RETURNING id",
+          (url,),
+        ).fetchone()["id"]
+        for url in ("https://a.example.com/", "https://b.example.com/")
+      ]
+    repo.upsert_articles(
+      [
+        _art(url="a1", source="Same", feed_id=ids[0]),
+        _art(url="b1", source="Same", feed_id=ids[1]),
+      ]
+    )
+    assert [r.url for r in repo.list_articles(feed_id=ids[0])] == ["a1"]
+    assert [r.url for r in repo.list_articles(feed_id=ids[1])] == ["b1"]
+
+  def test_article_without_feed_id_stays_unlinked(self):
+    repo.upsert_articles([_art(url="u1", source="unknown")])
     rows = repo.list_articles()
     assert rows[0].feed_id is None
 
@@ -188,7 +203,7 @@ class TestUpsertArticles:
 class TestReadState:
   def test_mark_read_sets_read_at(self):
     fid = _make_feed()
-    repo.upsert_articles([_art(url="u1"), _art(url="u2")], {"F": fid})
+    repo.upsert_articles([_art(url="u1", feed_id=fid), _art(url="u2", feed_id=fid)])
     repo.mark_read(["u1"])
     rows = {r.url: r for r in repo.list_articles()}
     assert rows["u1"].read_at is not None
@@ -196,7 +211,7 @@ class TestReadState:
 
   def test_mark_unread_clears_read_at(self):
     fid = _make_feed()
-    repo.upsert_articles([_art(url="u1")], {"F": fid})
+    repo.upsert_articles([_art(url="u1", feed_id=fid)])
     repo.mark_read(["u1"])
     repo.mark_unread(["u1"])
     assert repo.list_articles()[0].read_at is None
@@ -204,8 +219,8 @@ class TestReadState:
   def test_mark_all_read_scoped_to_feed(self):
     f1 = _make_feed(name="A")
     f2 = _make_feed(name="B")
-    repo.upsert_articles([_art(url="a1", source="A")], {"A": f1})
-    repo.upsert_articles([_art(url="b1", source="B")], {"B": f2})
+    repo.upsert_articles([_art(url="a1", source="A", feed_id=f1)])
+    repo.upsert_articles([_art(url="b1", source="B", feed_id=f2)])
     n = repo.mark_all_read(feed_id=f1)
     assert n == 1
     by_url = {r.url: r for r in repo.list_articles()}
@@ -217,8 +232,8 @@ class TestReadState:
     f1 = _make_feed(name="A")
     f2 = _make_feed(name="B")
     repo.move_feed_to_folder(f1, folder.id)
-    repo.upsert_articles([_art(url="a1", source="A")], {"A": f1})
-    repo.upsert_articles([_art(url="b1", source="B")], {"B": f2})
+    repo.upsert_articles([_art(url="a1", source="A", feed_id=f1)])
+    repo.upsert_articles([_art(url="b1", source="B", feed_id=f2)])
     n = repo.mark_all_read(folder_id=folder.id)
     assert n == 1
     by_url = {r.url: r for r in repo.list_articles()}
@@ -230,8 +245,8 @@ class TestReadState:
     f1 = _make_feed(name="A")
     f2 = _make_feed(name="B")
     repo.move_feed_to_folder(f1, folder.id)
-    repo.upsert_articles([_art(url="a1", source="A")], {"A": f1})
-    repo.upsert_articles([_art(url="b1", source="B")], {"B": f2})
+    repo.upsert_articles([_art(url="a1", source="A", feed_id=f1)])
+    repo.upsert_articles([_art(url="b1", source="B", feed_id=f2)])
     repo.mark_read(["a1", "b1"])
     n = repo.mark_all_unread(folder_id=folder.id)
     assert n == 1
@@ -241,13 +256,13 @@ class TestReadState:
 
   def test_mark_all_read_global(self):
     fid = _make_feed()
-    repo.upsert_articles([_art(url="u1"), _art(url="u2")], {"F": fid})
+    repo.upsert_articles([_art(url="u1", feed_id=fid), _art(url="u2", feed_id=fid)])
     assert repo.mark_all_read() == 2
     assert all(r.read_at is not None for r in repo.list_articles())
 
   def test_list_articles_unread_filter(self):
     fid = _make_feed()
-    repo.upsert_articles([_art(url="u1"), _art(url="u2")], {"F": fid})
+    repo.upsert_articles([_art(url="u1", feed_id=fid), _art(url="u2", feed_id=fid)])
     repo.mark_read(["u1"])
     unread = repo.list_articles(unread=True)
     assert [r.url for r in unread] == ["u2"]
@@ -263,7 +278,7 @@ class TestMarkReadEdgeCases:
 class TestSinceDaysFilter:
   def test_none_returns_all(self):
     fid = _make_feed()
-    repo.upsert_articles([_art(url="u1"), _art(url="u2")], {"F": fid})
+    repo.upsert_articles([_art(url="u1", feed_id=fid), _art(url="u2", feed_id=fid)])
     assert len(repo.list_articles(since_days=None)) == 2
 
   def test_filters_by_published(self):
@@ -271,10 +286,9 @@ class TestSinceDaysFilter:
     now = datetime.now(tz=UTC)
     repo.upsert_articles(
       [
-        _art(url="recent", published=now - timedelta(days=2)),
-        _art(url="old", published=now - timedelta(days=30)),
-      ],
-      {"F": fid},
+        _art(url="recent", published=now - timedelta(days=2), feed_id=fid),
+        _art(url="old", published=now - timedelta(days=30), feed_id=fid),
+      ]
     )
     urls = {r.url for r in repo.list_articles(since_days=7)}
     assert urls == {"recent"}
@@ -305,11 +319,10 @@ class TestSinceDaysFilter:
     now = datetime.now(tz=UTC)
     repo.upsert_articles(
       [
-        _art(url="a-recent", source="A", published=now - timedelta(days=1)),
-        _art(url="a-old", source="A", published=now - timedelta(days=30)),
-        _art(url="b-recent", source="B", published=now - timedelta(days=1)),
-      ],
-      {"A": f1, "B": f2},
+        _art(url="a-recent", source="A", published=now - timedelta(days=1), feed_id=f1),
+        _art(url="a-old", source="A", published=now - timedelta(days=30), feed_id=f1),
+        _art(url="b-recent", source="B", published=now - timedelta(days=1), feed_id=f2),
+      ]
     )
     repo.mark_read(["a-recent"])
     rows = repo.list_articles(feed_id=f1, unread=True, since_days=7)
@@ -321,7 +334,7 @@ class TestSinceDaysFilter:
 class TestPruneArticles:
   def test_deletes_only_old_articles(self):
     fid = _make_feed()
-    repo.upsert_articles([_art(url="fresh")], {"F": fid})
+    repo.upsert_articles([_art(url="fresh", feed_id=fid)])
     # Backdate one directly.
     with db.connection() as conn:
       conn.execute(
@@ -399,8 +412,7 @@ class TestListArticlesOrderStability:
   def test_full_tie_order_is_stable_and_url_asc(self):
     fid = _make_feed()
     repo.upsert_articles(
-      [_art(url="u-c"), _art(url="u-a"), _art(url="u-b")],
-      {"F": fid},
+      [_art(url="u-c", feed_id=fid), _art(url="u-a", feed_id=fid), _art(url="u-b", feed_id=fid)]
     )
     pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC)
     fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=UTC)
@@ -417,8 +429,7 @@ class TestListArticlesOrderStability:
   def test_limit_boundary_set_is_stable(self):
     fid = _make_feed()
     repo.upsert_articles(
-      [_art(url="u-c"), _art(url="u-a"), _art(url="u-b")],
-      {"F": fid},
+      [_art(url="u-c", feed_id=fid), _art(url="u-a", feed_id=fid), _art(url="u-b", feed_id=fid)]
     )
     pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC)
     fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=UTC)
@@ -438,8 +449,7 @@ class TestListArticlesOrderStability:
   def test_fetched_at_breaks_published_tie(self):
     fid = _make_feed()
     repo.upsert_articles(
-      [_art(url="u-old-fetch"), _art(url="u-new-fetch")],
-      {"F": fid},
+      [_art(url="u-old-fetch", feed_id=fid), _art(url="u-new-fetch", feed_id=fid)]
     )
     pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC)
     self._force_timestamps(
@@ -460,10 +470,7 @@ class TestListArticlesOrderStability:
 
   def test_published_null_group_orders_by_fetched_at(self):
     fid = _make_feed()
-    repo.upsert_articles(
-      [_art(url="u-early"), _art(url="u-late")],
-      {"F": fid},
-    )
+    repo.upsert_articles([_art(url="u-early", feed_id=fid), _art(url="u-late", feed_id=fid)])
     self._force_timestamps(
       "u-early",
       published=None,
@@ -483,10 +490,7 @@ class TestListArticlesOrderStability:
 
   def test_order_newest_keeps_descending(self):
     fid = _make_feed()
-    repo.upsert_articles(
-      [_art(url="u-old"), _art(url="u-new")],
-      {"F": fid},
-    )
+    repo.upsert_articles([_art(url="u-old", feed_id=fid), _art(url="u-new", feed_id=fid)])
     self._force_timestamps(
       "u-old",
       published=datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC),
@@ -505,8 +509,7 @@ class TestListArticlesOrderStability:
   def test_order_newest_full_tie_is_url_desc(self):
     fid = _make_feed()
     repo.upsert_articles(
-      [_art(url="u-c"), _art(url="u-a"), _art(url="u-b")],
-      {"F": fid},
+      [_art(url="u-c", feed_id=fid), _art(url="u-a", feed_id=fid), _art(url="u-b", feed_id=fid)]
     )
     pub = datetime(2026, 5, 20, 8, 0, 0, tzinfo=UTC)
     fetched = datetime(2026, 5, 20, 14, 30, 0, tzinfo=UTC)
@@ -538,13 +541,12 @@ class TestListArticlesReadWithinHours:
     now = datetime.now(tz=UTC)
     repo.upsert_articles(
       [
-        _art(url="old-unread", published=now - timedelta(days=30)),
-        _art(url="read-stale", published=now - timedelta(days=2)),
-        _art(url="read-1", published=now - timedelta(hours=3)),
-        _art(url="read-2", published=now - timedelta(hours=2)),
-        _art(url="read-3", published=now - timedelta(hours=1)),
-      ],
-      {"F": fid},
+        _art(url="old-unread", published=now - timedelta(days=30), feed_id=fid),
+        _art(url="read-stale", published=now - timedelta(days=2), feed_id=fid),
+        _art(url="read-1", published=now - timedelta(hours=3), feed_id=fid),
+        _art(url="read-2", published=now - timedelta(hours=2), feed_id=fid),
+        _art(url="read-3", published=now - timedelta(hours=1), feed_id=fid),
+      ]
     )
     _set_read_at("read-stale", hours_ago=48)
     for url in ("read-1", "read-2", "read-3"):

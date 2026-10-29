@@ -145,6 +145,9 @@ BEGIN
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS feeds_url_uniq ON feeds(url);
 """,
+  # 4: failed LLM attempts per article, so one the LLM can't finish stops
+  # being retried (repo.LLM_MAX_FAILURES).
+  "ALTER TABLE articles ADD COLUMN IF NOT EXISTS llm_failures INTEGER NOT NULL DEFAULT 0",
 ]
 
 # Name of the unique index created by migration 3 (repo maps its violation).

@@ -341,6 +341,7 @@ def _parse_rss(
 ) -> list[Article]:
   max_items: int = feed_cfg.get("max_items", 200)
   source: str = feed_cfg["name"]
+  feed_id: int | None = feed_cfg.get("id")
   parsed = _parse_feed(body)
   item_images = _extract_item_images(body)
 
@@ -397,6 +398,7 @@ def _parse_rss(
         published=published,
         content_snippet=_truncate(snippet),
         content_html=raw_html,
+        feed_id=feed_id,
       )
     )
 

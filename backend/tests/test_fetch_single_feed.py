@@ -51,7 +51,7 @@ class Recorder:
 def rec(monkeypatch: pytest.MonkeyPatch) -> Recorder:
   recorder = Recorder()
 
-  def upsert(articles: list[Article], _feed_id_map: dict[str, int]) -> int:
+  def upsert(articles: list[Article]) -> int:
     if recorder.upsert_error is not None:
       raise recorder.upsert_error
     recorder.upserted.append(articles)

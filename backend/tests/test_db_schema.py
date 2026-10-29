@@ -111,6 +111,13 @@ def test_empty_database_is_created_at_latest_version(conn: db.Conn) -> None:
   assert _feeds_checks(conn) == EXPECTED_CHECKS
 
 
+def test_articles_start_with_no_llm_failures(conn: db.Conn) -> None:
+  db.migrate(conn)
+  conn.execute("INSERT INTO articles (url, title, source) VALUES ('u', 't', 's')")
+  row = conn.execute("SELECT llm_failures FROM articles").fetchone()
+  assert row == {"llm_failures": 0}
+
+
 def test_legacy_database_is_upgraded_and_loses_the_duplicate_check(conn: db.Conn) -> None:
   _make_legacy(conn)
   assert "feeds_fetch_interval_min_check" in _feeds_checks(conn)
@@ -208,7 +215,7 @@ def test_feed_url_becomes_unique_and_null_urls_stay_allowed(conn: db.Conn) -> No
   db.migrate(conn)
   conn.commit()
 
-  assert _version(conn) == 3
+  assert _version(conn) == len(db._MIGRATIONS)
   conn.execute("INSERT INTO feeds (name, url) VALUES ('n3', NULL)")
   with pytest.raises(psycopg.errors.UniqueViolation) as excinfo:
     conn.execute("INSERT INTO feeds (name, url) VALUES ('a2', 'https://a.example.com/')")
