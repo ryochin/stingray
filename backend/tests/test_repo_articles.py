@@ -178,13 +178,16 @@ class TestUpsertArticles:
 
   def test_same_named_feeds_keep_their_own_articles(self):
     with db.connection() as conn:
-      ids = [
-        conn.execute(
+
+      def insert_feed(url: str) -> int:
+        row = conn.execute(
           "INSERT INTO feeds (name, url) VALUES ('Same', %s) RETURNING id",
           (url,),
-        ).fetchone()["id"]
-        for url in ("https://a.example.com/", "https://b.example.com/")
-      ]
+        ).fetchone()
+        assert row is not None
+        return int(row["id"])
+
+      ids = [insert_feed(url) for url in ("https://a.example.com/", "https://b.example.com/")]
     repo.upsert_articles(
       [
         _art(url="a1", source="Same", feed_id=ids[0]),

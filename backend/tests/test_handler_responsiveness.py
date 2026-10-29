@@ -26,7 +26,7 @@ import asyncio
 import contextlib
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from types import SimpleNamespace
 from typing import Any
 
@@ -48,15 +48,18 @@ _TIMEOUT = 10.0
 def stub_health_db(monkeypatch: pytest.MonkeyPatch):
   """/api/health only proves the loop is alive here, so keep it off the DB."""
 
+  def execute(*_args: object, **_kwargs: object) -> SimpleNamespace:
+    return SimpleNamespace(fetchone=lambda: (1,))
+
   @contextlib.contextmanager
   def fake_connection() -> Iterator[Any]:
-    yield SimpleNamespace(execute=lambda *a, **kw: SimpleNamespace(fetchone=lambda: (1,)))
+    yield SimpleNamespace(execute=execute)
 
   monkeypatch.setattr(app.db, "connection", fake_connection)
 
 
 @contextlib.asynccontextmanager
-async def _client() -> Any:
+async def _client() -> AsyncIterator[httpx.AsyncClient]:
   transport = httpx.ASGITransport(app=app.app)
   async with httpx.AsyncClient(
     transport=transport, base_url="http://test", timeout=_TIMEOUT
@@ -120,7 +123,11 @@ class TestSlowLlmProbe:
       return False, "timed out"
 
     feed = SimpleNamespace(extraction_rules={"item": "article"}, url="https://example.com")
-    monkeypatch.setattr(app, "_get_feed_or_404", lambda feed_id: feed)
+
+    def get_feed(feed_id: int) -> SimpleNamespace:
+      return feed
+
+    monkeypatch.setattr(app, "_get_feed_or_404", get_feed)
     monkeypatch.setattr(app, "_probe_llm", hanging_probe)
     # raising=False: lifespan never runs here, so state.config does not exist
     # yet. monkeypatch removes it again afterwards.

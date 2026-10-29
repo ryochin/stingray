@@ -14,10 +14,12 @@ DB fixtures give Rails-like isolation:
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
 import pytest
+from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
 import db
@@ -29,7 +31,7 @@ def _test_db_url() -> str:
   # test database. Check the database libpq will actually connect to: a
   # `?dbname=` query overrides the path, and a missing name falls back to
   # PGDATABASE or the user name.
-  dbname: str | None = conninfo_to_dict(url).get("dbname")
+  dbname: object = conninfo_to_dict(url).get("dbname")
   if not (isinstance(dbname, str) and dbname.endswith("_test")):
     raise RuntimeError(
       f"Refusing to run tests against database {dbname!r}: name must end with '_test'"
@@ -63,12 +65,11 @@ def _ensure_test_db(test_url: str) -> None:
   with psycopg.connect(_admin_url(test_url), autocommit=True) as conn:
     exists = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (test_db,)).fetchone()
     if not exists:
-      # Identifier quoting: test_db is derived from env/config, not user input.
-      conn.execute(f'CREATE DATABASE "{test_db}"')
+      conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(test_db)))
 
 
 @pytest.fixture(scope="session")
-def db_session():
+def db_session() -> Iterator[None]:
   test_url = _test_db_url()
   try:
     _ensure_test_db(test_url)
@@ -83,7 +84,7 @@ def db_session():
 
 
 @pytest.fixture
-def clean_db(db_session):
+def clean_db(db_session: None) -> Iterator[None]:
   """Truncate all app tables before each test. RESTART IDENTITY resets sequences."""
   with db.connection() as conn:
     conn.execute(

@@ -8,6 +8,10 @@ silently rewrites every link onto the wrong site.
 
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
+
 import feeds
 from feeds import _parse_rss
 from url_cleaner import clean_url
@@ -29,7 +33,7 @@ RSS_MIRROR = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def _feed_cfg() -> dict:
+def _feed_cfg() -> dict[str, Any]:
   return {"name": "Test", "url": "https://mirror.example/feed.xml", "max_items": 50}
 
 
@@ -125,7 +129,7 @@ def test_injected_thumbnail_is_resolved_too():
   assert 'src="https://source.example/thread/thumb.jpg"' in html
 
 
-def test_resolution_base_is_the_uncleaned_item_link(monkeypatch):
+def test_resolution_base_is_the_uncleaned_item_link(monkeypatch: pytest.MonkeyPatch):
   # `url_cleaner` only drops query params, so raw and cleaned links resolve
   # identically — spy on the argument instead of asserting on the output.
   seen: list[str] = []

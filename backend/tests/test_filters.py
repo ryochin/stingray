@@ -436,7 +436,7 @@ class TestContainsFilterSql:
       ("\\%", "\\% sign", "% sign"),
     ],
   )
-  def test_like_metacharacters_are_literal(self, pattern, dropped, kept):
+  def test_like_metacharacters_are_literal(self, pattern: str, dropped: str, kept: str):
     fid = _feed()
     _insert_article(fid, url="dropped", title=dropped)
     _insert_article(fid, url="kept", title=kept)
@@ -455,7 +455,7 @@ class TestContainsFilterSql:
       ("ＡＢＣ", "ａｂｃ"),  # noqa: RUF001
     ],
   )
-  def test_case_folding_matches_ilike(self, title, pattern):
+  def test_case_folding_matches_ilike(self, title: str, pattern: str):
     # The SQL used to be one `ILIKE` per rule; the rewrite must keep its
     # verdict even where Python's str.lower() would fold differently.
     fid = _feed()

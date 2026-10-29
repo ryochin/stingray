@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
@@ -81,7 +81,7 @@ def persisted_filters(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
   return calls
 
 
-def _post_filters(client: TestClient, headers: dict[str, str]) -> httpx.Response:
+def _post_filters(client: TestClient, headers: dict[str, str]) -> httpx2.Response:
   return client.post(
     "/api/filters/import",
     files={"file": ("filters.json", b"[]", "application/json")},

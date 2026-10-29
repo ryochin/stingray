@@ -7,6 +7,8 @@ two paths drifting.
 
 from __future__ import annotations
 
+from typing import Any
+
 from scraper import parse_web_page
 from url_cleaner import clean_url
 
@@ -28,7 +30,7 @@ RULES = {
 }
 
 
-def _feed_cfg() -> dict:
+def _feed_cfg() -> dict[str, Any]:
   return {"name": "Web", "url": "https://example.com/", "max_items": 50}
 
 

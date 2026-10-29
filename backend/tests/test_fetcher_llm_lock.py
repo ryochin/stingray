@@ -89,7 +89,7 @@ def _summarize_lock_held() -> bool:
 
 
 class TestBackgroundSummarizer:
-  def test_skips_the_round_while_the_lock_is_held_elsewhere(self, llm_calls):
+  def test_skips_the_round_while_the_lock_is_held_elsewhere(self, llm_calls: list[tuple[str, str]]):
     _store(_feed(), "u1", LONG_A)
     with repo.advisory_lock(repo.SUMMARIZE_LOCK_KEY) as got:
       assert got is True
@@ -97,13 +97,13 @@ class TestBackgroundSummarizer:
     assert llm_calls == []
     assert _summary("u1") is None
 
-  def test_processes_and_stores_a_batch(self, llm_calls):
+  def test_processes_and_stores_a_batch(self, llm_calls: list[tuple[str, str]]):
     _store(_feed(), "u1", LONG_A)
     assert asyncio.run(fetcher.summarize_pending(AppConfig())) == 1
     assert llm_calls == [("u1", LONG_A)]
     assert _summary("u1") == "summary of u1"
 
-  def test_releases_the_lock_afterwards(self, llm_calls):
+  def test_releases_the_lock_afterwards(self, llm_calls: list[tuple[str, str]]):
     _store(_feed(), "u1", LONG_A)
     asyncio.run(fetcher.summarize_pending(AppConfig()))
     assert llm_calls == [("u1", LONG_A)]
@@ -111,7 +111,9 @@ class TestBackgroundSummarizer:
 
 
 class TestRefreshLlmPass:
-  def test_waits_for_the_lock_then_rereads_pending_rows(self, llm_calls, monkeypatch):
+  def test_waits_for_the_lock_then_rereads_pending_rows(
+    self, llm_calls: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+  ):
     feed = _feed()
     done_meanwhile = _store(feed, "u1", LONG_A)
     stale = _store(feed, "u2", LONG_A)
@@ -151,14 +153,16 @@ class TestRefreshLlmPass:
     assert _summary("u1") == "by the other process"
     assert _summary("u2") == "summary of u2"
 
-  def test_releases_the_lock_afterwards(self, llm_calls):
+  def test_releases_the_lock_afterwards(self, llm_calls: list[tuple[str, str]]):
     feed = _feed()
     article = _store(feed, "u1", LONG_A)
     asyncio.run(fetcher._run_llm_pass([article], [feed], AppConfig()))
     assert llm_calls == [("u1", LONG_A)]
     assert not _summarize_lock_held()
 
-  def test_leaves_pending_rows_outside_this_refresh_to_the_background(self, llm_calls):
+  def test_leaves_pending_rows_outside_this_refresh_to_the_background(
+    self, llm_calls: list[tuple[str, str]]
+  ):
     """A backlog (say, a feed that just turned translation on) would otherwise
     be pulled into one refresh all at once."""
     feed = _feed()
@@ -172,8 +176,8 @@ class TestRefreshLlmPass:
 class TestLegacyCacheRestore:
   def test_restored_fields_are_stored_before_the_llm_pass_rereads(
     self,
-    llm_calls,
-    monkeypatch,
+    llm_calls: list[tuple[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
   ):
     """The pass rebuilds articles from DB rows, so values restored only in
@@ -190,8 +194,11 @@ class TestLegacyCacheRestore:
     async def fake_fetch(*_args: Any, **_kwargs: Any) -> tuple[list[Article], int]:
       return [article], 0
 
+    async def fake_backfill(*_args: Any, **_kwargs: Any) -> None:
+      await asyncio.sleep(0)
+
     monkeypatch.setattr(fetcher, "_fetch_and_persist_feeds", fake_fetch)
-    monkeypatch.setattr(fetcher, "_backfill_site_urls", lambda *_a, **_k: asyncio.sleep(0))
+    monkeypatch.setattr(fetcher, "_backfill_site_urls", fake_backfill)
     config = AppConfig(cache_dir=str(tmp_path))
 
     asyncio.run(fetcher.refresh_all(config, source="test", force=True))

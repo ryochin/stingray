@@ -129,8 +129,10 @@ class TestReorderFeeds:
 
 
 class TestFeedToggles:
-  def _add(self, name: str, **kw: object) -> FeedRow:
-    return repo.add_feed(FeedRow(name=name, url=f"https://{name}.example.com/", **kw))
+  def _add(self, name: str, *, summarize: bool = True) -> FeedRow:
+    return repo.add_feed(
+      FeedRow(name=name, url=f"https://{name}.example.com/", summarize=summarize),
+    )
 
   def test_toggle_enabled_flips_flag(self):
     f = self._add("F")

@@ -73,7 +73,7 @@ class TestCheckRecentJob:
 
 
 def _run_main(
-  monkeypatch, *, enabled: bool, argv: list[str], fail: str | None = None
+  monkeypatch: pytest.MonkeyPatch, *, enabled: bool, argv: list[str], fail: str | None = None
 ) -> tuple[int, dict[str, int]]:
   """Run healthcheck.main() with all checks stubbed, counting each check call.
 
@@ -86,9 +86,15 @@ def _run_main(
     if name == fail:
       raise RuntimeError(f"{name} down")
 
+  def _check_recent_job(max_age_minutes: int) -> None:
+    _record("job")
+
+  def _check_llm(base_url: str, timeout: float) -> None:
+    _record("llm")
+
   monkeypatch.setattr(healthcheck, "_check_db", lambda: _record("db"))
-  monkeypatch.setattr(healthcheck, "_check_recent_job", lambda max_age_minutes: _record("job"))
-  monkeypatch.setattr(healthcheck, "_check_llm", lambda base_url, timeout: _record("llm"))
+  monkeypatch.setattr(healthcheck, "_check_recent_job", _check_recent_job)
+  monkeypatch.setattr(healthcheck, "_check_llm", _check_llm)
   monkeypatch.setattr(
     healthcheck, "_load_config", lambda: AppConfig(ollama=OllamaConfig(enabled=enabled))
   )
@@ -97,26 +103,31 @@ def _run_main(
 
 
 class TestLlmGating:
-  def test_llm_checked_when_enabled(self, monkeypatch):
+  def test_llm_checked_when_enabled(self, monkeypatch: pytest.MonkeyPatch):
     code, calls = _run_main(monkeypatch, enabled=True, argv=[])
     assert code == 0
     assert calls["llm"] == 1
 
-  def test_llm_skipped_when_config_disabled(self, monkeypatch):
+  def test_llm_skipped_when_config_disabled(self, monkeypatch: pytest.MonkeyPatch):
     code, calls = _run_main(monkeypatch, enabled=False, argv=[])
     assert code == 0
     assert calls["llm"] == 0
     # Disabling the LLM must not skip the db/job checks.
     assert calls["db"] == 1 and calls["job"] == 1
 
-  def test_skip_llm_flag_does_not_read_config(self, monkeypatch):
+  def test_skip_llm_flag_does_not_read_config(self, monkeypatch: pytest.MonkeyPatch):
     # --skip-llm-check must short-circuit before _load_config is ever touched.
     llm_calls: list[str] = []
+
+    def _check_recent_job(max_age_minutes: int) -> None:
+      pass
+
+    def _check_llm(base_url: str, timeout: float) -> None:
+      llm_calls.append(base_url)
+
     monkeypatch.setattr(healthcheck, "_check_db", lambda: None)
-    monkeypatch.setattr(healthcheck, "_check_recent_job", lambda max_age_minutes: None)
-    monkeypatch.setattr(
-      healthcheck, "_check_llm", lambda base_url, timeout: llm_calls.append(base_url)
-    )
+    monkeypatch.setattr(healthcheck, "_check_recent_job", _check_recent_job)
+    monkeypatch.setattr(healthcheck, "_check_llm", _check_llm)
 
     def _fail() -> AppConfig:
       raise AssertionError("_load_config must not be called with --skip-llm-check")
@@ -126,13 +137,20 @@ class TestLlmGating:
     assert healthcheck.main() == 0
     assert llm_calls == []
 
-  def test_config_load_error_fails_without_running_llm(self, monkeypatch, capsys):
+  def test_config_load_error_fails_without_running_llm(
+    self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+  ):
     llm_calls: list[str] = []
+
+    def _check_recent_job(max_age_minutes: int) -> None:
+      pass
+
+    def _check_llm(base_url: str, timeout: float) -> None:
+      llm_calls.append(base_url)
+
     monkeypatch.setattr(healthcheck, "_check_db", lambda: None)
-    monkeypatch.setattr(healthcheck, "_check_recent_job", lambda max_age_minutes: None)
-    monkeypatch.setattr(
-      healthcheck, "_check_llm", lambda base_url, timeout: llm_calls.append(base_url)
-    )
+    monkeypatch.setattr(healthcheck, "_check_recent_job", _check_recent_job)
+    monkeypatch.setattr(healthcheck, "_check_llm", _check_llm)
 
     def _boom() -> AppConfig:
       raise ValueError("bad config")
@@ -157,7 +175,12 @@ class TestMainFailures:
     ],
   )
   def test_failed_check_returns_1_with_prefix(
-    self, monkeypatch, capsys, fail: str, prefix: str, expected_calls: dict[str, int]
+    self,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fail: str,
+    prefix: str,
+    expected_calls: dict[str, int],
   ):
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.test:11434")
     code, calls = _run_main(monkeypatch, enabled=True, argv=[], fail=fail)
@@ -167,7 +190,7 @@ class TestMainFailures:
     assert err.startswith(prefix)
     assert f"{fail} down" in err
 
-  def test_skip_job_check_does_not_run_job_check(self, monkeypatch):
+  def test_skip_job_check_does_not_run_job_check(self, monkeypatch: pytest.MonkeyPatch):
     code, calls = _run_main(monkeypatch, enabled=True, argv=["--skip-job-check"], fail="job")
     assert code == 0
     assert calls == {"db": 1, "llm": 1, "job": 0}

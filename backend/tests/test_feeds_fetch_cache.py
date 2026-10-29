@@ -25,14 +25,31 @@ async def _resolve(_host: str, _port: int) -> list[str]:
   return ["93.184.216.34"]
 
 
+def _stub_cache(
+  monkeypatch: pytest.MonkeyPatch,
+  cached: dict[str, object] | None,
+) -> list[tuple[object, ...]]:
+  """Serve `cached` from the feed cache and record every save into the returned list."""
+  saved: list[tuple[object, ...]] = []
+
+  def load(_url: str) -> dict[str, object] | None:
+    return cached
+
+  def save(*args: object) -> None:
+    saved.append(args)
+
+  monkeypatch.setattr(feeds, "load_feed_cache", load)
+  monkeypatch.setattr(feeds, "save_feed_cache", save)
+  return saved
+
+
 def _fetch(
   monkeypatch: pytest.MonkeyPatch,
   cached: dict[str, object] | None,
   status: int,
   seen: list[httpx.Request] | None = None,
 ) -> tuple[str, bool, str]:
-  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: cached)
-  monkeypatch.setattr(feeds, "save_feed_cache", lambda *_args: None)
+  _stub_cache(monkeypatch, cached)
 
   def handler(request: httpx.Request) -> httpx.Response:
     if seen is not None:
@@ -118,18 +135,14 @@ def test_body_matching_the_cached_hash_is_unchanged_and_not_saved(
     "body": body,
     "content_hash": hashlib.sha256(body.encode()).hexdigest(),
   }
-  saved: list[tuple[object, ...]] = []
-  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: cached)
-  monkeypatch.setattr(feeds, "save_feed_cache", lambda *args: saved.append(args))
+  saved = _stub_cache(monkeypatch, cached)
 
   assert _get(lambda _req: httpx.Response(200, text=body)) == (body, True, "unchanged")
   assert saved == []
 
 
 def test_fresh_body_is_saved_with_the_response_validators(monkeypatch: pytest.MonkeyPatch) -> None:
-  saved: list[tuple[object, ...]] = []
-  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: None)
-  monkeypatch.setattr(feeds, "save_feed_cache", lambda *args: saved.append(args))
+  saved = _stub_cache(monkeypatch, None)
   headers = {"ETag": '"e2"', "Last-Modified": "Tue, 02 Jan 2026 00:00:00 GMT"}
 
   result = _get(lambda _req: httpx.Response(200, text="<rss>new</rss>", headers=headers))
@@ -139,7 +152,10 @@ def test_fresh_body_is_saved_with_the_response_validators(monkeypatch: pytest.Mo
 
 
 def test_network_error_without_a_cache_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: None)
+  def no_cache(_url: str) -> None:
+    return None
+
+  monkeypatch.setattr(feeds, "load_feed_cache", no_cache)
 
   def handler(request: httpx.Request) -> httpx.Response:
     raise httpx.ConnectError("refused", request=request)

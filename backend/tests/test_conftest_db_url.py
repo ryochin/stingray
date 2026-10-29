@@ -12,7 +12,7 @@ from tests.conftest import _test_db_url
 
 
 @pytest.fixture(autouse=True)
-def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
   monkeypatch.delenv("TEST_DATABASE_URL", raising=False)
   monkeypatch.delenv("DATABASE_URL", raising=False)
 

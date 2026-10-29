@@ -12,7 +12,7 @@ def _feed(
   *,
   id: int = 1,
   name: str = "Feed",
-  url: str = "https://example.com/rss",
+  url: str | None = "https://example.com/rss",
   site_url: str | None = None,
   translate: bool = False,
   summarize: bool = False,

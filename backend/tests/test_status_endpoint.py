@@ -34,7 +34,12 @@ def test_disabled_llm_is_not_probed_and_no_job_is_not_running(
   monkeypatch: pytest.MonkeyPatch,
 ) -> None:
   probed: list[str] = []
-  monkeypatch.setattr(app_module, "_probe_llm", lambda url: probed.append(url) or (True, None))
+
+  def probe(url: str) -> tuple[bool, str | None]:
+    probed.append(url)
+    return True, None
+
+  monkeypatch.setattr(app_module, "_probe_llm", probe)
   config = AppConfig()
   config.ollama.enabled = False
   body = _get_status(config)
@@ -51,7 +56,10 @@ def test_disabled_llm_is_not_probed_and_no_job_is_not_running(
 def test_latest_job_is_reported(
   monkeypatch: pytest.MonkeyPatch, status: str, error: str | None
 ) -> None:
-  monkeypatch.setattr(app_module, "_probe_llm", lambda _url: (False, "offline"))
+  def probe(_url: str) -> tuple[bool, str | None]:
+    return False, "offline"
+
+  monkeypatch.setattr(app_module, "_probe_llm", probe)
   repo.finish_refresh_job(repo.create_refresh_job("cron"), "done", 1, None)
   job_id = repo.create_refresh_job("web")
   if status != "running":

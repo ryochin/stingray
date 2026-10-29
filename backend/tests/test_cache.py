@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ import cache
 
 
 @pytest.fixture
-def cache_dir(tmp_path: Path) -> Path:
+def cache_dir(tmp_path: Path) -> Iterator[Path]:
   """Point cache.configure at a tmp dir and restore afterwards."""
   original_cache = cache._cache_dir
   original_feed = cache._feed_cache_dir

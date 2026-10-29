@@ -7,7 +7,7 @@ reads/writes the on-disk feed cache, so tests swap all three out.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 from email.utils import format_datetime
 from functools import partial
@@ -19,7 +19,10 @@ import pytest
 import feeds
 from safe_http import SafeClient
 
-Handler = Callable[[httpx.Request], httpx.Response | Awaitable[httpx.Response]]
+Handler = (
+  Callable[[httpx.Request], httpx.Response]
+  | Callable[[httpx.Request], Coroutine[None, None, httpx.Response]]
+)
 
 
 async def resolve_public(_host: str, _port: int) -> list[str]:
@@ -40,10 +43,14 @@ def stub_network(
     "SafeClient",
     partial(SafeClient, transport=httpx.MockTransport(handler), resolver=resolve_public),
   )
+
   # Replace feeds' own `random` name, not the shared module, so the
   # scheduler's jitter elsewhere is unaffected.
-  monkeypatch.setattr(feeds, "random", SimpleNamespace(uniform=lambda _a, _b: 0))
-  monkeypatch.setattr(feeds, "load_feed_cache", lambda url: store.get(url))
+  def no_delay(_a: float, _b: float) -> float:
+    return 0
+
+  monkeypatch.setattr(feeds, "random", SimpleNamespace(uniform=no_delay))
+  monkeypatch.setattr(feeds, "load_feed_cache", store.get)
 
   def save(url: str, etag: str | None, last_modified: str | None, body: str) -> None:
     # Same shape as cache.save_feed_cache, so the content-hash check works.

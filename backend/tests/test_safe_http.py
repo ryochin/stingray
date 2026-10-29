@@ -424,7 +424,10 @@ def test_invalid_allow_private_entries_are_rejected(entry: str):
 
 
 def test_blocked_feed_does_not_fall_back_to_the_cache(monkeypatch: pytest.MonkeyPatch):
-  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: {"body": "<rss/>"})
+  def cached(_url: str) -> dict[str, object]:
+    return {"body": "<rss/>"}
+
+  monkeypatch.setattr(feeds, "load_feed_cache", cached)
 
   async def run() -> tuple[str, bool, str]:
     async with SafeClient(
@@ -443,7 +446,10 @@ def test_not_modified_is_served_from_the_cache_whatever_its_length(
   monkeypatch: pytest.MonkeyPatch,
 ):
   # A 304's Content-Length describes the cached resource, not a transfer.
-  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: {"body": "<rss/>", "etag": "e"})
+  def cached(_url: str) -> dict[str, object]:
+    return {"body": "<rss/>", "etag": "e"}
+
+  monkeypatch.setattr(feeds, "load_feed_cache", cached)
 
   def handler(_request: httpx.Request) -> httpx.Response:
     return httpx.Response(304, headers={"content-length": str(20 * 1024 * 1024)})
@@ -461,7 +467,10 @@ def test_not_modified_is_served_from_the_cache_whatever_its_length(
 
 
 def test_dns_failure_still_falls_back_to_the_cache(monkeypatch: pytest.MonkeyPatch):
-  monkeypatch.setattr(feeds, "load_feed_cache", lambda _url: {"body": "<rss/>"})
+  def cached(_url: str) -> dict[str, object]:
+    return {"body": "<rss/>"}
+
+  monkeypatch.setattr(feeds, "load_feed_cache", cached)
 
   async def run() -> tuple[str, bool, str]:
     async with SafeClient(

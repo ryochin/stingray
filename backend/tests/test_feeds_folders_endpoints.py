@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from psycopg import sql
 
 import app as app_module
 import cache
@@ -55,7 +56,8 @@ def _folder_names() -> list[str]:
 
 def _row_count(table: str) -> int:
   with db.connection() as conn:
-    row = conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()
+    query = sql.SQL("SELECT COUNT(*) AS n FROM {}").format(sql.Identifier(table))
+    row = conn.execute(query).fetchone()
     assert row is not None
     return int(row["n"])
 

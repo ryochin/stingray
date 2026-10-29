@@ -9,17 +9,18 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, LiteralString
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
 import pytest
+from psycopg import sql
 from psycopg.rows import dict_row
 
 import db
 from tests.conftest import _admin_url, _ensure_test_db, _test_db_url
 
-PROBES = [
+PROBES: list[LiteralString] = [
   "CREATE TABLE probe (n INTEGER NOT NULL)",
   "INSERT INTO probe VALUES (2)",
   "INSERT INTO probe VALUES (3)",
@@ -38,14 +39,16 @@ def conn() -> Iterator[db.Conn]:
   name = f"{urlparse(test_url).path.lstrip('/')}_schema_{uuid.uuid4().hex[:8]}"
   admin = _admin_url(test_url)
   with psycopg.connect(admin, autocommit=True) as admin_conn:
-    admin_conn.execute(f'CREATE DATABASE "{name}"')
+    admin_conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
   try:
     url = urlunparse(urlparse(test_url)._replace(path=f"/{name}"))
-    with psycopg.connect(url, row_factory=dict_row) as c:
+    with db.Conn.connect(url, row_factory=dict_row) as c:
       yield c
   finally:
     with psycopg.connect(admin, autocommit=True) as admin_conn:
-      admin_conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+      admin_conn.execute(
+        sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)),
+      )
 
 
 class RecordingConn:

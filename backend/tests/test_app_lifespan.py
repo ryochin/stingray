@@ -32,7 +32,7 @@ def stubbed_lifespan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
   monkeypatch.setattr(db, "init_schema", lambda: None)
   monkeypatch.setattr(db, "close", lambda: None)
   # Lifespan registers the summarizer here; start every test from an empty set.
-  monkeypatch.setattr(app_module, "_background_tasks", set())
+  monkeypatch.setattr(app_module, "_background_tasks", set[asyncio.Task[object]]())
   monkeypatch.setattr(app_module, "_background_summarizer", idle_summarizer)
   # The module default is the repo's cache/, the live one inside the
   # container. Point it at tmp so a lifespan that skips configure() writes

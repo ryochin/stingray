@@ -19,6 +19,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "httpx2>=2.16.0",
   "pyright>=1.1",
   "pytest>=8.3",
   "pytest-cov>=7.1.0",
@@ -47,8 +48,12 @@ extraPaths = ["backend"]
 exclude = [
   "**/.venv",
   "**/__pycache__",
-  "backend/tests",
 ]
+
+# Tests call private helpers on purpose to check them directly.
+[[tool.pyright.executionEnvironments]]
+root = "backend/tests"
+reportPrivateUsage = false
 
 [tool.ruff]
 target-version = "py312"

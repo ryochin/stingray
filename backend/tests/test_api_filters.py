@@ -13,7 +13,7 @@ from __future__ import annotations
 import io
 import json
 
-import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
@@ -27,7 +27,7 @@ def _client() -> TestClient:
   return TestClient(app_module.app)
 
 
-def _post_import(client: TestClient, raw: bytes) -> httpx.Response:
+def _post_import(client: TestClient, raw: bytes) -> httpx2.Response:
   """POST raw bytes as the import file and return the response unchecked."""
   return client.post(
     "/api/filters/import",

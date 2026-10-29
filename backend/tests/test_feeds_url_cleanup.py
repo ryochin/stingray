@@ -8,11 +8,13 @@ These guard the two interface contracts:
 
 from __future__ import annotations
 
+from typing import Any
+
 from feeds import _parse_rss
 from url_cleaner import clean_url
 
 
-def _feed_cfg() -> dict:
+def _feed_cfg() -> dict[str, Any]:
   return {"name": "Test", "url": "https://example.com/feed", "max_items": 50}
 
 

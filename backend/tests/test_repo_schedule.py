@@ -53,7 +53,7 @@ def _make_feed(
     return int(row["id"])
 
 
-def _read_feed(feed_id: int) -> dict:
+def _read_feed(feed_id: int) -> dict[str, Any]:
   with db.connection() as conn:
     row = conn.execute(
       "SELECT fetch_interval_min, next_fetch_at, consecutive_failures, "
@@ -137,7 +137,7 @@ class TestScheduleNextAt:
 
 
 class TestRecordFeedAttempt:
-  def test_fresh_shrinks_bucket(self, clean_db):
+  def test_fresh_shrinks_bucket(self, clean_db: None):
     fid = _make_feed(fetch_interval_min=60, consecutive_failures=2, last_error="prev")
     repo.record_feed_attempt(fid, "fresh")
     row = _read_feed(fid)
@@ -147,22 +147,22 @@ class TestRecordFeedAttempt:
     assert row["last_fetched_at"] is not None
     assert row["next_fetch_at"] is not None
 
-  def test_fresh_clamps_at_minimum(self, clean_db):
+  def test_fresh_clamps_at_minimum(self, clean_db: None):
     fid = _make_feed(fetch_interval_min=10)
     repo.record_feed_attempt(fid, "fresh")
     assert _read_feed(fid)["fetch_interval_min"] == 10
 
-  def test_miss_grows_bucket(self, clean_db):
+  def test_miss_grows_bucket(self, clean_db: None):
     fid = _make_feed(fetch_interval_min=60)
     repo.record_feed_attempt(fid, "miss")
     assert _read_feed(fid)["fetch_interval_min"] == 120
 
-  def test_miss_clamps_at_maximum(self, clean_db):
+  def test_miss_clamps_at_maximum(self, clean_db: None):
     fid = _make_feed(fetch_interval_min=360)
     repo.record_feed_attempt(fid, "miss")
     assert _read_feed(fid)["fetch_interval_min"] == 360
 
-  def test_failure_records_error_and_increments_counter(self, clean_db):
+  def test_failure_records_error_and_increments_counter(self, clean_db: None):
     fid = _make_feed(fetch_interval_min=60)
     repo.record_feed_attempt(fid, "failure", error="boom")
     row = _read_feed(fid)
@@ -170,7 +170,7 @@ class TestRecordFeedAttempt:
     assert row["consecutive_failures"] == 1
     assert row["last_error"] == "boom"
 
-  def test_failure_never_moves_schedule_earlier(self, clean_db):
+  def test_failure_never_moves_schedule_earlier(self, clean_db: None):
     far_future = datetime.now(tz=UTC) + timedelta(hours=12)
     fid = _make_feed(
       fetch_interval_min=360,
@@ -183,7 +183,7 @@ class TestRecordFeedAttempt:
     # earlier by a first-failure backoff of 15 minutes.
     assert row["next_fetch_at"] >= far_future
 
-  def test_recovery_clears_failures_and_error(self, clean_db):
+  def test_recovery_clears_failures_and_error(self, clean_db: None):
     fid = _make_feed(
       fetch_interval_min=60,
       consecutive_failures=3,
@@ -195,7 +195,7 @@ class TestRecordFeedAttempt:
     assert row["last_error"] is None
     assert row["fetch_interval_min"] == 30
 
-  def test_degraded_keeps_bucket_and_state(self, clean_db):
+  def test_degraded_keeps_bucket_and_state(self, clean_db: None):
     fid = _make_feed(
       fetch_interval_min=120,
       consecutive_failures=2,
@@ -209,7 +209,7 @@ class TestRecordFeedAttempt:
     assert row["last_fetched_at"] is not None
     assert row["next_fetch_at"] is not None
 
-  def test_degraded_with_error_overwrites_last_error(self, clean_db):
+  def test_degraded_with_error_overwrites_last_error(self, clean_db: None):
     fid = _make_feed(fetch_interval_min=60, last_error=None)
     repo.record_feed_attempt(
       fid,
@@ -218,12 +218,12 @@ class TestRecordFeedAttempt:
     )
     assert _read_feed(fid)["last_error"] == "extraction rules not configured"
 
-  def test_degraded_to_fresh_clears_last_error(self, clean_db):
+  def test_degraded_to_fresh_clears_last_error(self, clean_db: None):
     fid = _make_feed(fetch_interval_min=60, last_error="web-norules")
     repo.record_feed_attempt(fid, "fresh")
     assert _read_feed(fid)["last_error"] is None
 
-  def test_missing_feed_is_noop(self, clean_db):
+  def test_missing_feed_is_noop(self, clean_db: None):
     # Should silently ignore IDs that don't exist.
     repo.record_feed_attempt(999999, "fresh")
 
@@ -244,7 +244,11 @@ class TestFailureBackoff:
   @pytest.fixture(autouse=True)
   def _deterministic_clock(self, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(repo, "datetime", _FrozenDatetime)
-    monkeypatch.setattr(repo, "random", SimpleNamespace(uniform=lambda _a, _b: 0))
+
+    def no_jitter(_a: float, _b: float) -> float:
+      return 0
+
+    monkeypatch.setattr(repo, "random", SimpleNamespace(uniform=no_jitter))
 
   def _delay_after_failure(self, **feed: Any) -> timedelta:
     fid = _make_feed(**feed)
@@ -266,46 +270,46 @@ class TestFailureBackoff:
   )
   def test_delay_doubles_per_failure_up_to_the_cap(
     self,
-    clean_db,
+    clean_db: None,
     prior_failures: int,
     expected_min: int,
   ):
     delay = self._delay_after_failure(consecutive_failures=prior_failures)
     assert delay == timedelta(minutes=expected_min)
 
-  def test_longer_current_interval_wins_over_backoff(self, clean_db):
+  def test_longer_current_interval_wins_over_backoff(self, clean_db: None):
     assert self._delay_after_failure(fetch_interval_min=240) == timedelta(minutes=240)
 
 
 class TestRecordFeedAttemptHealth:
   """Each outcome maps to an explicit health state surfaced to the API."""
 
-  def test_failure_marks_failing(self, clean_db):
+  def test_failure_marks_failing(self, clean_db: None):
     fid = _make_feed()
     repo.record_feed_attempt(fid, "failure", error="boom")
     assert _read_feed(fid)["health"] == "failing"
 
-  def test_degraded_marks_degraded(self, clean_db):
+  def test_degraded_marks_degraded(self, clean_db: None):
     fid = _make_feed()
     repo.record_feed_attempt(fid, "degraded", error="stale cache")
     assert _read_feed(fid)["health"] == "degraded"
 
-  def test_degraded_without_error_marks_degraded(self, clean_db):
+  def test_degraded_without_error_marks_degraded(self, clean_db: None):
     fid = _make_feed()
     repo.record_feed_attempt(fid, "degraded")
     assert _read_feed(fid)["health"] == "degraded"
 
-  def test_fresh_marks_ok(self, clean_db):
+  def test_fresh_marks_ok(self, clean_db: None):
     fid = _make_feed(consecutive_failures=2, last_error="prev")
     repo.record_feed_attempt(fid, "fresh")
     assert _read_feed(fid)["health"] == "ok"
 
-  def test_miss_marks_ok(self, clean_db):
+  def test_miss_marks_ok(self, clean_db: None):
     fid = _make_feed()
     repo.record_feed_attempt(fid, "miss")
     assert _read_feed(fid)["health"] == "ok"
 
-  def test_recovery_from_failing_to_ok(self, clean_db):
+  def test_recovery_from_failing_to_ok(self, clean_db: None):
     fid = _make_feed()
     repo.record_feed_attempt(fid, "failure", error="boom")
     assert _read_feed(fid)["health"] == "failing"
@@ -317,7 +321,7 @@ class TestRecordFeedAttemptHealth:
 
 
 class TestListDueFeeds:
-  def test_force_false_selects_null_and_past(self, clean_db):
+  def test_force_false_selects_null_and_past(self, clean_db: None):
     past = datetime.now(tz=UTC) - timedelta(minutes=5)
     future = datetime.now(tz=UTC) + timedelta(hours=1)
     null_id = _make_feed(name="A", next_fetch_at=None)
@@ -326,7 +330,7 @@ class TestListDueFeeds:
     due_ids = {f.id for f in repo.list_due_feeds(force=False)}
     assert due_ids == {null_id, past_id}
 
-  def test_force_true_returns_all_enabled(self, clean_db):
+  def test_force_true_returns_all_enabled(self, clean_db: None):
     future = datetime.now(tz=UTC) + timedelta(hours=1)
     a_id = _make_feed(name="A", next_fetch_at=future)
     b_id = _make_feed(name="B", next_fetch_at=None)
@@ -334,7 +338,7 @@ class TestListDueFeeds:
     all_ids = {f.id for f in repo.list_due_feeds(force=True)}
     assert all_ids == {a_id, b_id}
 
-  def test_excludes_disabled(self, clean_db):
+  def test_excludes_disabled(self, clean_db: None):
     _make_feed(name="disabled", enabled=False, next_fetch_at=None)
     assert repo.list_due_feeds(force=False) == []
 
@@ -343,7 +347,7 @@ class TestListDueFeeds:
 
 
 class TestToggleFeed:
-  def test_disable_clears_next_fetch_at(self, clean_db):
+  def test_disable_clears_next_fetch_at(self, clean_db: None):
     future = datetime.now(tz=UTC) + timedelta(hours=1)
     fid = _make_feed(enabled=True, next_fetch_at=future)
     repo.toggle_feed(fid)
@@ -351,7 +355,7 @@ class TestToggleFeed:
     assert row["enabled"] is False
     assert row["next_fetch_at"] is None
 
-  def test_enable_leaves_next_fetch_at(self, clean_db):
+  def test_enable_leaves_next_fetch_at(self, clean_db: None):
     future = datetime.now(tz=UTC) + timedelta(hours=1)
     fid = _make_feed(enabled=False, next_fetch_at=future)
     repo.toggle_feed(fid)
@@ -365,7 +369,7 @@ class TestToggleFeed:
 
 
 class TestBucketCheck:
-  def test_rejects_non_bucket_value(self, clean_db):
+  def test_rejects_non_bucket_value(self, clean_db: None):
     with pytest.raises(psycopg.errors.CheckViolation), db.connection() as conn:
       conn.execute(
         "INSERT INTO feeds (name, url, fetch_interval_min) "
@@ -377,20 +381,20 @@ class TestBucketCheck:
 
 
 class TestAdvisoryLock:
-  def test_lock_acquires_and_releases(self, clean_db):
+  def test_lock_acquires_and_releases(self, clean_db: None):
     with repo.advisory_lock() as got:
       assert got is True
     # Second acquisition after release should succeed.
     with repo.advisory_lock() as got:
       assert got is True
 
-  def test_holder_is_not_idle_in_transaction(self, clean_db):
+  def test_holder_is_not_idle_in_transaction(self, clean_db: None):
     with repo.advisory_lock(_TEST_LOCK_KEY) as got:
       assert got is True
       assert _lock_holder_states(_TEST_LOCK_KEY) == ["idle"]
     assert _lock_holder_states(_TEST_LOCK_KEY) == []
 
-  def test_contended_lock_yields_false_and_keeps_holder(self, clean_db):
+  def test_contended_lock_yields_false_and_keeps_holder(self, clean_db: None):
     with repo.advisory_lock(_TEST_LOCK_KEY) as first:
       assert first is True
       with repo.advisory_lock(_TEST_LOCK_KEY) as second:
@@ -398,7 +402,7 @@ class TestAdvisoryLock:
       assert len(_lock_holder_states(_TEST_LOCK_KEY)) == 1
     assert _lock_holder_states(_TEST_LOCK_KEY) == []
 
-  def test_exception_in_block_releases_lock(self, clean_db):
+  def test_exception_in_block_releases_lock(self, clean_db: None):
     boom = RuntimeError("boom")
     with pytest.raises(RuntimeError) as excinfo, repo.advisory_lock(_TEST_LOCK_KEY) as got:
       assert got is True
@@ -406,7 +410,7 @@ class TestAdvisoryLock:
     assert excinfo.value is boom
     assert _lock_holder_states(_TEST_LOCK_KEY) == []
 
-  def test_failed_commit_releases_lock(self, clean_db, monkeypatch):
+  def test_failed_commit_releases_lock(self, clean_db: None, monkeypatch: pytest.MonkeyPatch):
     _make_connection_fail(monkeypatch, "commit")
     with (
       pytest.raises(psycopg.OperationalError, match="commit failed"),
@@ -415,7 +419,7 @@ class TestAdvisoryLock:
       pytest.fail("block must not run when the commit fails")
     assert _lock_holder_states(_TEST_LOCK_KEY) == []
 
-  def test_failed_unlock_closes_session(self, clean_db, monkeypatch):
+  def test_failed_unlock_closes_session(self, clean_db: None, monkeypatch: pytest.MonkeyPatch):
     used = _make_connection_fail(monkeypatch, "unlock")
     with (
       pytest.raises(psycopg.OperationalError, match="unlock failed"),

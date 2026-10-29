@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import feedparser.http
+import feedparser.http  # pyright: ignore[reportMissingTypeStubs]
 import pytest
 
 import feeds
@@ -31,7 +31,12 @@ def test_a_body_that_names_a_file_is_not_opened(tmp_path: Path):
 
 def test_a_body_that_looks_like_a_url_is_not_fetched(monkeypatch: pytest.MonkeyPatch):
   calls: list[Any] = []
-  monkeypatch.setattr(feedparser.http, "get", lambda *a, **_kw: calls.append(a) or b"")
+
+  def fake_get(*a: Any, **_kw: Any) -> bytes:
+    calls.append(a)
+    return b""
+
+  monkeypatch.setattr(feedparser.http, "get", fake_get)
   feeds.extract_site_url("http://169.254.169.254/latest/meta-data/")
   assert calls == []
 

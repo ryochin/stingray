@@ -7,10 +7,12 @@ literal `&lt;br /&gt;` to users.
 
 from __future__ import annotations
 
+from typing import Any
+
 from feeds import _normalize_title, _parse_rss
 
 
-def _feed_cfg() -> dict:
+def _feed_cfg() -> dict[str, Any]:
   return {"name": "Test", "url": "https://example.com/feed", "max_items": 50}
 
 

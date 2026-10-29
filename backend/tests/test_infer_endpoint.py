@@ -10,6 +10,7 @@ the test runs without a live network or Ollama.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from functools import partial
 from typing import Any
 
@@ -54,6 +55,10 @@ def _stored_rules(feed_id: int) -> str | None:
   return row["extraction_rules"]
 
 
+def _llm_up(_url: str) -> tuple[bool, str | None]:
+  return True, None
+
+
 def _client(config: AppConfig | None = None) -> TestClient:
   app_module.app.state.config = config or AppConfig()
   return TestClient(app_module.app)
@@ -61,7 +66,7 @@ def _client(config: AppConfig | None = None) -> TestClient:
 
 def _mock_inference(monkeypatch: pytest.MonkeyPatch, rules: dict[str, Any]) -> None:
   """Patch the LLM probe, page fetch, and LLM call for a happy-path inference."""
-  monkeypatch.setattr(app_module, "_probe_llm", lambda _url: (True, None))
+  monkeypatch.setattr(app_module, "_probe_llm", _llm_up)
 
   async def public_dns(_host: str, _port: int) -> list[str]:
     return ["93.184.216.34"]
@@ -150,7 +155,7 @@ def test_inference_returns_preview_without_persisting(monkeypatch: pytest.Monkey
 
 def test_unresolvable_page_returns_502(monkeypatch: pytest.MonkeyPatch) -> None:
   feed_id = _insert_feed(web=True)
-  monkeypatch.setattr(app_module, "_probe_llm", lambda _url: (True, None))
+  monkeypatch.setattr(app_module, "_probe_llm", _llm_up)
 
   async def no_dns(_host: str, _port: int) -> list[str]:
     raise OSError("name resolution failed")
@@ -168,10 +173,10 @@ def test_page_is_truncated_at_5_mib_whatever_the_fetch_limit(
   monkeypatch: pytest.MonkeyPatch,
 ) -> None:
   feed_id = _insert_feed(web=True)
-  monkeypatch.setattr(app_module, "_probe_llm", lambda _url: (True, None))
+  monkeypatch.setattr(app_module, "_probe_llm", _llm_up)
   served: list[int] = []
 
-  async def huge_page() -> Any:
+  async def huge_page() -> AsyncIterator[bytes]:
     for _ in range(12):  # 6 MiB in 512 KiB chunks, no Content-Length
       served.append(1)
       yield b"x" * (512 * 1024)
