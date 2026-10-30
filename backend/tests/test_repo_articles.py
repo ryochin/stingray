@@ -610,3 +610,49 @@ class TestListArticlesReadWithinHours:
       "read-stale",
       "old-unread",
     ]
+
+
+class TestListArticlesRegexFilterFill:
+  """Regex filters run in Python after SQL, so the rows they hide must not
+  shrink the page: as long as unhidden rows remain, `limit` of them come
+  back."""
+
+  def _seed(self, *, hidden: int, shown: int) -> None:
+    # The `hidden` newest rows match the filter; `shown` older ones do not.
+    fid = _make_feed(name="F")
+    now = datetime.now(tz=UTC)
+    articles = [
+      _art(url=f"hidden-{i}", title="NG", published=now - timedelta(minutes=i), feed_id=fid)
+      for i in range(hidden)
+    ] + [
+      _art(url=f"shown-{i}", title="ok", published=now - timedelta(days=1, minutes=i), feed_id=fid)
+      for i in range(shown)
+    ]
+    repo.upsert_articles(articles)
+    repo.add_filter("/^NG$/")
+
+  def test_fills_limit_past_a_run_of_hidden_rows(self):
+    # 9 hidden rows ahead of the visible ones: a 3x over-fetch of limit 2
+    # would read only hidden rows and return nothing.
+    self._seed(hidden=9, shown=3)
+    rows = repo.list_articles(limit=2, order="newest")
+    assert [r.url for r in rows] == ["shown-0", "shown-1"]
+    assert [r.url for r in repo.list_articles(limit=2)] == ["shown-1", "shown-0"]
+
+  def test_fills_limit_unread_first(self):
+    self._seed(hidden=9, shown=3)
+    # The newest visible row is read recently; the older two stay unread and
+    # must win the two slots over it.
+    _set_read_at("shown-0", hours_ago=1)
+    rows = repo.list_articles(unread=True, read_within_hours=24, limit=2, order="newest")
+    assert [r.url for r in rows] == ["shown-1", "shown-2"]
+    rows = repo.list_articles(unread=True, read_within_hours=24, limit=3, order="newest")
+    assert [r.url for r in rows] == ["shown-0", "shown-1", "shown-2"]
+
+  def test_returns_everything_left_when_fewer_than_limit(self):
+    self._seed(hidden=4, shown=2)
+    assert [r.url for r in repo.list_articles(order="newest")] == ["shown-0", "shown-1"]
+
+  def test_all_hidden_returns_empty(self):
+    self._seed(hidden=3, shown=0)
+    assert repo.list_articles() == []

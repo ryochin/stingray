@@ -924,9 +924,6 @@ def list_articles(
     params.extend(match_params)
 
   where = sql.SQL("WHERE ") + sql.SQL(" AND ").join(clauses) if clauses else sql.SQL("")
-  # Over-fetch only when regex filters need a Python pass after SQL.
-  fetch_limit = limit * 3 if regex_filters else limit
-  params.append(fetch_limit)
   # SQL returns newest first so LIMIT keeps the most recent `limit` rows
   # even when total >> limit (with `prefer_unread`, unread rows are kept
   # first and the newest read rows fill what is left). By default the response is reversed to
@@ -938,40 +935,78 @@ def list_articles(
   # an implementation-defined order that shuffles between requests.
   # `url` is the PK so the ordering is fully deterministic.
   date_order = sql.SQL("COALESCE(published, fetched_at) DESC NULLS LAST, fetched_at DESC, url DESC")
-  if prefer_unread:
-    # Pick which rows survive LIMIT unread-first, then hand them back in the
-    # usual date order.
-    query = sql.SQL(
-      "SELECT * FROM ("
-      "  SELECT * FROM articles {where} "
-      "  ORDER BY (read_at IS NULL) DESC, {date_order} LIMIT %s"
-      ") picked ORDER BY {date_order}"
-    ).format(where=where, date_order=date_order)
-  else:
-    query = sql.SQL("SELECT * FROM articles {where} ORDER BY {date_order} LIMIT %s").format(
-      where=where, date_order=date_order
-    )
+  # The order in which rows compete for the `limit` slots.
+  pick_order: sql.Composable = (
+    sql.SQL("(read_at IS NULL) DESC, ") + date_order if prefer_unread else date_order
+  )
   with db.connection() as conn:
-    rows = conn.execute(query, params).fetchall()
-  if regex_filters:
-    rows = [r for r in rows if not _matches_regex_rules(r, regex_filters)]
+    if regex_filters:
+      rows = _select_unfiltered_by_regex(
+        conn,
+        where=where,
+        params=params,
+        pick_order=pick_order,
+        date_order=date_order,
+        rules=regex_filters,
+        limit=limit,
+      )
+    elif prefer_unread:
+      # Pick which rows survive LIMIT unread-first, then hand them back in
+      # the usual date order.
+      query = sql.SQL(
+        "SELECT * FROM ("
+        "  SELECT * FROM articles {where} ORDER BY {pick_order} LIMIT %s"
+        ") picked ORDER BY {date_order}"
+      ).format(where=where, pick_order=pick_order, date_order=date_order)
+      rows = conn.execute(query, [*params, limit]).fetchall()
+    else:
+      query = sql.SQL("SELECT * FROM articles {where} ORDER BY {date_order} LIMIT %s").format(
+        where=where, date_order=date_order
+      )
+      rows = conn.execute(query, [*params, limit]).fetchall()
   articles = [ArticleRow.model_validate(r) for r in rows]
-  trimmed = _trim_unread_first(articles, limit) if prefer_unread else articles[:limit]
-  return trimmed if order == "newest" else list(reversed(trimmed))
+  return articles if order == "newest" else list(reversed(articles))
 
 
-def _trim_unread_first(articles: list[ArticleRow], limit: int) -> list[ArticleRow]:
-  """Keep `limit` of the newest-first `articles`, dropping read rows first.
+def _select_unfiltered_by_regex(
+  conn: db.Conn,
+  *,
+  where: sql.Composable,
+  params: list[object],
+  pick_order: sql.Composable,
+  date_order: sql.Composable,
+  rules: list[_RegexRule],
+  limit: int,
+) -> list[db.Row]:
+  """Up to `limit` rows no regex rule matches, taken in `pick_order` and
+  returned in `date_order`.
 
-  Mirrors the unread-first LIMIT in SQL for the regex path, which has to
-  over-fetch and trim in Python. Date order is preserved.
+  The regex rules run in Python, so no fixed LIMIT can tell how many rows to
+  read. A server-side cursor streams just the columns the rules need until
+  `limit` rows pass; the full rows are then read back so PostgreSQL does the
+  final ordering, with the same collation as the plain path.
   """
-  if len(articles) <= limit:
-    return articles
-  unread = [a for a in articles if a.read_at is None][:limit]
-  read = [a for a in articles if a.read_at is not None][: limit - len(unread)]
-  keep: set[str] = {a.url for a in unread} | {a.url for a in read}
-  return [a for a in articles if a.url in keep]
+  columns = sorted({"url", *(c for rule in rules for c in rule.columns)})
+  scan = sql.SQL("SELECT {columns} FROM articles {where} ORDER BY {pick_order}").format(
+    columns=sql.SQL(", ").join(sql.Identifier(c) for c in columns),
+    where=where,
+    pick_order=pick_order,
+  )
+  urls: list[str] = []
+  with conn.cursor(name="regex_filter_scan") as cur:
+    cur.execute(scan, params)
+    for r in cur:
+      if _matches_regex_rules(r, rules):
+        continue
+      urls.append(r["url"])
+      if len(urls) >= limit:
+        break
+  if not urls:
+    return []
+  query = sql.SQL("SELECT * FROM articles WHERE url = ANY(%s) ORDER BY {date_order}").format(
+    date_order=date_order,
+  )
+  return conn.execute(query, (urls,)).fetchall()
 
 
 def list_pending_summaries(
