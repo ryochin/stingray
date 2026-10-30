@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import psycopg
 import pytest
 
 import db
@@ -104,6 +105,34 @@ class TestAddFilterDedupe:
       conn.execute("INSERT INTO filters (pattern, target) VALUES (' spam ', 'title')")
     repo.add_filter("spam")
     assert len(repo.list_filters()) == 2
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestImportFilters:
+  def test_skips_rules_equivalent_to_stored_or_earlier_ones(self):
+    repo.add_filter("spam")
+    created, skipped = repo.import_filters(
+      [("SPAM", "title"), ("ham", "title"), (" Ham ", "title"), ("ham", "url")]
+    )
+    assert (created, skipped) == (2, 2)
+    assert [(f.pattern, f.target) for f in repo.list_filters()] == [
+      ("spam", "title"),
+      ("ham", "title"),
+      ("ham", "url"),
+    ]
+
+  def test_failure_part_way_leaves_nothing_behind(self):
+    # A temporary CHECK makes the server reject the second INSERT after the
+    # first has run.
+    with db.connection() as conn:
+      conn.execute("ALTER TABLE filters ADD CONSTRAINT test_reject_bad CHECK (pattern <> 'bad')")
+    try:
+      with pytest.raises(psycopg.errors.CheckViolation):
+        repo.import_filters([("ok", "title"), ("bad", "title")])
+    finally:
+      with db.connection() as conn:
+        conn.execute("ALTER TABLE filters DROP CONSTRAINT test_reject_bad")
+    assert repo.list_filters() == []
 
 
 def _article(

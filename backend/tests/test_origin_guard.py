@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app as app_module
+import repo
 from origin_guard import is_allowed
 
 HOST = "stingray.example:20080"
@@ -77,7 +78,7 @@ def persisted_filters(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     calls.append(items)
     return 0, 0
 
-  monkeypatch.setattr(app_module, "_persist_filters", fake_persist)
+  monkeypatch.setattr(repo, "import_filters", fake_persist)
   return calls
 
 

@@ -811,33 +811,6 @@ def export_filters() -> Response:
   )
 
 
-def _persist_filters(items: list[tuple[str, str]]) -> tuple[int, int]:
-  """Insert filter rules, skipping ones equivalent to a rule already stored.
-
-  Returns (created, skipped). Mirrors _persist_opml_feeds: a plain loop of
-  individual INSERTs pulled out so the caller can hand it to a worker thread.
-  Needs no lock of its own — repo.add_filter rejects duplicates with an
-  advisory lock and a UNIQUE index, and DuplicateFilterError is counted as a
-  skip. Not one transaction either: each add_filter commits on its own.
-  """
-  existing = {repo.filter_key(f.pattern, f.target) for f in repo.list_filters()}
-  created = 0
-  skipped = 0
-  for pattern, target in items:
-    key = repo.filter_key(pattern, target)
-    if key in existing:
-      skipped += 1
-      continue
-    try:
-      repo.add_filter(pattern, target)
-    except repo.DuplicateFilterError:
-      skipped += 1
-      continue
-    existing.add(key)
-    created += 1
-  return created, skipped
-
-
 @app.post("/api/filters/import")
 async def import_filters(file: UploadFile) -> dict[str, int]:
   try:
@@ -859,7 +832,7 @@ async def import_filters(file: UploadFile) -> dict[str, int]:
     if not pattern or target not in get_args(FilterTarget):
       continue
     items.append((pattern, target))
-  created, skipped = await asyncio.to_thread(_persist_filters, items)
+  created, skipped = await asyncio.to_thread(repo.import_filters, items)
   return {"created": created, "skipped": skipped}
 
 

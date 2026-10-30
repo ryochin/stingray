@@ -274,8 +274,7 @@ def add_filter(pattern: str, target: str = "title") -> FilterRow:
   key = filter_key(pattern, target)
   with db.connection() as conn:
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (_FILTER_LOCK_KEY,))
-    rows = conn.execute("SELECT pattern, target FROM filters").fetchall()
-    if any(filter_key(r["pattern"], r["target"]) == key for r in rows):
+    if key in _stored_filter_keys(conn):
       raise DuplicateFilterError(pattern, target)
     try:
       row = conn.execute(
@@ -289,6 +288,36 @@ def add_filter(pattern: str, target: str = "title") -> FilterRow:
     if row is None:
       raise RuntimeError("add_filter: INSERT returned no row")
     return FilterRow.model_validate(row)
+
+
+def import_filters(items: list[tuple[str, str]]) -> tuple[int, int]:
+  """Insert `(pattern, target)` rules in one transaction.
+
+  A rule equivalent to a stored one, or to an earlier item, is skipped. The
+  advisory lock is the one add_filter takes, so no rule can slip in between
+  the read and the inserts. Any other error rolls the whole import back.
+  Returns (created, skipped).
+  """
+  params: list[tuple[str, str]] = []
+  with db.connection() as conn, conn.transaction():
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_FILTER_LOCK_KEY,))
+    seen = _stored_filter_keys(conn)
+    for pattern, target in items:
+      pattern = pattern.strip()
+      key = filter_key(pattern, target)
+      if key in seen:
+        continue
+      seen.add(key)
+      params.append((pattern, target))
+    if params:
+      with conn.cursor() as cur:
+        cur.executemany("INSERT INTO filters (pattern, target) VALUES (%s, %s)", params)
+  return len(params), len(items) - len(params)
+
+
+def _stored_filter_keys(conn: db.Conn) -> set[tuple[bool, str, FilterScope]]:
+  rows = conn.execute("SELECT pattern, target FROM filters").fetchall()
+  return {filter_key(r["pattern"], r["target"]) for r in rows}
 
 
 def delete_filter(filter_id: int) -> None:
