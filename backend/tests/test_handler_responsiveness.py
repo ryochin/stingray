@@ -62,7 +62,7 @@ def stub_health_db(monkeypatch: pytest.MonkeyPatch):
 async def _client() -> AsyncIterator[httpx.AsyncClient]:
   transport = httpx.ASGITransport(app=app.app)
   async with httpx.AsyncClient(
-    transport=transport, base_url="http://test", timeout=_TIMEOUT
+    transport=transport, base_url="http://localhost", timeout=_TIMEOUT
   ) as client:
     yield client
 
@@ -134,7 +134,10 @@ class TestSlowLlmProbe:
     monkeypatch.setattr(
       app.app.state,
       "config",
-      SimpleNamespace(ollama=SimpleNamespace(enabled=True, base_url="http://ollama.invalid:11434")),
+      SimpleNamespace(
+        ollama=SimpleNamespace(enabled=True, base_url="http://ollama.invalid:11434"),
+        web=SimpleNamespace(allowed_hosts=[]),  # read by HostGuardMiddleware
+      ),
       raising=False,
     )
 

@@ -16,7 +16,8 @@ Browsers send Sec-Fetch-Site only to trustworthy URLs (HTTPS or localhost), so
 over plain HTTP on a LAN address the Origin/Host comparison is what decides.
 A reverse proxy that rewrites Host would then reject legitimate requests.
 
-DNS rebinding is out of scope: a rebound page is same-origin to the browser.
+DNS rebinding is out of scope here: a rebound page is same-origin to the
+browser, so host_guard refuses it by its Host instead.
 """
 
 from __future__ import annotations

@@ -23,6 +23,14 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
 import db
+import host_guard
+
+
+@pytest.fixture(autouse=True)
+def allow_testserver_host(monkeypatch: pytest.MonkeyPatch) -> None:
+  # TestClient sends Host "testserver", which the DNS rebinding guard would
+  # refuse; tests of the guard itself clear this again.
+  monkeypatch.setattr(host_guard, "EXTRA_ALLOWED_HOSTS", frozenset({"testserver"}))
 
 
 def _test_db_url() -> str:

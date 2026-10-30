@@ -164,6 +164,20 @@ class SelectorInferenceConfig(BaseModel):
   min_articles: int = Field(default=3, ge=1)
 
 
+def _bare_hostname(value: str, entry: str, field: str) -> str:
+  """Validate a lowercased hostname entry and return its IDNA (Punycode) form."""
+  # A port, userinfo, or path would be silently dropped below and widen the
+  # entry to the whole host, so reject them outright.
+  if any(c in value for c in ":@?#[]\\/ "):
+    raise ValueError(f"{field} entry must be a bare host: {entry!r}")
+  # Store hostnames in the IDNA form put on the wire, so a Unicode entry
+  # matches a Punycode request and vice versa.
+  try:
+    return httpx.URL(f"http://{value}/").raw_host.decode("ascii")
+  except httpx.InvalidURL as e:
+    raise ValueError(f"invalid {field} host: {entry!r}") from e
+
+
 class FetchConfig(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
@@ -196,17 +210,28 @@ class FetchConfig(BaseModel):
         try:
           ipaddress.ip_address(value)
         except ValueError:
-          # A port, userinfo, or path would be silently dropped below and
-          # widen the entry to the whole host, so reject them outright.
-          if any(c in value for c in ":@?#[]\\ "):
-            raise ValueError(f"allow_private entry must be a bare host: {entry!r}") from None
-          # Store hostnames in the IDNA form httpx puts on the wire, so a
-          # Unicode entry matches a Punycode URL and vice versa.
-          try:
-            value = httpx.URL(f"http://{value}/").raw_host.decode("ascii")
-          except httpx.InvalidURL as e:
-            raise ValueError(f"invalid allow_private host: {entry!r}") from e
+          value = _bare_hostname(value, entry, "allow_private")
       normalized.append(value)
+    return normalized
+
+
+class WebConfig(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
+  # Hostnames the web UI is served under besides IP addresses and localhost
+  # (exact, case-insensitive). Requests with any other Host are refused, which
+  # stops DNS rebinding.
+  allowed_hosts: list[str] = Field(default_factory=list)
+
+  @field_validator("allowed_hosts")
+  @classmethod
+  def _normalize_allowed_hosts(cls, entries: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for entry in entries:
+      value = entry.strip().lower().rstrip(".")
+      if not value:
+        raise ValueError("allowed_hosts entries must not be empty")
+      normalized.append(_bare_hostname(value, entry, "allowed_hosts"))
     return normalized
 
 
@@ -224,6 +249,7 @@ class AppConfig(BaseModel):
   url_cleanup: UrlCleanupConfig = Field(default_factory=UrlCleanupConfig)
   selector_inference: SelectorInferenceConfig = Field(default_factory=SelectorInferenceConfig)
   fetch: FetchConfig = Field(default_factory=FetchConfig)
+  web: WebConfig = Field(default_factory=WebConfig)
 
   @classmethod
   def load(cls, path: Path = Path("config.yml"), *, required: bool = False) -> AppConfig:

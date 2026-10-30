@@ -124,7 +124,7 @@ docker compose up -d                # 起動
 > [!IMPORTANT]
 > Stingray には認証機構がありません。`WEB_PORT` に到達できる相手は誰でも記事の閲覧・購読操作が可能です。万が一 LAN 外やインターネットに公開する場合は、リバースプロキシでの Basic 認証や VPN などで前段を保護するか、公開ポートをループバックに限定してください。
 >
-> ブラウザが他のサイトから送った書き込み要求は拒否します（`Sec-Fetch-Site` で判定し、このヘッダが無ければ `Origin` と `Host` を比べます）。そのため、他のサイトのページが知らないうちに記事を既読にしたり、フィードを変更したりすることはできません。ただし DNS リバインディングは防げないので、上の注意はそのまま当てはまります。平文の HTTP でリバースプロキシを前段に置く場合は、元の `Host` ヘッダをそのまま渡してください。渡さないと、Web UI 自身の書き込み要求も拒否されます。
+> ブラウザが他のサイトから送った書き込み要求は拒否します（`Sec-Fetch-Site` で判定し、このヘッダが無ければ `Origin` と `Host` を比べます）。そのため、他のサイトのページが知らないうちに記事を既読にしたり、フィードを変更したりすることはできません。また DNS リバインディングを防ぐため、`Host` が IP アドレス、`localhost`、`config.yml` の `web.allowed_hosts` に書いたホスト名のいずれでもない要求も拒否します。どちらも認証の代わりにはならないので、上の注意はそのまま当てはまります。平文の HTTP でリバースプロキシを前段に置く場合は、元の `Host` ヘッダをそのまま渡してください。渡さないと、Web UI 自身の書き込み要求も拒否されます。
 >
 > ```yaml
 > # compose.yml の web サービス
@@ -207,6 +207,9 @@ url_cleanup:
 fetch:
   allow_private: []              # フィード取得を許可する非公開ホスト（例: ["192.168.1.0/24", "nas.local"]）
   max_response_bytes: 10485760   # 取得するフィード / ページの最大サイズ（10 MiB。「Infer with LLM」は先頭 5 MiB だけを読む）
+
+web:
+  allowed_hosts: []              # IP と localhost 以外で Web UI を開くときのホスト名（例: ["stingray.local"]）
 ```
 
 設定は、その性質に応じて 2 種類のファイルに分けています。ホストごとに変わる**接続情報や秘密**（DB 認証・`OLLAMA_BASE_URL`・公開ポート等）は `.env` に、環境に依らない**アプリの挙動**（モデル名・タイムアウト・取得期間・ネイティブ言語等）は `config.yml` に置きます。たとえば Ollama サーバの URL は接続情報なので、`config.yml` ではなく `.env` の `OLLAMA_BASE_URL` で指定します。同じ値を両方に書くことはありません。
@@ -253,6 +256,10 @@ Ollama に接続できていない可能性があります。`docker compose log
 **自宅ネットワーク上のフィードが `BlockedDestinationError` で失敗する**
 
 フィードやページの URL は Web UI から入力されるため、Stingray は公開アドレスからしか取得しません。ループバック、LAN、リンクローカル、他の compose サービスに解決される URL は、リダイレクト経由でたどり着いた場合も含めて拒否されます。自宅ネットワーク上で配信されているフィードを購読するには、`config.yml` の `fetch.allow_private` にそのホストをホスト名・IP アドレス・CIDR のいずれかで追加し、コンテナを再起動してください（`docker compose restart web fetcher`）。
+
+**ホスト名で Web UI を開くと `Host not allowed` になる**
+
+DNS リバインディングを防ぐため、Stingray は `Host` が IP アドレスか `localhost` の要求にしか応えません。`stingray.local`、Tailscale の MagicDNS 名、リバースプロキシの公開名などの名前で開く場合は、その名前を `config.yml` の `web.allowed_hosts` に追加し（ポートを付けずにホスト名だけ）、web コンテナを再起動してください（`docker compose restart web`）。
 
 **`config.yml` の変更が反映されない**
 

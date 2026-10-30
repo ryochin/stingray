@@ -29,6 +29,7 @@ import log
 import repo
 from feeds import extract_feed_candidates, fetch_one_feed, probe_feed_body, read_file_url
 from fetcher import classify_outcome, refresh_all, summarize_pending
+from host_guard import HostGuardMiddleware
 from opml import ImportFeed, ImportFolder, export_opml, parse_opml
 from origin_guard import OriginGuardMiddleware
 from safe_http import FetchSettings, SafeClient
@@ -222,6 +223,8 @@ async def _cancel_background_tasks(timeout: float) -> None:
 
 app = FastAPI(title="Stingray", lifespan=lifespan)
 app.add_middleware(OriginGuardMiddleware)
+# Added last so it runs first: an unknown Host is refused before anything else.
+app.add_middleware(HostGuardMiddleware)
 
 
 # -- Articles --
