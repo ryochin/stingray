@@ -4,6 +4,45 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Entries are dated rather than versioned: there are no version numbers or releases.
 
+## 2026-10-31
+
+Range: (`750d507`, 2026-10-26) – (`8447986`, 2026-10-31) / 19 commits
+
+### Upgrade notes
+
+- **If you open the web UI by a hostname, add it to `web.allowed_hosts` in `config.yml` first.** Requests are now refused unless their Host is an IP address, `localhost` or a listed name (see Security below), so an mDNS name or a reverse proxy's host would get 403. Opening it by IP address needs no change
+- **Rebuild the images and recreate the containers** (`docker compose up -d --build`) to pick up the patched dependencies
+
+### Security
+
+- **Requests whose Host is not a name Stingray answers to are refused**, reads included. Another site could point its own domain at Stingray (DNS rebinding), after which the browser treats its script as same-origin and lets it read and change everything through the unauthenticated API. IP literals pass without configuration, so LAN access keeps working when the address changes ([`69391cd`](https://github.com/ryochin/stingray/commit/69391cd))
+- **Cross-origin write requests to the API are refused.** Several endpoints change state from a bodiless POST, so any page you visited could mark every article read or start a refresh. The check follows Go's `net/http.CrossOriginProtection`; clients that send neither `Sec-Fetch-Site` nor `Origin`, such as curl and the healthcheck, are unaffected ([`a423448`](https://github.com/ryochin/stingray/commit/a423448))
+- Dependencies are updated to clear every advisory `pip-audit` and `npm audit` reported (29 backend, 15 frontend) ([`b144739`](https://github.com/ryochin/stingray/commit/b144739))
+
+### Fixed
+
+- **An article whose body holds an image that never loads flickered and requested the image many times a second.** Every re-render rebuilt the card's body, which changed its height and triggered another re-render ([`2db5673`](https://github.com/ryochin/stingray/commit/2db5673))
+- **Articles the LLM cannot finish are no longer retried forever.** After five failed attempts an article drops out of the pending queue. Failures on Ollama's side, such as a refused connection, are not counted, so an outage does not use up the backlog ([`aba3271`](https://github.com/ryochin/stingray/commit/aba3271))
+- **Translate and summarize settings followed the feed name**, so two feeds with the same name shared them, and articles fetched before a rename lost them. Articles now record the ID of their feed ([`aba3271`](https://github.com/ryochin/stingray/commit/aba3271))
+- **Reading an article again right after marking it unread could leave it unread**, and a poll in that window could drop it from the unread list. Reads and refetches now wait for a pending mark-unread to land ([`874e1d6`](https://github.com/ryochin/stingray/commit/874e1d6))
+- **With a regex filter active, the article list could come back short** although more visible articles remained, whenever the filter hid most of the newest rows ([`f621d53`](https://github.com/ryochin/stingray/commit/f621d53))
+- Keyboard and auto-read:
+  - <kbd>Space</kbd> stopped moving to the next feed after you clicked the feed that was already selected ([`f38bd9f`](https://github.com/ryochin/stingray/commit/f38bd9f))
+  - after new articles arrived at the top of the list, the next scroll down did not mark the cards it passed as read ([`6f6c006`](https://github.com/ryochin/stingray/commit/6f6c006))
+- Extraction rules that can never work are refused when saved (422) instead of failing on every fetch: a multi-valued attribute such as `class` or `rel` in an attribute field, and `_self` outside `link`. A malformed rules body now gets a 422 instead of a 500 ([`906b947`](https://github.com/ryochin/stingray/commit/906b947), [`9c90324`](https://github.com/ryochin/stingray/commit/9c90324))
+- A filter import that fails partway no longer leaves part of the file behind; it commits all rules or none ([`8447986`](https://github.com/ryochin/stingray/commit/8447986))
+- Error messages are announced to screen readers, and an unexpected sidebar state saved in the session falls back to the defaults ([`e76f334`](https://github.com/ryochin/stingray/commit/e76f334))
+
+### Performance
+
+- **Time-range views no longer re-download the whole list every 15 seconds.** The All view's response reaches 34 MB and was also refetched after every batch of reads. These views now update when a refresh finishes or the window regains focus, and mark reads in place. Unread mode is small and keeps polling ([`2437f56`](https://github.com/ryochin/stingray/commit/2437f56))
+
+### Changed
+
+- Warning colors, which had drifted across yellow, amber and orange, share a single caution color ([`f3c59a7`](https://github.com/ryochin/stingray/commit/f3c59a7))
+- Extraction rule selectors are parsed by soupsieve 3.0, which rejects combinators inside `:has()` and nested `:has()`; such a rule is refused when saved ([`5d89fc3`](https://github.com/ryochin/stingray/commit/5d89fc3))
+- The frontend builds with Vite 8 ([`3e8dbf4`](https://github.com/ryochin/stingray/commit/3e8dbf4))
+
 ## 2026-10-26
 
 Range: (`99bf035`, 2026-09-14) – (`750d507`, 2026-10-26) / 56 commits
