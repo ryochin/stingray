@@ -315,14 +315,18 @@ export function useArticleListController({
         const currentTop: number = m.scrollTop
         const prevTop: number = lastScrollTopRef.current
         lastScrollTopRef.current = currentTop
-        if (currentTop <= prevTop) return
-        if (focusScrollRafRef.current != null) return
         if (programmaticScrollRef.current) {
           // Hook-driven scrollTop shift (focus rebind). Consume the flag and
-          // skip this frame; the next real user scroll will go through.
+          // skip this frame; the next real user scroll will go through. This
+          // runs before the direction check: the rebind also re-registers
+          // this effect, which re-baselines lastScrollTopRef to the shifted
+          // position, so the shift's own frame reads as "not downward" and
+          // would otherwise leave the flag to swallow the user's next scroll.
           programmaticScrollRef.current = false
           return
         }
+        if (currentTop <= prevTop) return
+        if (focusScrollRafRef.current != null) return
         const headerBottom: number = stickyHeaderRef.current
           ? stickyHeaderRef.current.getBoundingClientRect().bottom
           : m.getBoundingClientRect().top
