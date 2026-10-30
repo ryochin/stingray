@@ -55,13 +55,6 @@ function AddFeedForm({
       })
   }
 
-  const reset = (): void => {
-    setName("")
-    setUrl("")
-    setFolderId(undefined)
-    onDismissCandidates()
-  }
-
   const pick = (href: string): void => {
     setUrl(href)
     // The candidate is added with an auto-detected name (name: ""), so clear
@@ -75,7 +68,6 @@ function AddFeedForm({
     <div className="mb-6">
       <form
         onSubmit={submit}
-        onReset={reset}
         className="flex flex-wrap gap-3 items-end p-4 bg-bg-secondary rounded-lg border border-border"
       >
         <label className="flex flex-col gap-1 flex-1 min-w-48">

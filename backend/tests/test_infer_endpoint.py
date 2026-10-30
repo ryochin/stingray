@@ -111,6 +111,26 @@ def test_update_rules_invalid_body_is_422_and_not_stored(rules: dict[str, str]) 
   assert _stored_rules(feed_id) == before
 
 
+@pytest.mark.parametrize(
+  "body",
+  [b"{", b"\xff", b"[" * 100_000 + b"]" * 100_000, b"1" * 5_000],
+  ids=["bad-syntax", "undecodable", "deep-nesting", "huge-int"],
+)
+def test_update_rules_malformed_json_is_422_and_not_stored(body: bytes) -> None:
+  feed_id = _insert_feed(web=True)
+  client = _client()
+  assert client.patch(f"/api/feeds/{feed_id}/rules", json=GOOD_RULES).status_code == 200
+  before = _stored_rules(feed_id)
+  resp = client.patch(
+    f"/api/feeds/{feed_id}/rules",
+    content=body,
+    headers={"Content-Type": "application/json"},
+  )
+  assert resp.status_code == 422
+  assert resp.json()["detail"] == "Request body must be valid JSON"
+  assert _stored_rules(feed_id) == before
+
+
 def test_update_rules_stores_the_normalized_rules() -> None:
   feed_id = _insert_feed(web=True)
   body = {**GOOD_RULES, "item": "  li.entry  ", "date": None, "thumbnail": ""}

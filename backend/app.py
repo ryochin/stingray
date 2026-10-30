@@ -634,7 +634,12 @@ async def update_extraction_rules(feed_id: int, request: Request) -> FeedRow:
   feed = await asyncio.to_thread(_get_feed_or_404, feed_id)
   if feed.extraction_rules is None:
     raise HTTPException(400, "Not a web page feed")
-  rules_raw: object = await request.json()
+  try:
+    rules_raw: object = await request.json()
+  except (ValueError, RecursionError) as e:
+    # ValueError covers bad syntax, undecodable bytes and over-long integers;
+    # deep nesting overflows json.loads.
+    raise HTTPException(422, "Request body must be valid JSON") from e
   try:
     rules = validate_extraction_rules(rules_raw)
   except ValueError as e:

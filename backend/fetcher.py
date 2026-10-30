@@ -105,13 +105,11 @@ def classify_outcome(
 async def _fetch_and_persist_feeds(
   feeds_cfg: list[dict[str, Any]],
   config: AppConfig,
-  *,
-  update_schedule: bool = True,
 ) -> tuple[list[Article], int]:
   """Fetch all feeds in parallel and upsert each feed's articles as soon as it
-  finishes. The per-feed callback also classifies the fetch outcome and, when
-  `update_schedule` is True, records it via `repo.record_feed_attempt` so the
-  adaptive interval learns from this cycle.
+  finishes. The per-feed callback also classifies the fetch outcome and records
+  it via `repo.record_feed_attempt` so the adaptive interval learns from this
+  cycle.
   """
   new_count_total = 0
   new_count_lock = asyncio.Lock()
@@ -142,8 +140,6 @@ async def _fetch_and_persist_feeds(
       name = feed_cfg.get("name") or "?"
       log.info(f"  [db] {name}: +{inserted_count} new")
 
-    if not update_schedule:
-      return
     feed_id = feed_cfg.get("id")
     if feed_id is None:
       return
