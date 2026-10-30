@@ -78,6 +78,17 @@ class TestValidateExtractionRules:
     with pytest.raises(ValueError, match="Invalid CSS selector"):
       validate_extraction_rules({"item": "li[", "title": "a", "link": "a"})
 
+  def test_single_relative_has_passes(self):
+    rules = validate_extraction_rules({"item": "li:has(> a)", "title": "a", "link": "a"})
+    assert rules["item"] == "li:has(> a)"
+
+  @pytest.mark.parametrize("selector", ["li:has(a img)", "li:has(:has(a))"])
+  def test_complex_or_nested_has_rejected(self, selector: str):
+    # soupsieve 3.0 made :has() strict by default; this pins that behavior so a
+    # dependency change that flips it shows up here.
+    with pytest.raises(ValueError, match="Invalid CSS selector"):
+      validate_extraction_rules({"item": selector, "title": "a", "link": "a"})
+
   @pytest.mark.parametrize("key", ["link_attr", "date_attr", "thumbnail_attr"])
   @pytest.mark.parametrize("attr", ["class", " rel "])
   def test_multi_valued_attribute_rejected(self, key: str, attr: str):
